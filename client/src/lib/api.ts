@@ -42,6 +42,8 @@ export interface CopilotSession {
   lastModified: string;
   hasPlan: boolean;
   planSnippet?: string;
+  summary?: string;
+  cwd?: string;
   agentName?: string;
   isOrphaned: boolean;
   checkpoints: { number: number; title: string; filename: string }[];
@@ -217,6 +219,8 @@ export const api = {
   getSessions: (limit = 20) => fetchJson<CopilotSession[]>(`/sessions?limit=${limit}`),
   getOrphanedSessions: () => fetchJson<CopilotSession[]>('/sessions/orphaned'),
   getSessionPlan: (id: string) => fetchJson<{ plan: string }>(`/sessions/${id}/plan`),
+  registerSession: (id: string, name: string) =>
+    postJson<{ success: boolean; sessionId: string; name: string }>(`/sessions/${id}/register`, { name }),
 
   // Conversations
   getConversation: (sessionId: string) =>

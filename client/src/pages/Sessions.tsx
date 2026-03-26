@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api, type CopilotSession } from '../lib/api';
 
 function relativeTime(dateStr: string): string {
@@ -15,6 +15,54 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+function RegisterButton({ session, onRegistered }: { session: CopilotSession; onRegistered: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(session.agentName || `session-${session.id.slice(0, 8)}`);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSaving(true);
+    try {
+      await api.registerSession(session.id, name.trim() || `session-${session.id.slice(0, 8)}`);
+      setOpen(false);
+      onRegistered();
+    } catch { /* ignore */ } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return (
+    <button
+      className="text-[10px] px-2 py-0.5 rounded border border-dashed border-blue/40 text-blue/70 hover:border-blue hover:text-blue transition-colors"
+      onClick={e => { e.stopPropagation(); setOpen(true); setTimeout(() => inputRef.current?.focus(), 50); }}
+    >
+      {session.agentName ? 'rename' : '+ register'}
+    </button>
+  );
+
+  return (
+    <form onSubmit={submit} onClick={e => e.stopPropagation()} className="flex items-center gap-1">
+      <input
+        ref={inputRef}
+        value={name}
+        onChange={e => setName(e.target.value)}
+        className="text-[10px] bg-bg-2 border border-blue/50 rounded px-1.5 py-0.5 text-fg outline-none w-32"
+        placeholder="agent name"
+        disabled={saving}
+      />
+      <button type="submit" disabled={saving}
+        className="text-[10px] px-1.5 py-0.5 rounded bg-blue/20 text-blue hover:bg-blue/30 transition-colors">
+        {saving ? '…' : '✓'}
+      </button>
+      <button type="button" onClick={() => setOpen(false)}
+        className="text-[10px] text-fg-2 hover:text-fg px-1">✕</button>
+    </form>
+  );
+}
+
 export default function Sessions() {
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [orphaned, setOrphaned] = useState<CopilotSession[]>([]);
@@ -22,11 +70,13 @@ export default function Sessions() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'all' | 'orphaned'>('all');
 
-  useEffect(() => {
+  const load = () => {
     Promise.all([api.getSessions(50), api.getOrphanedSessions()])
       .then(([all, orph]) => { setSessions(all); setOrphaned(orph); })
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { load(); }, []);
 
   const loadPlan = async (id: string) => {
     try {
@@ -52,7 +102,7 @@ export default function Sessions() {
           <button className={`text-xs pb-1 transition-colors ${tab === 'all' ? 'text-fg border-b-2 border-blue' : 'text-fg-2 hover:text-fg-1'}`}
             onClick={() => setTab('all')}>All ({sessions.length})</button>
           <button className={`text-xs pb-1 transition-colors ${tab === 'orphaned' ? 'text-fg border-b-2 border-blue' : 'text-fg-2 hover:text-fg-1'}`}
-            onClick={() => setTab('orphaned')}>Orphaned ({orphaned.length})</button>
+            onClick={() => setTab('orphaned')}>Unregistered ({orphaned.length})</button>
         </div>
         <div className="space-y-1.5">
           {displaySessions.map(s => (
@@ -62,24 +112,32 @@ export default function Sessions() {
               onClick={() => loadPlan(s.id)}>
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  {s.agentName && <span className="text-[10px] bg-bg-2 text-fg-1 px-1.5 py-0.5 rounded">{s.agentName}</span>}
-                  {s.isOrphaned && <span className="text-[10px] text-red/60 bg-red/5 px-1.5 py-0.5 rounded">orphaned</span>}
+                  {s.agentName
+                    ? <span className="text-[10px] bg-blue/10 text-blue px-1.5 py-0.5 rounded font-medium">{s.agentName}</span>
+                    : <span className="text-[10px] text-fg-2/40 px-1.5 py-0.5 rounded border border-dashed border-border">unregistered</span>
+                  }
+                  {s.checkpoints.length > 0 && (
+                    <span className="text-[10px] text-fg-2/50">{s.checkpoints.length} ckpt{s.checkpoints.length !== 1 ? 's' : ''}</span>
+                  )}
                 </div>
-                <span className="text-[10px] text-fg-2" title={new Date(s.lastModified).toLocaleString()}>
-                  {relativeTime(s.lastModified)}
-                </span>
+                <div className="flex items-center gap-2">
+                  <RegisterButton session={s} onRegistered={load} />
+                  <span className="text-[10px] text-fg-2" title={new Date(s.lastModified).toLocaleString()}>
+                    {relativeTime(s.lastModified)}
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] font-mono text-fg-2/60 truncate">{s.id}</div>
-              {s.planSnippet && <p className="text-[11px] text-fg-2 mt-1 line-clamp-1">{s.planSnippet}</p>}
-              {s.checkpoints.length > 0 && (
-                <p className="text-[10px] text-fg-2/60 mt-1">{s.checkpoints.length} checkpoint{s.checkpoints.length !== 1 ? 's' : ''}</p>
+              {s.summary && s.summary !== 'Start Conversation' && (
+                <p className="text-[11px] text-fg-1 truncate">{s.summary}</p>
               )}
+              {s.cwd && <p className="text-[10px] font-mono text-fg-2/50 truncate mt-0.5">{s.cwd}</p>}
+              <div className="text-[10px] font-mono text-fg-2/30 truncate mt-0.5">{s.id}</div>
             </div>
           ))}
           {displaySessions.length === 0 && (
             <div className="text-center py-12 text-fg-2 text-xs">
               <span className="text-2xl block mb-3 opacity-30">↻</span>
-              <p>{tab === 'orphaned' ? 'No orphaned sessions' : 'No sessions found'}</p>
+              <p>{tab === 'orphaned' ? 'No unregistered sessions' : 'No sessions found'}</p>
             </div>
           )}
         </div>
@@ -101,3 +159,6 @@ export default function Sessions() {
     </div>
   );
 }
+
+
+

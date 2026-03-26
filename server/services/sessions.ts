@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'fs';
 import { join, basename } from 'path';
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
@@ -17,9 +17,11 @@ export interface CopilotSession {
   lastModified: Date;
   hasPlan: boolean;
   planSnippet?: string;
-  checkpoints: SessionCheckpoint[];
+  summary?: string;
+  cwd?: string;
   agentName?: string;
   isOrphaned: boolean;
+  checkpoints: SessionCheckpoint[];
 }
 
 function getBoundSessionIds(): Set<string> {
@@ -53,6 +55,19 @@ function getAgentNameForSession(sessionId: string): string | undefined {
     }
   } catch { /* ignore */ }
   return undefined;
+}
+
+function loadWorkspaceMeta(sessionDir: string): { summary?: string; cwd?: string } {
+  const yamlPath = join(sessionDir, 'workspace.yaml');
+  if (!existsSync(yamlPath)) return {};
+  try {
+    const text = readFileSync(yamlPath, 'utf-8');
+    const summary = text.match(/^summary:\s*(.+)$/m)?.[1]?.trim();
+    const cwd = text.match(/^cwd:\s*(.+)$/m)?.[1]?.trim();
+    return { summary, cwd };
+  } catch {
+    return {};
+  }
 }
 
 function loadCheckpoints(sessionDir: string): SessionCheckpoint[] {
@@ -97,10 +112,11 @@ export function getAllSessions(): CopilotSession[] {
     if (hasPlan) {
       try {
         const content = readFileSync(planPath, 'utf-8');
-        // First 3 non-empty lines
         planSnippet = content.split('\n').filter(l => l.trim()).slice(0, 3).join('\n');
       } catch { /* ignore */ }
     }
+
+    const { summary, cwd } = loadWorkspaceMeta(sessionDir);
 
     sessions.push({
       id: dir,
@@ -108,6 +124,8 @@ export function getAllSessions(): CopilotSession[] {
       lastModified: statSync(sessionDir).mtime,
       hasPlan,
       planSnippet,
+      summary,
+      cwd,
       checkpoints: loadCheckpoints(sessionDir),
       agentName: getAgentNameForSession(dir),
       isOrphaned: !boundIds.has(dir),
@@ -141,4 +159,29 @@ export function getSessionCheckpointContent(id: string, filename: string): strin
 
 export function getOrphanedSessions(): CopilotSession[] {
   return getAllSessions().filter(s => s.isOrphaned);
+}
+
+export function registerSession(sessionId: string, name: string): void {
+  let data: any = { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+  if (existsSync(SESSION_MAP_FILE)) {
+    data = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+  }
+  if (!data.agents) data.agents = {};
+
+  // Remove any existing entry for this session ID under a different name
+  for (const key of Object.keys(data.agents)) {
+    const v = data.agents[key];
+    const sid = v.session || v.sessionId || v.session_id;
+    if (sid === sessionId && key !== name) delete data.agents[key];
+  }
+
+  const existing = data.agents[name] || {};
+  data.agents[name] = {
+    ...existing,
+    session: sessionId,
+    startedAt: existing.startedAt || new Date().toISOString(),
+  };
+  delete data.agents[name].stoppedAt;
+
+  writeFileSync(SESSION_MAP_FILE, JSON.stringify(data, null, 2));
 }

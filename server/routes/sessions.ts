@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getAllSessions, getSession, getSessionPlan, getSessionCheckpointContent, getOrphanedSessions } from '../services/sessions.js';
+import { getAllSessions, getSession, getSessionPlan, getSessionCheckpointContent, getOrphanedSessions, registerSession } from '../services/sessions.js';
 
 const router = Router();
 
@@ -20,6 +20,19 @@ router.get('/:id', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json(session);
+});
+
+// Register a session as a named agent
+router.post('/:id/register', (req, res) => {
+  const { name } = req.body as { name?: string };
+  const sessionId = req.params.id;
+  const agentName = (name && name.trim()) ? name.trim() : `session-${sessionId.slice(0, 8)}`;
+  try {
+    registerSession(sessionId, agentName);
+    res.json({ success: true, sessionId, name: agentName });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to register session' });
+  }
 });
 
 // Get session plan
