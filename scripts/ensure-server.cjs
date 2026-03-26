@@ -234,11 +234,27 @@ rl.on('line', (line) => {
           });
         } else if (tool === 'copilot_town_register') {
           const { name } = msg.params?.arguments || {};
-          const sessionId = process.env.COPILOT_SESSION_ID;
+
+          // Try env var first, then fall back to most recently touched session-state dir
+          let sessionId = process.env.COPILOT_SESSION_ID;
+          if (!sessionId) {
+            try {
+              const stateDir = path.join(process.env.USERPROFILE || process.env.HOME || '', '.copilot', 'session-state');
+              if (fs.existsSync(stateDir)) {
+                const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                const entries = fs.readdirSync(stateDir)
+                  .filter(d => UUID_RE.test(d))
+                  .map(d => ({ id: d, mtime: fs.statSync(path.join(stateDir, d)).mtimeMs }))
+                  .sort((a, b) => b.mtime - a.mtime);
+                if (entries.length > 0) sessionId = entries[0].id;
+              }
+            } catch {}
+          }
+
           if (!sessionId) {
             process.stdout.write(JSON.stringify({
               jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'No session ID found (COPILOT_SESSION_ID not set). Are hooks enabled?' }] }
+              result: { content: [{ type: 'text', text: 'No session ID found (COPILOT_SESSION_ID not set and no session-state dir found).' }] }
             }) + '\n');
           } else {
             const HOME = process.env.USERPROFILE || process.env.HOME || '';
