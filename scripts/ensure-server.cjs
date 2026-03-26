@@ -67,13 +67,14 @@ async function ensureServer() {
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
   const logFd = fs.openSync(LOG_FILE, 'a');
 
-  // Spawn detached server — completely hidden, no terminal window
-  const child = spawn('npx', ['--yes', 'tsx', SERVER_SCRIPT], {
+  // Spawn detached server — completely hidden, no terminal window.
+  // Use npx.cmd on Windows (no shell: true needed, avoids cmd.exe flash).
+  const npxCmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  const child = spawn(npxCmd, ['--yes', 'tsx', SERVER_SCRIPT], {
     cwd: ROOT,
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: { ...process.env, COPILOT_TOWN_PORT: String(PORT) },
-    shell: true,
     windowsHide: true,
   });
   child.unref();
@@ -143,6 +144,16 @@ rl.on('line', (line) => {
                 name: 'copilot_town_list_templates',
                 description: 'List available agent templates',
                 inputSchema: { type: 'object', properties: {} }
+              },
+              {
+                name: 'copilot_town_register',
+                description: 'Register this Copilot session as a named agent in Copilot Town so it appears in the dashboard',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', description: 'Display name for this agent (optional — defaults to session-XXXXXXXX)' }
+                  }
+                }
               }
             ]
           }
@@ -221,6 +232,57 @@ rl.on('line', (line) => {
               result: { content: [{ type: 'text', text: 'Hub server not running' }] }
             }) + '\n');
           });
+        } else if (tool === 'copilot_town_register') {
+          const { name } = msg.params?.arguments || {};
+          const sessionId = process.env.COPILOT_SESSION_ID;
+          if (!sessionId) {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0', id: msg.id,
+              result: { content: [{ type: 'text', text: 'No session ID found (COPILOT_SESSION_ID not set). Are hooks enabled?' }] }
+            }) + '\n');
+          } else {
+            const HOME = process.env.USERPROFILE || process.env.HOME || '';
+            const SESSION_FILE = path.join(HOME, '.copilot', 'agent-sessions.json');
+            const agentName = (name && name.trim()) ? name.trim() : `session-${sessionId.slice(0, 8)}`;
+            try {
+              let data = { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+              if (fs.existsSync(SESSION_FILE)) {
+                data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+              }
+              if (!data.agents) data.agents = {};
+
+              // If this session is already stored under a different key, move it
+              const existingKey = Object.keys(data.agents).find(k => {
+                const v = data.agents[k];
+                return (v.session || v.sessionId || v.session_id) === sessionId;
+              });
+              if (existingKey && existingKey !== agentName) {
+                const old = data.agents[existingKey];
+                delete data.agents[existingKey];
+                data.agents[agentName] = old;
+              }
+
+              const existing = data.agents[agentName] || {};
+              data.agents[agentName] = {
+                ...existing,
+                session: sessionId,
+                startedAt: existing.startedAt || new Date().toISOString(),
+              };
+              // Remove stoppedAt in case session was previously marked stopped
+              delete data.agents[agentName].stoppedAt;
+
+              fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+              process.stdout.write(JSON.stringify({
+                jsonrpc: '2.0', id: msg.id,
+                result: { content: [{ type: 'text', text: `✅ Registered as "${agentName}" in Copilot Town. Open the dashboard to see it.` }] }
+              }) + '\n');
+            } catch (e) {
+              process.stdout.write(JSON.stringify({
+                jsonrpc: '2.0', id: msg.id,
+                result: { content: [{ type: 'text', text: `Failed to register: ${e.message}` }] }
+              }) + '\n');
+            }
+          }
         } else if (tool === 'copilot_town_status') {
           // Fetch from local API
           const http = require('http');

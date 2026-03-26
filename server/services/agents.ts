@@ -129,6 +129,8 @@ interface SessionMapEntry {
   sessionId: string;
   agentName: string;
   displayName?: string;
+  startedAt?: string;
+  stoppedAt?: string;
 }
 
 function loadSessionMap(): Map<string, SessionMapEntry> {
@@ -146,6 +148,8 @@ function loadSessionMap(): Map<string, SessionMapEntry> {
           sessionId,
           agentName: name,
           displayName: data.displayName || data.display_name,
+          startedAt: data.startedAt,
+          stoppedAt: data.stoppedAt,
         });
       }
     }
@@ -245,8 +249,13 @@ export function getAllAgents(): Agent[] {
     }
 
     const id = sessionId || syntheticId(pane.target);
-    const template = agentName ? templateMap.get(agentName) : undefined;
-    const name = template?.name || agentName || id.slice(0, 8);
+
+    // Custom name from agent-sessions.json always wins over --agent= extracted name
+    const sessionEntry = sessionMap.get(id);
+    const customName = sessionEntry?.displayName || sessionEntry?.agentName || null;
+    const resolvedName = customName || agentName;
+    const template = resolvedName ? templateMap.get(resolvedName) : undefined;
+    const name = customName || template?.name || agentName || id.slice(0, 8);
 
     agents.push({ id, name, template, status: state, pane, sessionId: id });
     seenSessionIds.add(id);
@@ -258,8 +267,10 @@ export function getAllAgents(): Agent[] {
 
     const template = templateMap.get(entry.agentName);
     const name = entry.displayName || template?.name || entry.agentName || sessionId.slice(0, 8);
+    // Show as idle (not stopped) if session was started but never explicitly stopped
+    const status: AgentStatus = entry.stoppedAt ? 'stopped' : 'idle';
 
-    agents.push({ id: sessionId, name, template, status: 'stopped', sessionId });
+    agents.push({ id: sessionId, name, template, status, sessionId });
     seenSessionIds.add(sessionId);
   }
 
