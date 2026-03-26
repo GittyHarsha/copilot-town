@@ -161,20 +161,34 @@ router.post('/relay', (req, res) => {
 // Stop agent
 router.post('/:id/stop', (req, res) => {
   const agent = getAgent(req.params.id);
-  if (!agent?.pane) return res.status(404).json({ error: 'Agent has no active pane' });
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+  // No pane — just mark as stopped in agent-sessions.json
+  if (!agent.pane) {
+    try {
+      const raw = existsSync(SESSION_MAP_FILE)
+        ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+        : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+      const agents = raw.agents || {};
+      const key = Object.keys(agents).find(k => {
+        const v = agents[k];
+        return (v.session || v.sessionId || v.session_id) === agent.sessionId;
+      }) || agent.name;
+      if (agents[key]) agents[key].stoppedAt = new Date().toISOString();
+      raw.agents = agents;
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    } catch { /* ignore */ }
+    pushEvent('agent_stopped', `Agent ${agent.name} marked as stopped`, 'info', agent.name);
+    return res.json({ success: true, method: 'marked' });
+  }
 
   const target = agent.pane.target;
-
   sendKeys(target, 'C-c', false);
-
-  setTimeout(() => {
-    sendKeys(target, '/exit');
-  }, 300);
-
+  setTimeout(() => { sendKeys(target, '/exit'); }, 300);
   setTimeout(() => {
     sendKeys(target, 'exit');
     pushEvent('agent_stopped', `Agent ${agent.name} stopped`, 'info', agent.name);
-    res.json({ success: true, target });
+    res.json({ success: true, target, method: 'psmux' });
   }, 800);
 });
 
