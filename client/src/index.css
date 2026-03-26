@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme variables ── */
+:root {
+  --color-bg: #0a0a0a;
+  --color-bg-1: #111111;
+  --color-bg-2: #1a1a1a;
+  --color-bg-3: #222222;
+  --color-fg: #ededed;
+  --color-fg-1: #b0b0b0;
+  --color-fg-2: #707070;
+  --color-border: #222222;
+  --color-border-1: #333333;
+  --scrollbar-track: #111111;
+  --scrollbar-thumb: #3a3a3a;
+  --scrollbar-thumb-hover: #555555;
+}
+
+[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-bg-1: #f5f5f5;
+  --color-bg-2: #e8e8e8;
+  --color-bg-3: #d4d4d4;
+  --color-fg: #171717;
+  --color-fg-1: #404040;
+  --color-fg-2: #737373;
+  --color-border: #e5e5e5;
+  --color-border-1: #d4d4d4;
+  --scrollbar-track: #f5f5f5;
+  --scrollbar-thumb: #c4c4c4;
+  --scrollbar-thumb-hover: #a3a3a3;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.dot-live { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Glow accents for agent cards */
+.glow-green { box-shadow: inset 2px 0 0 #22c55e; }
+.glow-yellow { box-shadow: inset 2px 0 0 #eab308; }
+
+@keyframes toast-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.toast-in { animation: toast-in 200ms ease-out; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.animate-fade-in { animation: fade-in 100ms ease-out; }
+.animate-slide-in-right { animation: slide-in-right 200ms ease-out; }
+
+

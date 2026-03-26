@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "copilot-town": {
+      "type": "local",
+      "command": "node",
+      "args": ["scripts/ensure-server.cjs"],
+      "env": {},
+      "tools": ["*"]
+    }
+  }
+}

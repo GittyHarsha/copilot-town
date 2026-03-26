@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "node scripts/session-hook.cjs",
+        "powershell": "node scripts/session-hook.cjs",
+        "env": {
+          "COPILOT_TOWN_HOOK": "sessionStart"
+        },
+        "timeoutSec": 5
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "node scripts/session-hook.cjs",
+        "powershell": "node scripts/session-hook.cjs",
+        "env": {
+          "COPILOT_TOWN_HOOK": "sessionEnd"
+        },
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

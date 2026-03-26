@@ -1,0 +1,262 @@
+#!/usr/bin/env node
+/**
+ * Ensure the Copilot Town server is running.
+ * Called as an MCP server entry — if the real server is already running,
+ * this just exits cleanly. If not, it spawns the server as a detached process.
+ * 
+ * Also acts as a minimal MCP server that responds to initialize/list_tools.
+ */
+const { execSync, spawn } = require('child_process');
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
+
+const PORT = parseInt(process.env.COPILOT_TOWN_PORT || '3848');
+const PID_FILE = path.join(process.env.USERPROFILE || process.env.HOME || '', '.copilot', 'copilot-town.pid');
+const ROOT = path.join(__dirname, '..');
+const SERVER_SCRIPT = path.join(ROOT, 'server', 'index.ts');
+const LOG_FILE = path.join(process.env.USERPROFILE || process.env.HOME || '', '.copilot', 'copilot-town.log');
+
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(true));
+    server.once('listening', () => { server.close(); resolve(false); });
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+/** Silently install deps if node_modules is missing */
+function ensureDeps() {
+  const nm = path.join(ROOT, 'node_modules');
+  if (!fs.existsSync(nm)) {
+    try {
+      execSync('npm install --silent --no-progress', {
+        cwd: ROOT,
+        stdio: 'ignore',
+        timeout: 120000,
+        windowsHide: true,
+      });
+    } catch {}
+  }
+  // Also client deps
+  const clientNm = path.join(ROOT, 'client', 'node_modules');
+  if (!fs.existsSync(clientNm)) {
+    try {
+      execSync('npm install --silent --no-progress', {
+        cwd: path.join(ROOT, 'client'),
+        stdio: 'ignore',
+        timeout: 120000,
+        windowsHide: true,
+      });
+    } catch {}
+  }
+}
+
+async function ensureServer() {
+  const inUse = await isPortInUse(PORT);
+  if (inUse) {
+    return; // Server already running
+  }
+
+  // Install deps silently if needed
+  ensureDeps();
+
+  // Open a log file for server output (so we can debug without visible terminals)
+  const logDir = path.dirname(LOG_FILE);
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+  const logFd = fs.openSync(LOG_FILE, 'a');
+
+  // Spawn detached server — completely hidden, no terminal window
+  const child = spawn('npx', ['--yes', 'tsx', SERVER_SCRIPT], {
+    cwd: ROOT,
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: { ...process.env, COPILOT_TOWN_PORT: String(PORT) },
+    shell: true,
+    windowsHide: true,
+  });
+  child.unref();
+  fs.closeSync(logFd);
+
+  // Save PID
+  try {
+    const dir = path.dirname(PID_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(PID_FILE, String(child.pid));
+  } catch {}
+}
+
+// Run as MCP server (stdin/stdout JSON-RPC)
+// CRITICAL: Start MCP listener IMMEDIATELY so initialize doesn't timeout.
+// Server startup happens in the background.
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin });
+
+// Fire and forget — don't block MCP handshake
+ensureServer().catch(() => {});
+
+rl.on('line', (line) => {
+    try {
+      const msg = JSON.parse(line);
+      if (msg.method === 'initialize') {
+        const resp = {
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'copilot-town', version: '0.1.0' }
+          }
+        };
+        process.stdout.write(JSON.stringify(resp) + '\n');
+      } else if (msg.method === 'tools/list') {
+        const resp = {
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: {
+            tools: [
+              {
+                name: 'copilot_town_open',
+                description: 'Open the Copilot Town dashboard in your browser',
+                inputSchema: { type: 'object', properties: {} }
+              },
+              {
+                name: 'copilot_town_status',
+                description: 'Get status of all agents in Copilot Town',
+                inputSchema: { type: 'object', properties: {} }
+              },
+              {
+                name: 'copilot_town_relay',
+                description: 'Relay a message between agents',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    from: { type: 'string', description: 'Source agent name' },
+                    to: { type: 'string', description: 'Target agent name' },
+                    message: { type: 'string', description: 'Message to relay' }
+                  },
+                  required: ['from', 'to', 'message']
+                }
+              },
+              {
+                name: 'copilot_town_list_templates',
+                description: 'List available agent templates',
+                inputSchema: { type: 'object', properties: {} }
+              }
+            ]
+          }
+        };
+        process.stdout.write(JSON.stringify(resp) + '\n');
+      } else if (msg.method === 'tools/call') {
+        const tool = msg.params?.name;
+        if (tool === 'copilot_town_open') {
+          const url = `http://localhost:${PORT}`;
+          // Try to open browser
+          try {
+            if (process.platform === 'win32') execSync(`start ${url}`, { shell: true });
+            else if (process.platform === 'darwin') execSync(`open ${url}`);
+            else execSync(`xdg-open ${url}`);
+          } catch {}
+          process.stdout.write(JSON.stringify({
+            jsonrpc: '2.0', id: msg.id,
+            result: { content: [{ type: 'text', text: `Copilot Town opened at ${url}` }] }
+          }) + '\n');
+        } else if (tool === 'copilot_town_relay') {
+          const { from, to, message } = msg.params?.arguments || {};
+          const postData = JSON.stringify({ from, to, message });
+          const http = require('http');
+          const req = http.request({
+            hostname: 'localhost', port: PORT, path: '/api/agents/relay',
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+          }, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+              try {
+                const result = JSON.parse(data);
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: result.message || `Relayed message from ${from} to ${to}` }] }
+                }) + '\n');
+              } catch {
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: data || 'Relay sent' }] }
+                }) + '\n');
+              }
+            });
+          });
+          req.on('error', () => {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0', id: msg.id,
+              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
+            }) + '\n');
+          });
+          req.write(postData);
+          req.end();
+        } else if (tool === 'copilot_town_list_templates') {
+          const http = require('http');
+          http.get(`http://localhost:${PORT}/api/templates`, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+              try {
+                const templates = JSON.parse(data);
+                const summary = templates.map(t => `${t.name}: ${t.description || 'No description'}`).join('\n');
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: summary || 'No templates found' }] }
+                }) + '\n');
+              } catch {
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: 'Hub server not responding' }] }
+                }) + '\n');
+              }
+            });
+          }).on('error', () => {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0', id: msg.id,
+              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
+            }) + '\n');
+          });
+        } else if (tool === 'copilot_town_status') {
+          // Fetch from local API
+          const http = require('http');
+          http.get(`http://localhost:${PORT}/api/agents`, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+              try {
+                const agents = JSON.parse(data);
+                const summary = agents.map(a => `${a.name}: ${a.status}`).join('\n');
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: summary || 'No agents found' }] }
+                }) + '\n');
+              } catch {
+                process.stdout.write(JSON.stringify({
+                  jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: 'Hub server not responding' }] }
+                }) + '\n');
+              }
+            });
+          }).on('error', () => {
+            process.stdout.write(JSON.stringify({
+              jsonrpc: '2.0', id: msg.id,
+              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
+            }) + '\n');
+          });
+        }
+      } else if (msg.method === 'notifications/initialized') {
+        // No response needed
+      } else if (msg.id) {
+        // Unknown method
+        process.stdout.write(JSON.stringify({
+          jsonrpc: '2.0', id: msg.id,
+          error: { code: -32601, message: 'Method not found' }
+        }) + '\n');
+      }
+    } catch {}
+  });

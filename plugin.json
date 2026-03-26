@@ -1,0 +1,15 @@
+{
+  "name": "copilot-town",
+  "description": "Copilot Town — multi-agent orchestration for GitHub Copilot CLI. Run specialized agents that talk to each other, relay messages, and collaborate on complex tasks.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Harsha Narayana P"
+  },
+  "license": "MIT",
+  "keywords": [
+    "copilot", "agents", "multi-agent", "dashboard", "psmux",
+    "orchestration", "terminal", "hub", "visualization"
+  ],
+  "hooks": "hooks.json",
+  "mcpServers": ".mcp.json"
+}
