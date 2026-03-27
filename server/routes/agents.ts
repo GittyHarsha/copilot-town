@@ -274,8 +274,11 @@ router.post('/:id/resume', async (req, res) => {
     return res.status(500).json({ error: e.message || 'Failed to provision pane' });
   }
 
-  const agentFlag = agent.template?.name || agent.name;
-  const cmd = req.body.command || `copilot --agent=${agentFlag} --resume=${agent.sessionId}`;
+  // Only use --agent= flag if the agent has a real .agent.md template
+  const agentFlag = agent.template?.name;
+  const cmd = req.body.command || (agentFlag
+    ? `copilot --agent=${agentFlag} --resume=${agent.sessionId}`
+    : `copilot --resume=${agent.sessionId}`);
   const ok = sendToPane(target, cmd);
   if (ok) {
     updatePaneMapping(agent.name, target);
