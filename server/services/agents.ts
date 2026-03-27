@@ -186,7 +186,7 @@ let _paneCacheTime = 0;
 
 function scanPanes(panes: PsmuxPane[]): Map<string, PaneScanResult> {
   const now = Date.now();
-  if (now - _paneCacheTime < 5000 && _paneCache.size > 0) {
+  if (now - _paneCacheTime < 8000 && _paneCache.size > 0) {
     return _paneCache;
   }
 

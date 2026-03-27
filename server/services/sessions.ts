@@ -5,6 +5,15 @@ const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const SESSION_STATE_DIR = join(HOME, '.copilot', 'session-state');
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
 
+// Cache sessions for 10s — scanning 100+ dirs on every request is expensive
+let _sessionCache: CopilotSession[] = [];
+let _sessionCacheTime = 0;
+const SESSION_CACHE_TTL = 10_000;
+
+function invalidateSessionCache() {
+  _sessionCacheTime = 0;
+}
+
 export interface SessionCheckpoint {
   number: number;
   title: string;
@@ -92,6 +101,11 @@ function loadCheckpoints(sessionDir: string): SessionCheckpoint[] {
 }
 
 export function getAllSessions(): CopilotSession[] {
+  const now = Date.now();
+  if (now - _sessionCacheTime < SESSION_CACHE_TTL && _sessionCache.length > 0) {
+    return _sessionCache;
+  }
+
   if (!existsSync(SESSION_STATE_DIR)) return [];
 
   const boundIds = getBoundSessionIds();
@@ -132,7 +146,10 @@ export function getAllSessions(): CopilotSession[] {
     });
   }
 
-  return sessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+  const sorted = sessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+  _sessionCache = sorted;
+  _sessionCacheTime = Date.now();
+  return sorted;
 }
 
 export function getSession(id: string): CopilotSession | undefined {
@@ -184,4 +201,5 @@ export function registerSession(sessionId: string, name: string): void {
   delete data.agents[name].stoppedAt;
 
   writeFileSync(SESSION_MAP_FILE, JSON.stringify(data, null, 2));
+  invalidateSessionCache();
 }

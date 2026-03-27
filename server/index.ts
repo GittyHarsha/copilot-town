@@ -73,24 +73,37 @@ const server = createServer(app);
 // --- WebSocket 1: Agent status broadcast (/ws/status) ---
 const wssStatus = new WebSocketServer({ noServer: true });
 let lastStatus = '';
+let cachedAgents: ReturnType<typeof getAllAgents> = [];
+let cachedPanes: ReturnType<typeof listPanes> = [];
+let agentCacheTime = 0;
+const AGENT_CACHE_TTL = 5000; // refresh at most every 5s
+
+function refreshAgentCache() {
+  const now = Date.now();
+  if (now - agentCacheTime < AGENT_CACHE_TTL) return;
+  agentCacheTime = now;
+  try {
+    cachedAgents = getAllAgents();
+    cachedPanes = listPanes();
+  } catch { /* ignore */ }
+}
 
 function broadcastStatus() {
   if (wssStatus.clients.size === 0) return;
   try {
-    const agents = getAllAgents();
-    const panes = listPanes();
+    refreshAgentCache();
     const payload = JSON.stringify({
       type: 'status',
       timestamp: new Date().toISOString(),
-      agents: agents.map(a => ({
+      agents: cachedAgents.map(a => ({
         id: a.id,
         name: a.name,
         status: a.status,
         pane: a.pane ? a.pane.target : null,
       })),
       psmux: {
-        totalPanes: panes.length,
-        sessions: [...new Set(panes.map(p => p.sessionName))],
+        totalPanes: cachedPanes.length,
+        sessions: [...new Set(cachedPanes.map(p => p.sessionName))],
       },
     });
     if (payload !== lastStatus) {
@@ -103,7 +116,7 @@ function broadcastStatus() {
     console.error('Status broadcast error:', err);
   }
 }
-setInterval(broadcastStatus, 2000);
+setInterval(broadcastStatus, 5000); // slow down: WS pushes on change anyway
 
 // Wire event broadcaster to push events to all WS clients
 setBroadcaster((event: ActivityEvent) => {
