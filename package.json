@@ -10,7 +10,9 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "cd client && npx vite --port 3847",
     "build": "cd client && npx vite build",
-    "start": "npx tsx server/index.ts"
+    "start": "tsx server/index.ts",
+    "start:bg": "powershell -ExecutionPolicy Bypass -File start.ps1 -NoBrowser",
+    "stop": "powershell -ExecutionPolicy Bypass -File stop.ps1"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

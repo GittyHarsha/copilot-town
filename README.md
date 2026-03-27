@@ -38,14 +38,23 @@ One Copilot session is powerful. A **team** of them is unstoppable.
 # Install the plugin
 copilot plugin install harshanp_microsoft/copilot-town
 
-# The server auto-starts when Copilot loads the plugin.
-# From any copilot session, just say:
-#   "open copilot town"    → opens dashboard in browser
-#   "show agent status"    → lists all agents
-#   "relay a message to X" → sends message to another agent
+# Start the server yourself (no Copilot session needed):
+.\start.ps1              # starts server + opens dashboard
+.\start.ps1 -NoBrowser   # starts server only
+.\stop.ps1               # stops the server
+
+# Or via npm:
+npm start                # foreground
+npm run start:bg         # background (silent)
+npm run stop             # stop background server
 ```
 
-The server launches silently in the background on port **3848** — no terminal window, no manual setup.
+The server also auto-starts when Copilot loads the MCP plugin, but you don't need to burn an LLM call for that — just run the script.
+
+From any copilot session, use the MCP tools:
+- `"open copilot town"` → opens dashboard
+- `"show agent status"` → lists all agents
+- `"relay a message to X"` → sends message to another agent
 
 ## How It Works
 
