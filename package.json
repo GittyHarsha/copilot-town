@@ -18,6 +18,7 @@
     "express": "^4.21.0",
     "glob": "^11.0.0",
     "gray-matter": "^4.0.3",
+    "open": "^11.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

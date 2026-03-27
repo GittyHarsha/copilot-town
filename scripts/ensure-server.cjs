@@ -167,15 +167,18 @@ rl.on('line', (line) => {
         const tool = msg.params?.name;
         if (tool === 'copilot_town_open') {
           const url = `http://localhost:${PORT}`;
-          // Try to open browser
+          // Use the 'open' package — handles Windows without terminal flash
           try {
-            if (process.platform === 'win32') {
-              // Use start /b through a hidden shell to avoid terminal flash
-              spawn('cmd.exe', ['/c', 'start', '', url], { detached: false, stdio: 'ignore', windowsHide: true }).unref();
-            }
-            else if (process.platform === 'darwin') execSync(`open ${url}`);
-            else execSync(`xdg-open ${url}`);
-          } catch {}
+            const open = require('open');
+            open(url).catch(() => {});
+          } catch {
+            // Fallback if open package not available
+            try {
+              if (process.platform === 'win32') spawn('cmd.exe', ['/c', 'start', '', url], { stdio: 'ignore', windowsHide: true }).unref();
+              else if (process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore' }).unref();
+              else spawn('xdg-open', [url], { stdio: 'ignore' }).unref();
+            } catch {}
+          }
           process.stdout.write(JSON.stringify({
             jsonrpc: '2.0', id: msg.id,
             result: { content: [{ type: 'text', text: `Copilot Town opened at ${url}` }] }
