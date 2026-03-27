@@ -183,6 +183,13 @@ interface PaneScanResult {
 
 let _paneCache = new Map<string, PaneScanResult>();
 let _paneCacheTime = 0;
+let _sessionMapCache: Map<string, any> | null = null;
+
+export function invalidateAgentCache() {
+  _paneCache = new Map();
+  _paneCacheTime = 0;
+  _sessionMapCache = null;
+}
 
 function scanPanes(panes: PsmuxPane[]): Map<string, PaneScanResult> {
   const now = Date.now();

@@ -14,6 +14,8 @@ function invalidateSessionCache() {
   _sessionCacheTime = 0;
 }
 
+export { invalidateSessionCache };
+
 export interface SessionCheckpoint {
   number: number;
   title: string;

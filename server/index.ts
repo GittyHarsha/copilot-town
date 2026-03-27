@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
+import { watch, existsSync } from 'fs';
 import { URL, fileURLToPath } from 'url';
-import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import agentRoutes from './routes/agents.js';
 import psmuxRoutes from './routes/psmux.js';
@@ -14,8 +14,9 @@ import relayRoutes from './routes/relays.js';
 import eventRoutes from './routes/events.js';
 import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
-import { getAllAgents, loadAgentTemplates } from './services/agents.js';
+import { getAllAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
 import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary } from './services/psmux.js';
+import { invalidateSessionCache } from './services/sessions.js';
 import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
 
@@ -75,23 +76,12 @@ const wssStatus = new WebSocketServer({ noServer: true });
 let lastStatus = '';
 let cachedAgents: ReturnType<typeof getAllAgents> = [];
 let cachedPanes: ReturnType<typeof listPanes> = [];
-let agentCacheTime = 0;
-const AGENT_CACHE_TTL = 5000; // refresh at most every 5s
 
-function refreshAgentCache() {
-  const now = Date.now();
-  if (now - agentCacheTime < AGENT_CACHE_TTL) return;
-  agentCacheTime = now;
+function buildAndBroadcast() {
+  if (wssStatus.clients.size === 0) return;
   try {
     cachedAgents = getAllAgents();
     cachedPanes = listPanes();
-  } catch { /* ignore */ }
-}
-
-function broadcastStatus() {
-  if (wssStatus.clients.size === 0) return;
-  try {
-    refreshAgentCache();
     const payload = JSON.stringify({
       type: 'status',
       timestamp: new Date().toISOString(),
@@ -106,17 +96,59 @@ function broadcastStatus() {
         sessions: [...new Set(cachedPanes.map(p => p.sessionName))],
       },
     });
-    if (payload !== lastStatus) {
-      lastStatus = payload;
-      for (const client of wssStatus.clients) {
-        if (client.readyState === WebSocket.OPEN) client.send(payload);
-      }
+    if (payload === lastStatus) return; // nothing changed
+    lastStatus = payload;
+    for (const client of wssStatus.clients) {
+      if (client.readyState === WebSocket.OPEN) client.send(payload);
     }
   } catch (err) {
     console.error('Status broadcast error:', err);
   }
 }
-setInterval(broadcastStatus, 5000); // slow down: WS pushes on change anyway
+
+// ── File watchers: push immediately on change ──────────────────────
+const HOME = process.env.USERPROFILE || process.env.HOME || '';
+const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
+const SESSION_STATE_DIR = join(HOME, '.copilot', 'session-state');
+
+// Debounce helper — coalesce rapid file-change events
+function debounce(fn: () => void, ms: number) {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return () => { clearTimeout(t); t = setTimeout(fn, ms); };
+}
+
+const onAgentFileChange = debounce(() => {
+  invalidateAgentCache();
+  buildAndBroadcast();
+}, 200);
+
+const onSessionDirChange = debounce(() => {
+  invalidateSessionCache();
+  // No WS broadcast needed — sessions are fetched via REST, not WS
+}, 300);
+
+// Watch agent-sessions.json for registrations/stops
+if (existsSync(SESSION_MAP_FILE)) {
+  watch(SESSION_MAP_FILE, onAgentFileChange);
+} else {
+  // Watch parent dir until the file is created
+  watch(join(HOME, '.copilot'), (_evt, fname) => {
+    if (fname === 'agent-sessions.json') {
+      onAgentFileChange();
+      // Re-attach direct watcher once it exists
+      try { watch(SESSION_MAP_FILE, onAgentFileChange); } catch { /* ignore */ }
+    }
+  });
+}
+
+// Watch session-state dir for new sessions
+if (existsSync(SESSION_STATE_DIR)) {
+  watch(SESSION_STATE_DIR, onSessionDirChange);
+}
+
+// Psmux pane status still needs polling — there are no file events for terminal state.
+// 5s is plenty; WS only pushes when payload actually changes.
+setInterval(buildAndBroadcast, 5000);
 
 // Wire event broadcaster to push events to all WS clients
 setBroadcaster((event: ActivityEvent) => {
