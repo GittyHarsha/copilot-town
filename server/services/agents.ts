@@ -248,6 +248,17 @@ export function getAllAgents(): Agent[] {
       sessionId = nameToSessionId.get(agentName) || null;
     }
 
+    // Last resort: try matching by agent name across all registered entries
+    // (handles resume case where --resume=UUID not yet visible in pane output)
+    if (!sessionId && agentName) {
+      for (const [sid, entry] of sessionMap) {
+        if (entry.agentName === agentName || entry.displayName === agentName) {
+          sessionId = sid;
+          break;
+        }
+      }
+    }
+
     const id = sessionId || syntheticId(pane.target);
 
     // Custom name from agent-sessions.json always wins over --agent= extracted name
@@ -256,6 +267,9 @@ export function getAllAgents(): Agent[] {
     const resolvedName = customName || agentName;
     const template = resolvedName ? templateMap.get(resolvedName) : undefined;
     const name = customName || template?.name || agentName || id.slice(0, 8);
+
+    // Only include in agent list if registered (in session map) — skip anonymous pane-XXXX
+    if (!sessionEntry) continue;
 
     agents.push({ id, name, template, status: state, pane, sessionId: id });
     seenSessionIds.add(id);
