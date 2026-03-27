@@ -67,12 +67,16 @@ async function ensureServer() {
   if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
   const logFd = fs.openSync(LOG_FILE, 'a');
 
-  // Spawn detached server — completely hidden, no terminal window.
-  // Spawn node directly (not npx/cmd.exe) to avoid visible terminal on Windows.
+  // Spawn server as a background process — NO visible terminal window.
+  // On Windows: detached:true creates a new console (visible flash!).
+  //   Instead, skip detached — Windows processes survive parent exit by default.
+  //   unref() lets this MCP process exit without waiting for the child.
+  // On Unix: detached:true + setsid is needed so the child survives parent exit.
+  const isWin = process.platform === 'win32';
   const tsxCli = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
   const child = spawn(process.execPath, [tsxCli, SERVER_SCRIPT], {
     cwd: ROOT,
-    detached: true,
+    detached: !isWin,
     stdio: ['ignore', logFd, logFd],
     env: { ...process.env, COPILOT_TOWN_PORT: String(PORT) },
     windowsHide: true,
