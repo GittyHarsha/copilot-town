@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
+import { execSync } from 'child_process';
 import matter from 'gray-matter';
 import { listPanes, capturePane, type PsmuxPane } from './psmux.js';
 import { trackStatusChanges } from './statusHistory.js';
@@ -9,6 +10,36 @@ const USER_AGENTS_DIR = process.env.COPILOT_TOWN_USER_AGENTS_DIR || join(HOME, '
 const PROJECT_DIR = process.env.COPILOT_TOWN_PROJECT_DIR || process.cwd();
 const PROJECT_AGENTS_DIR = join(PROJECT_DIR, '.github', 'agents');
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
+const SESSION_STATE_DIR = join(HOME, '.copilot', 'session-state');
+
+// ── Lock-file based status detection ─────────────────────────────
+// Each active copilot session writes inuse.<PID>.lock into its session dir.
+// If any lock file exists AND its PID is alive → session is running.
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // signal 0 = just check existence
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getLockFileStatus(sessionId: string): 'running' | 'idle' | null {
+  const sessionDir = join(SESSION_STATE_DIR, sessionId);
+  if (!existsSync(sessionDir)) return null;
+  try {
+    const locks = readdirSync(sessionDir).filter(f => /^inuse\.\d+\.lock$/.test(f));
+    if (locks.length === 0) return null;
+    const alive = locks.some(f => {
+      const pid = parseInt(f.replace('inuse.', '').replace('.lock', ''));
+      return isProcessAlive(pid);
+    });
+    return alive ? 'running' : 'idle';
+  } catch {
+    return null;
+  }
+}
 
 export type AgentStatus = 'running' | 'idle' | 'stopped';
 
@@ -78,7 +109,7 @@ const COPILOT_INDICATORS = [
 function detectCopilotState(output: string): 'running' | 'idle' | null {
   if (!output) return null;
   const hasCopilot = COPILOT_INDICATORS.some(ind => output.includes(ind));
-  if (!hasCopilot && !/claude-|gpt-|gemini-/i.test(output)) return null;
+  if (!hasCopilot && !/claude[\s-]|gpt[\s-]|gemini[\s-]/i.test(output)) return null;
   const hasPrompt = output.includes('❯') || output.includes('shift+tab switch mode');
   return hasPrompt ? 'idle' : 'running';
 }
@@ -282,14 +313,21 @@ export function getAllAgents(): Agent[] {
     seenSessionIds.add(id);
   }
 
-  // Phase 2: Known sessions from agent-sessions.json not in any pane → stopped
+  // Phase 2: Known sessions from agent-sessions.json not in any pane
+  // Use lock files to determine real status: inuse.<PID>.lock in session-state dir
   for (const [sessionId, entry] of sessionMap) {
     if (seenSessionIds.has(sessionId)) continue;
 
     const template = templateMap.get(entry.agentName);
     const name = entry.displayName || template?.name || entry.agentName || sessionId.slice(0, 8);
-    // Show as idle (not stopped) if session was started but never explicitly stopped
-    const status: AgentStatus = entry.stoppedAt ? 'stopped' : 'idle';
+
+    let status: AgentStatus;
+    if (entry.stoppedAt) {
+      status = 'stopped';
+    } else {
+      const lockStatus = getLockFileStatus(sessionId);
+      status = lockStatus ?? 'idle'; // lock file alive → running, no locks → idle
+    }
 
     agents.push({ id: sessionId, name, template, status, sessionId });
     seenSessionIds.add(sessionId);
