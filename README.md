@@ -2,7 +2,7 @@
 
 **Multi-agent orchestration for GitHub Copilot CLI.**
 
-Run a fleet of specialized Copilot agents that talk to each other, relay messages, share context, and collaborate on complex tasks — like a town of AI specialists each doing what they do best.
+Run a fleet of specialized Copilot agents that discover each other, relay messages, and collaborate on complex tasks — a town of AI specialists each doing what they do best.
 
 ![Copilot Town](https://img.shields.io/badge/copilot-plugin-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-green)
@@ -12,61 +12,101 @@ Run a fleet of specialized Copilot agents that talk to each other, relay message
 
 One Copilot session is powerful. A **team** of them is unstoppable.
 
-- 🧠 **Specialized agents** — A docs expert, a test writer, a code reviewer — each with deep domain knowledge in their `.agent.md` template
-- 🔄 **Inter-agent messaging** — Agents relay messages to each other. Ask one agent a question and it routes to the right specialist
-- 🏗️ **Session-first model** — Every Copilot CLI session is an agent. Templates are optional roles. No config needed to get started
-- 📡 **MCP-powered** — The hub exposes tools (`copilot_town_status`, `copilot_town_relay`) so any agent can programmatically query and talk to others
-- 🪟 **psmux orchestration** — Auto-provision terminal panes, manage windows, launch agents with one click
+- 🧠 **Specialized agents** — A docs expert, a test writer, a code reviewer — each with domain knowledge via `.agent.md` templates
+- 🔄 **Inter-agent messaging** — Agents relay messages to each other through the hub
+- 🏗️ **Session-first model** — Every Copilot CLI session is an agent. Templates are optional roles. Zero config to start
+- 📡 **MCP-powered** — 5 tools (`copilot_town_status`, `copilot_town_relay`, etc.) let any agent programmatically query and talk to others
+- 🪟 **psmux orchestration** — Auto-provision terminal panes, manage windows, launch agents from the dashboard
 
 ## Features
 
-- 🔄 **Agent Relay** — Route messages between agents, build multi-agent workflows
-- 📊 **Live Dashboard** — See all agents at a glance with real-time status
-- 🏘️ **Town View** — Animated visualization of your agent network and relay connections
-- ▦ **Terminal Grid** — View all agent panes in a single window
-- 🚀 **Launch** — Spin up new sessions with template/model/flag picker
-- 💬 **Chat** — Send messages to any agent from the UI
-- ⏱ **Sessions** — Browse conversation history across all agents
-- ⚙ **Settings** — Rename agents, configure the town
+| Tab | What it does |
+|-----|-------------|
+| **Dashboard** `1` | Agent cards with live status (running/idle/stopped), create/resume/stop agents, relay panel, conversation history |
+| **Town** `2` | Animated ring visualization of your agent network with relay connections |
+| **Panes** `3` | Terminal grid + full pane management — swap, zoom, break, rotate, move, resize, layout presets |
+| **Chat** `4` | Browse and search conversation history across all agents (full-text search) |
+| **Sessions** `5` | Copilot session lifecycle — register sessions as named agents, view orphaned sessions |
+| **Graph** `6` | Force-directed graph of agent relay messages with frequency-weighted edges |
+| **Settings** `7` | Hub config, agent display names, dark/light theme |
+
+> Number keys `1`–`7` switch tabs. `Ctrl+K` opens the command palette.
 
 ## Quick Start
 
-```bash
+```powershell
 # Install the plugin
 copilot plugin install harshanp_microsoft/copilot-town
 
-# The server auto-starts. Open the dashboard:
-open http://localhost:3848
-
-# Or from any copilot session, use the MCP tool:
-# "open copilot town" → triggers copilot_town_open
+# The server auto-starts when Copilot loads the plugin.
+# From any copilot session, just say:
+#   "open copilot town"    → opens dashboard in browser
+#   "show agent status"    → lists all agents
+#   "relay a message to X" → sends message to another agent
 ```
+
+The server launches silently in the background on port **3848** — no terminal window, no manual setup.
 
 ## How It Works
 
-1. **You launch agents** in psmux panes (or let Copilot Town auto-provision them)
-2. **Agents discover each other** — the hub scans panes for Copilot CLI indicators
-3. **Agents communicate** — via relay messages, routed through the hub
-4. **You observe and orchestrate** — from the dashboard, or programmatically via MCP tools
-
 ```
 ┌──────────┐    relay     ┌──────────┐    relay     ┌──────────┐
-│  docs    │ ──────────→  │ registry │ ──────────→  │  test    │
-│  expert  │ ←──────────  │  (router)│ ←──────────  │  writer  │
+│  docs    │ ──────────→  │   hub    │ ──────────→  │  test    │
+│  expert  │ ←──────────  │ (router) │ ←──────────  │  writer  │
 └──────────┘              └──────────┘              └──────────┘
      ↑                         ↑                         ↑
      └─────────────── Copilot Town Hub ──────────────────┘
                         (auto-discovery)
 ```
 
+1. **Agents launch** in psmux panes (manually, or auto-provisioned from the dashboard)
+2. **Auto-discovery** — the hub scans all psmux panes for Copilot CLI indicators, detecting status in real time
+3. **Relay messaging** — agents send messages through the hub via HTTP API or MCP tools
+4. **Observe & orchestrate** — the dashboard shows live status, or use MCP tools programmatically
+
+### Agent Lifecycle
+
+| Status | How it's detected |
+|--------|------------------|
+| **running** | Copilot is executing — tool confirmation dialogs, working indicators visible in pane |
+| **idle** | Copilot is at the prompt waiting for input (`Type @ to mention`, `shift+tab` visible) |
+| **stopped** | No lock file, no pane, or explicitly stopped via API |
+
+Detection uses a multi-strategy approach: lock files (`inuse.<PID>.lock`), pane output analysis, and session map tracking — with an 8-second cache to keep it fast.
+
+## MCP Tools
+
+Every Copilot session with the plugin installed gets these tools automatically:
+
+| Tool | Description |
+|------|-------------|
+| `copilot_town_open` | Open the dashboard in your browser |
+| `copilot_town_status` | Get status of all agents |
+| `copilot_town_relay` | Send a message from one agent to another |
+| `copilot_town_list_templates` | List available `.agent.md` templates |
+| `copilot_town_register` | Register current session as a named agent |
+
+## Pane Management
+
+The **Panes** tab provides full terminal multiplexer control from the browser:
+
+**Per-pane actions:**
+`↑↓` Swap · `⤢` Zoom · `⊡` Break to window · `⟳` Rotate · `↗` Move · `⇔` Resize
+
+**Per-window:**
+Split horizontal/vertical · 5 layout presets (tiled, stacked, side-by-side, main-h, main-v)
+
+**Per-session:**
+Create · Rename · Kill · Add windows
+
 ## Install
 
-```bash
+```powershell
 copilot plugin install harshanp_microsoft/copilot-town
 ```
 
 Or from source:
-```bash
+```powershell
 git clone https://github.com/harshanp_microsoft/copilot-town.git
 cd copilot-town
 npm install
@@ -77,56 +117,76 @@ cd client && npm install && npx vite build
 
 - [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli)
 - Node.js 18+
-- **psmux** (recommended) — terminal multiplexer for agent panes, discovery, and orchestration
-
-### Installing a terminal multiplexer
+- [**psmux**](https://github.com/psmux/psmux) — terminal multiplexer for pane management and agent discovery
 
 ```powershell
-# Windows
 winget install marlocarlo.psmux
-
-# macOS
-brew install tmux
-
-# Linux (usually pre-installed)
-sudo apt install tmux   # Debian/Ubuntu
 ```
 
-> **Note on psmux:** [psmux](https://github.com/psmux/psmux) is a third-party open-source terminal multiplexer for Windows. If you prefer not to install pre-built binaries via winget, you can clone the repo and build from source to use as a pinned, auditable runtime. On Mac/Linux, tmux is the well-established standard and ships with most distributions.
-
-Copilot Town auto-detects whichever is available (`psmux` on Windows, `tmux` on Mac/Linux). Without either, the dashboard and relay messaging still work, but pane management, terminal grid, and auto-discovery of running agents are disabled.
+Without psmux, the dashboard and relay messaging still work, but pane management, terminal grid, and auto-discovery of running agents are disabled.
 
 ## Configuration
 
-Set via Settings page or environment variables:
+Set via the Settings page or environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `COPILOT_TOWN_PORT` | `3848` | Server port |
-| `COPILOT_TOWN_PROJECT_DIR` | cwd | Project root (for .github/agents/) |
+| `COPILOT_TOWN_PROJECT_DIR` | cwd | Project root (for `.github/agents/`) |
 | `COPILOT_TOWN_USER_AGENTS_DIR` | `~/.copilot/agents` | User agent templates |
 
 ## Architecture
 
-- **Discovery**: Scans psmux panes for Copilot CLI indicators — zero config
-- **Identity**: Session ID (UUID) = agent. Templates (`.agent.md`) = optional roles
-- **Relay**: HTTP API + WebSocket for real-time agent-to-agent messaging
-- **MCP bridge**: Exposes hub as MCP tools so agents can query each other programmatically
-- **Hooks**: `sessionStart`/`sessionEnd` auto-register agents
-
-## Plugin Structure
-
 ```
 copilot-town/
-├── plugin.json          # Copilot CLI plugin manifest
-├── .mcp.json            # Auto-starts server as MCP server
-├── hooks.json           # Session lifecycle hooks
-├── scripts/             # Hook + server launcher scripts
-├── server/              # Express + WebSocket backend
-├── client/              # React frontend
-│   └── dist/            # Pre-built (zero build step)
-└── data/                # Runtime (gitignored)
+├── plugin.json              # Copilot CLI plugin manifest
+├── .mcp.json                # MCP server config → runs ensure-server.cjs
+├── hooks.json               # sessionStart/sessionEnd lifecycle hooks
+├── scripts/
+│   ├── ensure-server.cjs    # MCP bridge + silent server auto-launcher
+│   └── session-hook.cjs     # Auto-registers sessions to agent-sessions.json
+├── server/
+│   ├── index.ts             # Express + dual WebSocket (status + terminal)
+│   ├── routes/              # REST API (agents, psmux, relays, sessions, config, …)
+│   └── services/
+│       ├── agents.ts        # Discovery engine, status detection, lifecycle
+│       └── psmux.ts         # Cross-platform mux abstraction (40+ operations)
+├── client/
+│   ├── src/                 # React + Vite + Tailwind
+│   └── dist/                # Pre-built (zero build step for users)
+└── data/                    # Runtime state (gitignored)
 ```
+
+**Key design decisions:**
+- **Session-first identity** — `agent.id` = Copilot session UUID. Templates are optional roles, not identities
+- **Silent server** — `ensure-server.cjs` spawns the server with `detached: false` on Windows (no console flash) and responds to MCP `initialize` immediately (no blocking)
+- **Pane layout tracking** — `psmux_layout` in `agent-sessions.json` maps pane targets to agent names, surviving pane renumbering
+- **Lock file detection** — checks `inuse.<PID>.lock` files with `process.kill(pid, 0)` for reliable stopped-state detection
+
+## API
+
+The server exposes a REST API at `http://localhost:3848/api/`:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /agents` | List all agents with status |
+| `GET /agents/:id` | Agent details |
+| `GET /agents/:id/output` | Capture pane output |
+| `POST /agents/relay` | Relay message between agents |
+| `POST /agents/:id/stop` | Stop agent |
+| `POST /agents/:id/resume` | Resume agent (auto-provisions pane) |
+| `POST /agents/:id/start` | Start from template |
+| `GET /agents/templates` | List `.agent.md` templates |
+| `GET /conversations` | List sessions (supports `?q=` FTS) |
+| `GET /conversations/:id` | Conversation turns |
+| `GET /psmux/sessions` | List psmux sessions |
+| `GET /psmux/panes` | List all panes |
+| `POST /psmux/panes/:target/*` | Pane operations (split, swap, zoom, break, join, resize, rotate) |
+| `GET /relays` | Relay message log |
+| `GET /events` | Recent events |
+| `GET/PUT /config` | Hub configuration |
+
+WebSocket endpoints: `/ws` (status updates), `/ws/terminal` (live terminal streams).
 
 ## License
 
