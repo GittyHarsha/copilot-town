@@ -169,7 +169,10 @@ rl.on('line', (line) => {
           const url = `http://localhost:${PORT}`;
           // Try to open browser
           try {
-            if (process.platform === 'win32') execSync(`start ${url}`, { shell: true });
+            if (process.platform === 'win32') {
+              // Use start /b through a hidden shell to avoid terminal flash
+              spawn('cmd.exe', ['/c', 'start', '', url], { detached: false, stdio: 'ignore', windowsHide: true }).unref();
+            }
             else if (process.platform === 'darwin') execSync(`open ${url}`);
             else execSync(`xdg-open ${url}`);
           } catch {}
