@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { api, type AgentData } from '../lib/api';
+import { useAgentStatus } from '../hooks/useAgentStatus';
 
 /* ── Dynamic color/ring from agent name ───────────── */
 function hashHex(name: string): string {
@@ -39,27 +40,23 @@ interface NodePos { name: string; x: number; y: number; agent: AgentData; color:
 
 export default function TownView() {
   const [agents, setAgents] = useState<AgentData[]>([]);
+  const { status: wsStatus } = useAgentStatus();
   const [relays, setRelays] = useState<Relay[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  const [tick, setTick] = useState(0);
 
-  // Polling
+  // Fetch full agent data when WS status updates (avoids redundant REST polling)
   useEffect(() => {
-    const load = () => {
-      api.getAgents().then(setAgents).catch(() => {});
-      api.getRelays(50).then(setRelays).catch(() => {});
-    };
-    load();
-    const iv = setInterval(load, 5000);
-    return () => clearInterval(iv);
-  }, []);
+    if (!wsStatus) return;
+    api.getAgents().then(setAgents).catch(() => {});
+  }, [wsStatus]);
 
-  // Animation tick for particles
+  // Relays: fetch once on mount, then infrequently
   useEffect(() => {
-    const iv = setInterval(() => setTick(t => t + 1), 60);
+    api.getRelays(50).then(setRelays).catch(() => {});
+    const iv = setInterval(() => api.getRelays(50).then(setRelays).catch(() => {}), 30000);
     return () => clearInterval(iv);
   }, []);
 

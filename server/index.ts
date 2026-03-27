@@ -14,7 +14,7 @@ import relayRoutes from './routes/relays.js';
 import eventRoutes from './routes/events.js';
 import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
-import { getAllAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
+import { getAllAgents, refreshAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
 import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary } from './services/psmux.js';
 import { invalidateSessionCache } from './services/sessions.js';
 import { setBroadcaster, type ActivityEvent } from './services/events.js';
@@ -58,12 +58,17 @@ app.get('/api/health', (_req, res) => {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientDist = join(__dirname, '..', 'client', 'dist');
 if (existsSync(clientDist)) {
-  app.use(express.static(clientDist));
-  // SPA fallback — serve index.html for all non-API routes
+  app.use(express.static(clientDist, {
+    maxAge: '1h',              // Cache static assets (they have content hashes)
+    immutable: true,           // Vite-hashed files never change
+  }));
+  // SPA fallback — serve index.html for non-API, non-asset routes only
   app.get('*', (_req, res) => {
-    if (!_req.path.startsWith('/api') && !_req.path.startsWith('/ws')) {
-      res.sendFile(join(clientDist, 'index.html'));
+    if (_req.path.startsWith('/api') || _req.path.startsWith('/ws') || _req.path.startsWith('/assets')) {
+      return res.status(404).end();
     }
+    res.setHeader('Cache-Control', 'no-cache'); // index.html should never be cached
+    res.sendFile(join(clientDist, 'index.html'));
   });
   console.log(`📦 Serving built frontend from ${clientDist}`);
 }
@@ -77,10 +82,11 @@ let lastStatus = '';
 let cachedAgents: ReturnType<typeof getAllAgents> = [];
 let cachedPanes: ReturnType<typeof listPanes> = [];
 
-function buildAndBroadcast() {
+async function buildAndBroadcast() {
   if (wssStatus.clients.size === 0) return;
   try {
-    cachedAgents = getAllAgents();
+    cachedAgents = await refreshAgents();
+    // listPanes result is cached in psmux.ts — cheap to call again
     cachedPanes = listPanes();
     const payload = JSON.stringify({
       type: 'status',
@@ -158,10 +164,10 @@ setBroadcaster((event: ActivityEvent) => {
   }
 });
 
-wssStatus.on('connection', (ws) => {
+wssStatus.on('connection', async (ws) => {
   console.log('Status WS connected');
   try {
-    const agents = getAllAgents();
+    const agents = await refreshAgents();
     ws.send(JSON.stringify({
       type: 'status',
       timestamp: new Date().toISOString(),
@@ -231,7 +237,7 @@ wssTerminal.on('connection', (ws, req) => {
 
   // Initial full capture
   pollPane();
-  pollInterval = setInterval(pollPane, 200);
+  pollInterval = setInterval(pollPane, 1000);
 
   // Receive keystrokes from xterm
   ws.on('message', (data) => {

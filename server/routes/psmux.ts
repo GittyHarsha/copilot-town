@@ -8,7 +8,7 @@ import {
   breakPane, joinPane, respawnPane,
   selectWindow, rotateWindow, listWindows,
   displayMessage, setOption, showOptions, hasSession,
-  provisionPane, type ProvisionConfig,
+  provisionPane, invalidatePaneCache, type ProvisionConfig,
 } from '../services/psmux.js';
 
 const router = Router();
@@ -109,6 +109,7 @@ router.post('/windows', (req, res) => {
   const { session, name } = req.body;
   if (!session) return res.status(400).json({ error: 'session required' });
   const success = newWindow(session, name);
+  invalidatePaneCache();
   res.json({ success, session });
 });
 
@@ -117,6 +118,7 @@ router.post('/split', (req, res) => {
   const { session, vertical } = req.body;
   if (!session) return res.status(400).json({ error: 'session required' });
   const success = splitPane(session, vertical !== false);
+  invalidatePaneCache();
   res.json({ success, session });
 });
 
@@ -127,6 +129,7 @@ router.post('/layout', (req, res) => {
   const allowed = ['even-horizontal', 'even-vertical', 'tiled', 'main-horizontal', 'main-vertical'];
   if (!allowed.includes(layout)) return res.status(400).json({ error: `layout must be one of: ${allowed.join(', ')}` });
   const success = selectLayout(target, layout);
+  invalidatePaneCache();
   res.json({ success, target, layout });
 });
 
@@ -175,6 +178,7 @@ router.post('/panes/:target/swap', (req, res) => {
   }
   try {
     swapPane(req.params.target, direction);
+    invalidatePaneCache();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -185,6 +189,7 @@ router.post('/panes/:target/swap', (req, res) => {
 router.post('/panes/:target/break', (req, res) => {
   try {
     breakPane(req.params.target);
+    invalidatePaneCache();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -197,6 +202,7 @@ router.post('/panes/join', (req, res) => {
   if (!source || !target) return res.status(400).json({ error: 'source and target required' });
   try {
     joinPane(source, target);
+    invalidatePaneCache();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -267,6 +273,7 @@ router.put('/windows/:target', (req, res) => {
 router.delete('/panes/:target', (req, res) => {
   try {
     killPane(req.params.target);
+    invalidatePaneCache();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -277,6 +284,7 @@ router.delete('/panes/:target', (req, res) => {
 router.delete('/windows/:target', (req, res) => {
   try {
     killWindow(req.params.target);
+    invalidatePaneCache();
     res.json({ ok: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

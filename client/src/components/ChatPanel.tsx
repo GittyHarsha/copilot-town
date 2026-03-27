@@ -58,7 +58,7 @@ export default function ChatPanel({ agentName, onClose }: Props) {
   }, [agentName, lastOutput]);
 
   useEffect(() => {
-    pollRef.current = setInterval(pollOutput, 3000);
+    pollRef.current = setInterval(pollOutput, 8000);
     // Initial fetch
     pollOutput();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };

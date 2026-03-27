@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import { execSync } from 'child_process';
 import matter from 'gray-matter';
-import { listPanes, capturePane, type PsmuxPane } from './psmux.js';
+import { listPanes, capturePane, capturePaneAsync, type PsmuxPane } from './psmux.js';
 import { trackStatusChanges } from './statusHistory.js';
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
@@ -78,20 +78,7 @@ function parseAgentFile(filePath: string, source: 'user' | 'project'): AgentTemp
   }
 }
 
-export function loadAgentTemplates(): AgentTemplate[] {
-  const templates: AgentTemplate[] = [];
-  for (const [dir, source] of [[USER_AGENTS_DIR, 'user'], [PROJECT_AGENTS_DIR, 'project']] as const) {
-    if (existsSync(dir)) {
-      for (const file of readdirSync(dir)) {
-        if (file.endsWith('.agent.md')) {
-          const t = parseAgentFile(join(dir, file), source);
-          if (t) templates.push(t);
-        }
-      }
-    }
-  }
-  return templates;
-}
+// Template loading handled below with caching
 
 // ── Copilot detection ─────────────────────────────────────────────
 
@@ -175,10 +162,33 @@ interface SessionMapEntry {
   stoppedAt?: string;
 }
 
-function loadSessionMap(): Map<string, SessionMapEntry> {
-  const map = new Map<string, SessionMapEntry>();
+// ── Consolidated session file reader (single read, three views) ────
+interface SessionFileData {
+  sessionMap: Map<string, SessionMapEntry>;
+  nameToSessionId: Map<string, string>;
+  paneLayout: Map<string, string>;
+}
+
+let _sessionFileCache: SessionFileData | null = null;
+let _sessionFileCacheTime = 0;
+const SESSION_FILE_TTL = 3000; // 3s cache
+
+function loadSessionFile(): SessionFileData {
+  const now = Date.now();
+  if (_sessionFileCache && now - _sessionFileCacheTime < SESSION_FILE_TTL) {
+    return _sessionFileCache;
+  }
+
+  const sessionMap = new Map<string, SessionMapEntry>();
+  const nameToSessionId = new Map<string, string>();
+  const paneLayout = new Map<string, string>();
+
   try {
-    if (!existsSync(SESSION_MAP_FILE)) return map;
+    if (!existsSync(SESSION_MAP_FILE)) {
+      _sessionFileCache = { sessionMap, nameToSessionId, paneLayout };
+      _sessionFileCacheTime = now;
+      return _sessionFileCache;
+    }
     const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
     const agentsBlock = raw.agents || raw;
 
@@ -186,51 +196,29 @@ function loadSessionMap(): Map<string, SessionMapEntry> {
       if (name.startsWith('_')) continue;
       const sessionId = data.session || data.sessionId || data.session_id || '';
       if (sessionId) {
-        map.set(sessionId, {
+        sessionMap.set(sessionId, {
           sessionId,
           agentName: name,
           displayName: data.displayName || data.display_name,
           startedAt: data.startedAt,
           stoppedAt: data.stoppedAt,
         });
+        nameToSessionId.set(name, sessionId);
       }
     }
-  } catch { /* ignore */ }
-  return map;
-}
 
-function loadAgentNameToSessionId(): Map<string, string> {
-  const map = new Map<string, string>();
-  try {
-    if (!existsSync(SESSION_MAP_FILE)) return map;
-    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
-    const agentsBlock = raw.agents || raw;
-
-    for (const [name, data] of Object.entries(agentsBlock as Record<string, any>)) {
-      if (name.startsWith('_')) continue;
-      const sessionId = data.session || data.sessionId || data.session_id || '';
-      if (sessionId) map.set(name, sessionId);
-    }
-  } catch { /* ignore */ }
-  return map;
-}
-
-// Load psmux_layout: pane target ("session:w.p") → agent name
-function loadPaneLayout(): Map<string, string> {
-  const map = new Map<string, string>();
-  try {
-    if (!existsSync(SESSION_MAP_FILE)) return map;
-    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
     const layout = raw.psmux_layout || {};
     for (const [sessionName, panes] of Object.entries(layout as Record<string, any>)) {
       if (sessionName.startsWith('_')) continue;
       for (const [wp, agentName] of Object.entries(panes as Record<string, string>)) {
-        // Convert "0.1" → "session:0.1"
-        map.set(`${sessionName}:${wp}`, agentName);
+        paneLayout.set(`${sessionName}:${wp}`, agentName);
       }
     }
   } catch { /* ignore */ }
-  return map;
+
+  _sessionFileCache = { sessionMap, nameToSessionId, paneLayout };
+  _sessionFileCacheTime = now;
+  return _sessionFileCache;
 }
 
 // ── Pane scanning cache ───────────────────────────────────────────
@@ -243,17 +231,45 @@ interface PaneScanResult {
 
 let _paneCache = new Map<string, PaneScanResult>();
 let _paneCacheTime = 0;
-let _sessionMapCache: Map<string, any> | null = null;
+
+// ── Template caching ──────────────────────────────────────────────
+let _templateCache: AgentTemplate[] | null = null;
+let _templateCacheTime = 0;
+const TEMPLATE_CACHE_TTL = 30000; // 30s — templates rarely change
+
+export function loadAgentTemplates(): AgentTemplate[] {
+  const now = Date.now();
+  if (_templateCache && now - _templateCacheTime < TEMPLATE_CACHE_TTL) {
+    return _templateCache;
+  }
+  const templates: AgentTemplate[] = [];
+  for (const [dir, source] of [[USER_AGENTS_DIR, 'user'], [PROJECT_AGENTS_DIR, 'project']] as const) {
+    if (existsSync(dir)) {
+      for (const file of readdirSync(dir)) {
+        if (file.endsWith('.agent.md')) {
+          const t = parseAgentFile(join(dir, file), source);
+          if (t) templates.push(t);
+        }
+      }
+    }
+  }
+  _templateCache = templates;
+  _templateCacheTime = now;
+  return templates;
+}
 
 export function invalidateAgentCache() {
   _paneCache = new Map();
   _paneCacheTime = 0;
-  _sessionMapCache = null;
+  _sessionFileCache = null;
+  _sessionFileCacheTime = 0;
+  _templateCache = null;
+  _templateCacheTime = 0;
 }
 
-function scanPanes(panes: PsmuxPane[]): Map<string, PaneScanResult> {
+function scanPanesSync(panes: PsmuxPane[]): Map<string, PaneScanResult> {
   const now = Date.now();
-  if (now - _paneCacheTime < 8000 && _paneCache.size > 0) {
+  if (now - _paneCacheTime < 15000 && _paneCache.size > 0) {
     return _paneCache;
   }
 
@@ -279,6 +295,40 @@ function scanPanes(panes: PsmuxPane[]): Map<string, PaneScanResult> {
   return map;
 }
 
+/** Parallel async version — captures all panes concurrently */
+async function scanPanesAsync(panes: PsmuxPane[]): Promise<Map<string, PaneScanResult>> {
+  const now = Date.now();
+  if (now - _paneCacheTime < 15000 && _paneCache.size > 0) {
+    return _paneCache;
+  }
+
+  const map = new Map<string, PaneScanResult>();
+  const results = await Promise.all(
+    panes.map(async pane => {
+      try {
+        const output = await capturePaneAsync(pane.target, 20);
+        if (!output) return null;
+        const copilotState = detectCopilotState(output);
+        if (!copilotState) return null;
+        return {
+          target: pane.target,
+          agentName: extractAgentName(output),
+          sessionId: extractSessionId(output),
+          state: copilotState,
+        };
+      } catch { return null; }
+    })
+  );
+
+  for (const r of results) {
+    if (r) map.set(r.target, { agentName: r.agentName, sessionId: r.sessionId, state: r.state });
+  }
+
+  _paneCache = map;
+  _paneCacheTime = now;
+  return map;
+}
+
 function syntheticId(target: string): string {
   let hash = 0;
   for (let i = 0; i < target.length; i++) {
@@ -290,16 +340,14 @@ function syntheticId(target: string): string {
 
 // ── Main discovery (session-first) ────────────────────────────────
 
-export function getAllAgents(): Agent[] {
+/** Builds agent list from pane scan data + session file. Pure computation, no I/O. */
+function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   const templates = loadAgentTemplates();
   const templateMap = new Map<string, AgentTemplate>();
   for (const t of templates) templateMap.set(t.name, t);
 
-  const sessionMap = loadSessionMap();
-  const nameToSessionId = loadAgentNameToSessionId();
-  const paneLayout = loadPaneLayout();
+  const { sessionMap, nameToSessionId, paneLayout } = loadSessionFile();
   const allPanes = listPanes();
-  const paneData = scanPanes(allPanes);
 
   const agents: Agent[] = [];
   const seenSessionIds = new Set<string>();
@@ -378,6 +426,38 @@ export function getAllAgents(): Agent[] {
 
   trackStatusChanges(agents);
   return agents;
+}
+
+// Cached agent list — always returned immediately
+let _agentListCache: Agent[] = [];
+let _agentListCacheTime = 0;
+let _refreshInProgress = false;
+
+/** Returns cached agent list instantly. Never blocks on pane capture. */
+export function getAllAgents(): Agent[] {
+  // On very first call, do a sync scan to bootstrap
+  if (_agentListCacheTime === 0) {
+    const allPanes = listPanes();
+    const paneData = scanPanesSync(allPanes);
+    _agentListCache = buildAgentList(paneData);
+    _agentListCacheTime = Date.now();
+  }
+  return _agentListCache;
+}
+
+/** Async refresh — captures all panes in parallel, then updates cache. */
+export async function refreshAgents(): Promise<Agent[]> {
+  if (_refreshInProgress) return _agentListCache;
+  _refreshInProgress = true;
+  try {
+    const allPanes = listPanes();
+    const paneData = await scanPanesAsync(allPanes);
+    _agentListCache = buildAgentList(paneData);
+    _agentListCacheTime = Date.now();
+    return _agentListCache;
+  } finally {
+    _refreshInProgress = false;
+  }
 }
 
 export function getAgent(idOrName: string): Agent | undefined {

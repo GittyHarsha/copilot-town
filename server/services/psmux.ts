@@ -1,4 +1,7 @@
-import { execSync } from 'child_process';
+import { execSync, exec as cpExec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(cpExec);
 
 // Detect available multiplexer binary (psmux on Windows, tmux on Mac/Linux)
 let MUX_BIN: string | null = null;
@@ -107,13 +110,25 @@ export function listSessions(): PsmuxSession[] {
   });
 }
 
+let _listPanesCache: PsmuxPane[] = [];
+let _listPanesCacheTime = 0;
+const LIST_PANES_TTL = 5000; // 5s cache
+
 export function listPanes(session?: string): PsmuxPane[] {
+  // Only cache the -a (all panes) call — session-specific calls bypass cache
+  if (!session) {
+    const now = Date.now();
+    if (now - _listPanesCacheTime < LIST_PANES_TTL && _listPanesCache.length > 0) {
+      return _listPanesCache;
+    }
+  }
+
   const target = session ? `-t ${session}` : '-a';
   const raw = exec(
     `psmux list-panes ${target} -F "#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_pid}|#{pane_active}|#{pane_width}|#{pane_height}"`
   );
   if (!raw) return [];
-  return raw.split('\n').filter(Boolean).map(line => {
+  const result = raw.split('\n').filter(Boolean).map(line => {
     const [sessionName, windowIndex, paneIndex, command, pid, active, width, height] = line.split('|');
     const wi = parseInt(windowIndex) || 0;
     const pi = parseInt(paneIndex) || 0;
@@ -129,11 +144,37 @@ export function listPanes(session?: string): PsmuxPane[] {
       target: `${sessionName}:${wi}.${pi}`,
     };
   });
+
+  if (!session) {
+    _listPanesCache = result;
+    _listPanesCacheTime = Date.now();
+  }
+  return result;
+}
+
+export function invalidatePaneCache() {
+  _listPanesCache = [];
+  _listPanesCacheTime = 0;
 }
 
 export function capturePane(target: string, lines = 100, ansi = false): string {
   const flag = ansi ? '-e -p' : '-p';
   return exec(`psmux capture-pane ${flag} -t "${sanitizeTarget(target)}" -S -${lines}`, true);
+}
+
+/** Async version — runs capture in parallel without blocking the event loop */
+export async function capturePaneAsync(target: string, lines = 20): Promise<string> {
+  const bin = detectMux();
+  if (!bin) return '';
+  const safeTarget = sanitizeTarget(target);
+  const prefix = IS_WIN ? '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ' : '';
+  const cmd = `${prefix}${bin} capture-pane -p -t "${safeTarget}" -S -${lines}`;
+  try {
+    const { stdout } = await execAsync(cmd, { encoding: 'utf-8', timeout: 5000, shell: SHELL });
+    return stdout.trim();
+  } catch {
+    return '';
+  }
 }
 
 export function getPaneDimensions(target: string): { width: number; height: number } | null {
