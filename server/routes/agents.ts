@@ -41,6 +41,22 @@ function updatePaneMapping(agentName: string, paneTarget: string) {
   }
 }
 
+// Clear stoppedAt when an agent is resumed/started
+function clearStoppedAt(agentName: string) {
+  try {
+    const raw = existsSync(SESSION_MAP_FILE)
+      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+    const agents = raw.agents || {};
+    if (agents[agentName]) {
+      delete agents[agentName].stoppedAt;
+      agents[agentName].startedAt = new Date().toISOString();
+      raw.agents = agents;
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    }
+  } catch { /* ignore */ }
+}
+
 // Build message envelope with return-address metadata
 function wrapEnvelope(from: string, to: string, message: string): string {
   const sender = getAgent(from);
@@ -232,6 +248,7 @@ router.post('/:id/resume', async (req, res) => {
   const ok = sendToPane(target, cmd);
   if (ok) {
     updatePaneMapping(agent.name, target);
+    clearStoppedAt(agent.name);
     pushEvent('agent_resumed', `Agent ${agent.name} resumed in ${target} (${how})`, 'info', agent.name);
   }
   res.json({ success: ok, target, command: cmd, sessionId: agent.sessionId, provisioned: how });
@@ -275,6 +292,7 @@ router.post('/:id/start', async (req, res) => {
   const ok = sendToPane(target, cmd);
   if (ok) {
     updatePaneMapping(templateName, target);
+    clearStoppedAt(templateName);
     pushEvent('agent_started', `Agent ${templateName} started in ${target} (${how})`, 'info', templateName);
   }
   res.json({ success: ok, target, command: cmd, provisioned: how });

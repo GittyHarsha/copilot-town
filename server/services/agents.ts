@@ -204,6 +204,24 @@ function loadAgentNameToSessionId(): Map<string, string> {
   return map;
 }
 
+// Load psmux_layout: pane target ("session:w.p") → agent name
+function loadPaneLayout(): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    if (!existsSync(SESSION_MAP_FILE)) return map;
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    const layout = raw.psmux_layout || {};
+    for (const [sessionName, panes] of Object.entries(layout as Record<string, any>)) {
+      if (sessionName.startsWith('_')) continue;
+      for (const [wp, agentName] of Object.entries(panes as Record<string, string>)) {
+        // Convert "0.1" → "session:0.1"
+        map.set(`${sessionName}:${wp}`, agentName);
+      }
+    }
+  } catch { /* ignore */ }
+  return map;
+}
+
 // ── Pane scanning cache ───────────────────────────────────────────
 
 interface PaneScanResult {
@@ -268,11 +286,13 @@ export function getAllAgents(): Agent[] {
 
   const sessionMap = loadSessionMap();
   const nameToSessionId = loadAgentNameToSessionId();
+  const paneLayout = loadPaneLayout();
   const allPanes = listPanes();
   const paneData = scanPanes(allPanes);
 
   const agents: Agent[] = [];
   const seenSessionIds = new Set<string>();
+  const seenPanes = new Set<string>();
 
   // Phase 1: Discover agents from live panes (copilot running)
   for (const pane of allPanes) {
@@ -281,36 +301,48 @@ export function getAllAgents(): Agent[] {
 
     let { agentName, sessionId, state } = info;
 
-    // Resolve session ID from agent-sessions.json when not found in pane output
+    // Strategy A: Use psmux_layout mapping (most reliable — set by resume/start)
+    const layoutName = paneLayout.get(pane.target);
+    if (layoutName && !agentName) agentName = layoutName;
+
+    // Strategy B: Resolve session ID from agent-sessions.json by name
     if (!sessionId && agentName) {
       sessionId = nameToSessionId.get(agentName) || null;
     }
 
-    // Last resort: try matching by agent name across all registered entries
-    // (handles resume case where --resume=UUID not yet visible in pane output)
-    if (!sessionId && agentName) {
-      for (const [sid, entry] of sessionMap) {
-        if (entry.agentName === agentName || entry.displayName === agentName) {
-          sessionId = sid;
-          break;
+    // Strategy C: If psmux_layout gave us a name, find the session ID
+    if (!sessionId && layoutName) {
+      sessionId = nameToSessionId.get(layoutName) || null;
+    }
+
+    // Strategy D: Match by agent name across all registered entries
+    if (!sessionId) {
+      const nameToMatch = agentName || layoutName;
+      if (nameToMatch) {
+        for (const [sid, entry] of sessionMap) {
+          if (entry.agentName === nameToMatch || entry.displayName === nameToMatch) {
+            sessionId = sid;
+            break;
+          }
         }
       }
     }
 
     const id = sessionId || syntheticId(pane.target);
 
-    // Custom name from agent-sessions.json always wins over --agent= extracted name
+    // Custom name from agent-sessions.json always wins
     const sessionEntry = sessionMap.get(id);
-    const customName = sessionEntry?.displayName || sessionEntry?.agentName || null;
+    const customName = sessionEntry?.displayName || sessionEntry?.agentName || layoutName || null;
     const resolvedName = customName || agentName;
     const template = resolvedName ? templateMap.get(resolvedName) : undefined;
     const name = customName || template?.name || agentName || id.slice(0, 8);
 
-    // Only include in agent list if registered (in session map) — skip anonymous pane-XXXX
+    // Only include if registered (in session map) — skip anonymous pane-XXXX
     if (!sessionEntry) continue;
 
     agents.push({ id, name, template, status: state, pane, sessionId: id });
     seenSessionIds.add(id);
+    seenPanes.add(pane.target);
   }
 
   // Phase 2: Known sessions from agent-sessions.json not in any pane
