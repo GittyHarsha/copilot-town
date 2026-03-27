@@ -303,7 +303,7 @@ export function getAllAgents(): Agent[] {
 
     // Strategy A: Use psmux_layout mapping (most reliable — set by resume/start)
     const layoutName = paneLayout.get(pane.target);
-    if (layoutName && !agentName) agentName = layoutName;
+    if (layoutName) agentName = layoutName; // layout always wins over regex extraction
 
     // Strategy B: Resolve session ID from agent-sessions.json by name
     if (!sessionId && agentName) {

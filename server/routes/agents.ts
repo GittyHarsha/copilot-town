@@ -174,31 +174,62 @@ router.post('/relay', (req, res) => {
   });
 });
 
+// Mark agent as stopped in agent-sessions.json
+function markStopped(agentName: string, sessionId?: string) {
+  try {
+    const raw = existsSync(SESSION_MAP_FILE)
+      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+    const agents = raw.agents || {};
+    const key = Object.keys(agents).find(k => {
+      const v = agents[k];
+      return sessionId && (v.session || v.sessionId || v.session_id) === sessionId;
+    }) || agentName;
+    if (agents[key]) {
+      agents[key].stoppedAt = new Date().toISOString();
+      raw.agents = agents;
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    }
+  } catch { /* ignore */ }
+}
+
+// Remove psmux_layout entry for an agent (prevents stale mapping after pane renumber)
+function removePaneMapping(agentName: string) {
+  try {
+    const raw = existsSync(SESSION_MAP_FILE)
+      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+    const layout = raw.psmux_layout || {};
+    let changed = false;
+    for (const [sess, panes] of Object.entries(layout as Record<string, any>)) {
+      if (sess.startsWith('_')) continue;
+      for (const [key, name] of Object.entries(panes as Record<string, string>)) {
+        if (name === agentName) { delete panes[key]; changed = true; }
+      }
+    }
+    if (changed) {
+      raw.psmux_layout = layout;
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    }
+  } catch { /* ignore */ }
+}
+
 // Stop agent
 router.post('/:id/stop', (req, res) => {
   const agent = getAgent(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-  // No pane — just mark as stopped in agent-sessions.json
+  // No pane — just mark as stopped
   if (!agent.pane) {
-    try {
-      const raw = existsSync(SESSION_MAP_FILE)
-        ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-        : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-      const agents = raw.agents || {};
-      const key = Object.keys(agents).find(k => {
-        const v = agents[k];
-        return (v.session || v.sessionId || v.session_id) === agent.sessionId;
-      }) || agent.name;
-      if (agents[key]) agents[key].stoppedAt = new Date().toISOString();
-      raw.agents = agents;
-      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-    } catch { /* ignore */ }
+    markStopped(agent.name, agent.sessionId);
+    removePaneMapping(agent.name);
     pushEvent('agent_stopped', `Agent ${agent.name} marked as stopped`, 'info', agent.name);
     return res.json({ success: true, method: 'marked' });
   }
 
   const target = agent.pane.target;
+  removePaneMapping(agent.name);
+  markStopped(agent.name, agent.sessionId);
   sendKeys(target, 'C-c', false);
   setTimeout(() => { sendKeys(target, '/exit'); }, 300);
   setTimeout(() => {
