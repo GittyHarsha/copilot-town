@@ -126,7 +126,15 @@ router.get('/:id', (req, res) => {
   const agent = getAgent(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   const mdContent = agent.template ? getAgentMdContent(agent.template.name) : null;
-  res.json({ ...agent, mdContent });
+  // Include persisted metadata (template, model, flags, envVars, description)
+  let meta: any = {};
+  try {
+    if (existsSync(SESSION_MAP_FILE)) {
+      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      meta = raw.metadata?.[agent.name] || {};
+    }
+  } catch {}
+  res.json({ ...agent, mdContent, meta });
 });
 
 // Get agent's pane output
@@ -270,11 +278,27 @@ router.post('/:id/resume', async (req, res) => {
     return res.status(500).json({ error: e.message || 'Failed to provision pane' });
   }
 
-  // Only use --agent= flag if the agent has a real .agent.md template
-  const agentFlag = agent.template?.name;
-  const cmd = req.body.command || (agentFlag
-    ? `copilot --agent=${agentFlag} --resume=${agent.sessionId}`
-    : `copilot --resume=${agent.sessionId}`);
+  // Build command from persisted metadata + request overrides
+  let meta: any = {};
+  try {
+    if (existsSync(SESSION_MAP_FILE)) {
+      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      meta = raw.metadata?.[agent.name] || {};
+    }
+  } catch {}
+
+  const agentFlag = meta.template || agent.template?.name;
+  let cmd = req.body.command;
+  if (!cmd) {
+    const parts = ['copilot'];
+    if (agentFlag) parts.push(`--agent=${agentFlag}`);
+    parts.push(`--resume=${agent.sessionId}`);
+    const model = req.body.model || meta.model;
+    if (model) parts.push(`--model=${model}`);
+    const flags = req.body.flags || meta.flags || [];
+    for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
+    cmd = parts.join(' ');
+  }
   const ok = sendToPane(target, cmd);
   if (ok) {
     updatePaneMapping(agent.name, target);
@@ -318,7 +342,24 @@ router.post('/:id/start', async (req, res) => {
     }
   }
 
-  const cmd = req.body.command || `copilot --agent=${templateName}`;
+  // Build command from persisted metadata + request overrides
+  let meta: any = {};
+  try {
+    if (existsSync(SESSION_MAP_FILE) && agent) {
+      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      meta = raw.metadata?.[agent.name] || {};
+    }
+  } catch {}
+
+  let cmd = req.body.command;
+  if (!cmd) {
+    const parts = ['copilot', `--agent=${meta.template || templateName}`];
+    const model = req.body.model || meta.model;
+    if (model) parts.push(`--model=${model}`);
+    const flags = req.body.flags || meta.flags || [];
+    for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
+    cmd = parts.join(' ');
+  }
   const ok = sendToPane(target, cmd);
   if (ok) {
     updatePaneMapping(templateName, target);
@@ -328,12 +369,15 @@ router.post('/:id/start', async (req, res) => {
   res.json({ success: ok, target, command: cmd, provisioned: how });
 });
 
-// Update agent display name / description
+// Update agent settings (name, description, template, model, flags, envVars)
 router.put('/:id/settings', (req, res) => {
   const agent = getAgent(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-  const { name, description } = req.body as { name?: string; description?: string };
+  const { name, description, template, model, flags, envVars } = req.body as {
+    name?: string; description?: string; template?: string;
+    model?: string; flags?: string[]; envVars?: Record<string, string>;
+  };
 
   try {
     const result = withSessionFileReturn(raw => {
@@ -348,21 +392,32 @@ router.put('/:id/settings', (req, res) => {
       if (name && name !== key) {
         const entry = agents[key];
         delete agents[key];
+        // Also move metadata
+        if (raw.metadata?.[key]) {
+          if (!raw.metadata[name]) raw.metadata[name] = {};
+          Object.assign(raw.metadata[name], raw.metadata[key]);
+          delete raw.metadata[key];
+        }
         agents[name] = entry;
         key = name;
       }
 
-      if (description !== undefined) {
-        if (!raw.metadata) raw.metadata = {};
-        raw.metadata[key] = { ...(raw.metadata[key] || {}), description };
-      }
+      if (!raw.metadata) raw.metadata = {};
+      if (!raw.metadata[key]) raw.metadata[key] = {};
+      const meta = raw.metadata[key];
+
+      if (description !== undefined) meta.description = description;
+      if (template !== undefined) meta.template = template;
+      if (model !== undefined) meta.model = model;
+      if (flags !== undefined) meta.flags = flags;
+      if (envVars !== undefined) meta.envVars = envVars;
 
       raw.agents = agents;
-      return { key, description: raw.metadata?.[key]?.description };
+      return { key, meta };
     });
 
     const updated = getAgent(req.params.id) || agent;
-    res.json({ ...updated, name: result.key, description: result.description });
+    res.json({ ...updated, name: result.key, ...result.meta });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to update settings' });
   }

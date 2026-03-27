@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { LaunchConfigPanel } from './LaunchConfigPanel';
 import { useTerminalPanel } from './TerminalPanel';
 import ChatPanel from './ChatPanel';
+import AgentEditPanel from './AgentEditPanel';
 
 interface Props {
   agent: AgentData;
@@ -32,6 +33,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
   const [resumeError, setResumeError] = useState('');
   const [showLaunchConfig, setShowLaunchConfig] = useState<'resume' | 'start' | null>(null);
   const [showChat, setShowChat] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const prevStatus = useRef(agent.status);
   const { openTerminal } = useTerminalPanel();
 
@@ -144,6 +146,9 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
               <button className="text-[10px] px-2.5 py-1 rounded border border-border bg-bg-2 text-fg-2 hover:text-fg-1"
                 onClick={(e) => { e.stopPropagation(); onViewHistory(agent.id); }}>History</button>
             )}
+
+            <button className="text-[10px] px-2.5 py-1 rounded border border-border bg-bg-2 text-fg-2 hover:text-fg-1"
+              onClick={(e) => { e.stopPropagation(); setShowEdit(true); }}>Edit</button>
           </div>
 
           {/* Resume error */}
@@ -160,6 +165,11 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
 
       {showChat && createPortal(
         <ChatPanel agentName={agent.id} onClose={() => setShowChat(false)} />,
+        document.body
+      )}
+
+      {showEdit && createPortal(
+        <AgentEditPanel agent={agent} onClose={() => setShowEdit(false)} onSaved={onRefresh} />,
         document.body
       )}
     </div>

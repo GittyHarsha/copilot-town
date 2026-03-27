@@ -124,7 +124,10 @@ export const api = {
   updateConfig: (config: Partial<Config>) => putJson<Config>('/config', config),
 
   // Agent settings
-  updateAgentSettings: (id: string, settings: { name?: string; description?: string }) =>
+  updateAgentSettings: (id: string, settings: {
+    name?: string; description?: string; template?: string;
+    model?: string; flags?: string[]; envVars?: Record<string, string>;
+  }) =>
     putJson<AgentData>(`/agents/${encodeURIComponent(id)}/settings`, settings),
   deleteAgentSettings: (id: string) =>
     deleteJson<{ success: boolean }>(`/agents/${encodeURIComponent(id)}/settings`),
