@@ -68,14 +68,13 @@ async function ensureServer() {
   const logFd = fs.openSync(LOG_FILE, 'a');
 
   // Spawn detached server — completely hidden, no terminal window.
-  // On Windows, .cmd files can't be used with detached:true (EINVAL).
-  // Use shell:true but pass windowsHide:true to suppress the cmd.exe window.
-  const child = spawn('npx', ['--yes', 'tsx', SERVER_SCRIPT], {
+  // Spawn node directly (not npx/cmd.exe) to avoid visible terminal on Windows.
+  const tsxCli = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const child = spawn(process.execPath, [tsxCli, SERVER_SCRIPT], {
     cwd: ROOT,
     detached: true,
     stdio: ['ignore', logFd, logFd],
     env: { ...process.env, COPILOT_TOWN_PORT: String(PORT) },
-    shell: true,
     windowsHide: true,
   });
   child.unref();
