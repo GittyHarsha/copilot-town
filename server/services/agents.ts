@@ -104,14 +104,25 @@ const COPILOT_INDICATORS = [
   'Environment loaded:',
   'copilot --agent=',
   '⎇',
+  // Tool/action prompts (copilot is working but waiting for confirmation)
+  'Do you want to use this tool?',
+  "Yes, and don't ask again",
+  '↑↓ to navigate',
+  // Working indicators (spinners, progress)
+  'Copilot is using',
 ];
 
 function detectCopilotState(output: string): 'running' | 'idle' | null {
   if (!output) return null;
   const hasCopilot = COPILOT_INDICATORS.some(ind => output.includes(ind));
   if (!hasCopilot && !/claude[\s-]|gpt[\s-]|gemini[\s-]/i.test(output)) return null;
-  const hasPrompt = output.includes('❯') || output.includes('shift+tab switch mode');
-  return hasPrompt ? 'idle' : 'running';
+
+  // Idle = at prompt waiting for user input
+  const hasPrompt = output.includes('Type @ to mention') || output.includes('shift+tab switch mode');
+  if (hasPrompt) return 'idle';
+
+  // Running = copilot is actively working (tool dialogs, generating, etc.)
+  return 'running';
 }
 
 // ── Session ID & agent name extraction from pane output ───────────
