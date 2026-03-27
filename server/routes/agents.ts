@@ -10,19 +10,35 @@ const router = Router();
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
 
-// Update psmux_layout in agent-sessions.json when an agent is assigned to a pane
-function updatePaneMapping(agentName: string, paneTarget: string) {
+// Serialize read-modify-write to agent-sessions.json within this process
+function withSessionFile(fn: (data: any) => void): void {
   try {
     const raw = existsSync(SESSION_MAP_FILE)
       ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
       : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-    const layout = raw.psmux_layout || {};
+    fn(raw);
+    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+  } catch (e) {
+    console.error('agent-sessions.json write error:', e);
+  }
+}
 
-    // Parse target: "session:window.pane"
+function withSessionFileReturn<T>(fn: (data: any) => T): T {
+  const raw = existsSync(SESSION_MAP_FILE)
+    ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+    : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+  const result = fn(raw);
+  writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+  return result;
+}
+
+// Update psmux_layout in agent-sessions.json when an agent is assigned to a pane
+function updatePaneMapping(agentName: string, paneTarget: string) {
+  withSessionFile(raw => {
+    const layout = raw.psmux_layout || {};
     const [sessionName, wp] = paneTarget.split(':');
     if (!sessionName || !wp) return;
 
-    // Remove old mapping for this agent from all sessions
     for (const [sess, panes] of Object.entries(layout as Record<string, any>)) {
       if (sess.startsWith('_')) continue;
       for (const [key, name] of Object.entries(panes as Record<string, string>)) {
@@ -30,31 +46,22 @@ function updatePaneMapping(agentName: string, paneTarget: string) {
       }
     }
 
-    // Add new mapping
     if (!layout[sessionName]) layout[sessionName] = {};
     layout[sessionName][wp] = agentName;
     raw.psmux_layout = layout;
-
-    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-  } catch (e) {
-    console.error('Failed to update pane mapping:', e);
-  }
+  });
 }
 
 // Clear stoppedAt when an agent is resumed/started
 function clearStoppedAt(agentName: string) {
-  try {
-    const raw = existsSync(SESSION_MAP_FILE)
-      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+  withSessionFile(raw => {
     const agents = raw.agents || {};
     if (agents[agentName]) {
       delete agents[agentName].stoppedAt;
       agents[agentName].startedAt = new Date().toISOString();
       raw.agents = agents;
-      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
     }
-  } catch { /* ignore */ }
+  });
 }
 
 // Build message envelope with return-address metadata
@@ -176,10 +183,7 @@ router.post('/relay', (req, res) => {
 
 // Mark agent as stopped in agent-sessions.json
 function markStopped(agentName: string, sessionId?: string) {
-  try {
-    const raw = existsSync(SESSION_MAP_FILE)
-      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+  withSessionFile(raw => {
     const agents = raw.agents || {};
     const key = Object.keys(agents).find(k => {
       const v = agents[k];
@@ -188,30 +192,22 @@ function markStopped(agentName: string, sessionId?: string) {
     if (agents[key]) {
       agents[key].stoppedAt = new Date().toISOString();
       raw.agents = agents;
-      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
     }
-  } catch { /* ignore */ }
+  });
 }
 
 // Remove psmux_layout entry for an agent (prevents stale mapping after pane renumber)
 function removePaneMapping(agentName: string) {
-  try {
-    const raw = existsSync(SESSION_MAP_FILE)
-      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+  withSessionFile(raw => {
     const layout = raw.psmux_layout || {};
-    let changed = false;
     for (const [sess, panes] of Object.entries(layout as Record<string, any>)) {
       if (sess.startsWith('_')) continue;
       for (const [key, name] of Object.entries(panes as Record<string, string>)) {
-        if (name === agentName) { delete panes[key]; changed = true; }
+        if (name === agentName) delete panes[key];
       }
     }
-    if (changed) {
-      raw.psmux_layout = layout;
-      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-    }
-  } catch { /* ignore */ }
+    raw.psmux_layout = layout;
+  });
 }
 
 // Stop agent
@@ -340,36 +336,33 @@ router.put('/:id/settings', (req, res) => {
   const { name, description } = req.body as { name?: string; description?: string };
 
   try {
-    const raw = existsSync(SESSION_MAP_FILE)
-      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+    const result = withSessionFileReturn(raw => {
+      const agents = raw.agents || {};
 
-    const agents = raw.agents || {};
+      let key = Object.keys(agents).find(k => {
+        const v = agents[k];
+        return (v.session || v.sessionId || v.session_id) === agent.sessionId;
+      });
+      if (!key) key = agent.name;
 
-    // Find by session ID or name key
-    let key = Object.keys(agents).find(k => agents[k] === agent.sessionId);
-    if (!key) key = agent.name;
+      if (name && name !== key) {
+        const entry = agents[key];
+        delete agents[key];
+        agents[name] = entry;
+        key = name;
+      }
 
-    // If renaming, move the key
-    if (name && name !== key) {
-      const sid = agents[key];
-      delete agents[key];
-      agents[name] = sid;
-      key = name;
-    }
+      if (description !== undefined) {
+        if (!raw.metadata) raw.metadata = {};
+        raw.metadata[key] = { ...(raw.metadata[key] || {}), description };
+      }
 
-    // Store description in metadata section
-    if (description !== undefined) {
-      if (!raw.metadata) raw.metadata = {};
-      raw.metadata[key] = { ...(raw.metadata[key] || {}), description };
-    }
+      raw.agents = agents;
+      return { key, description: raw.metadata?.[key]?.description };
+    });
 
-    raw.agents = agents;
-    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-
-    // Re-read the agent to return updated data
     const updated = getAgent(req.params.id) || agent;
-    res.json({ ...updated, name: key, description: raw.metadata?.[key]?.description });
+    res.json({ ...updated, name: result.key, description: result.description });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to update settings' });
   }
@@ -381,19 +374,16 @@ router.delete('/:id/settings', (req, res) => {
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
   try {
-    const raw = existsSync(SESSION_MAP_FILE)
-      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-      : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-
-    const agents = raw.agents || {};
-    const key = Object.keys(agents).find(k => agents[k] === agent.sessionId) || agent.name;
-    delete agents[key];
-    raw.agents = agents;
-
-    // Clean up metadata
-    if (raw.metadata?.[key]) delete raw.metadata[key];
-
-    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    withSessionFile(raw => {
+      const agents = raw.agents || {};
+      const key = Object.keys(agents).find(k => {
+        const v = agents[k];
+        return (v.session || v.sessionId || v.session_id) === agent.sessionId;
+      }) || agent.name;
+      delete agents[key];
+      raw.agents = agents;
+      if (raw.metadata?.[key]) delete raw.metadata[key];
+    });
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to delete agent' });

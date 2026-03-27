@@ -133,7 +133,7 @@ export function listPanes(session?: string): PsmuxPane[] {
 
 export function capturePane(target: string, lines = 100, ansi = false): string {
   const flag = ansi ? '-e -p' : '-p';
-  return exec(`psmux capture-pane ${flag} -t "${target}" -S -${lines}`, true);
+  return exec(`psmux capture-pane ${flag} -t "${sanitizeTarget(target)}" -S -${lines}`, true);
 }
 
 export function getPaneDimensions(target: string): { width: number; height: number } | null {
@@ -146,17 +146,16 @@ export function getPaneDimensions(target: string): { width: number; height: numb
 // in ONE psmux command: 'line1' Enter 'line2' Enter 'line3'
 export function sendKeys(target: string, text: string, pressEnter = true): boolean {
   try {
+    const safeTarget = sanitizeTarget(target);
     const esc = (s: string) => s.replace(/'/g, "''");
 
     if (text.includes('\n')) {
-      // Multi-line: chain each line with Enter between them (Enter = newline in editor)
       const parts = text.split('\n').map(line => `'${esc(line)}'`).join(' Enter ');
       const enterArg = pressEnter ? ' Enter' : '';
-      exec(`psmux send-keys -t '${esc(target)}' ${parts}${enterArg}`);
+      exec(`psmux send-keys -t '${esc(safeTarget)}' ${parts}${enterArg}`);
     } else {
-      // Single-line: single-quoted (preserves key names like C-q, Enter)
       const enterArg = pressEnter ? ' Enter' : '';
-      exec(`psmux send-keys -t '${esc(target)}' '${esc(text)}'${enterArg}`);
+      exec(`psmux send-keys -t '${esc(safeTarget)}' '${esc(text)}'${enterArg}`);
     }
     return true;
   } catch {
@@ -167,7 +166,7 @@ export function sendKeys(target: string, text: string, pressEnter = true): boole
 // Send Escape key
 export function sendEscape(target: string): boolean {
   try {
-    exec(`psmux send-keys -t "${target}" Escape`);
+    exec(`psmux send-keys -t "${sanitizeTarget(target)}" Escape`);
     return true;
   } catch {
     return false;
@@ -176,7 +175,7 @@ export function sendEscape(target: string): boolean {
 
 export function createSession(name: string): boolean {
   try {
-    exec(`psmux new-session -d -s "${name}"`);
+    exec(`psmux new-session -d -s "${sanitizeName(name)}"`);
     return true;
   } catch {
     return false;
@@ -187,7 +186,7 @@ export function splitPane(sessionTarget: string, vertical = true): PsmuxPane | n
   try {
     const flag = vertical ? '-v' : '-h';
     // split-window creates a new pane; capture its info
-    exec(`psmux split-window ${flag} -t "${sessionTarget}"`);
+    exec(`psmux split-window ${flag} -t "${sanitizeTarget(sessionTarget)}"`);
     // New pane becomes the active pane — find it
     const panes = listPanes();
     // The newest pane in this session is the one just created (highest pane index)
@@ -205,7 +204,7 @@ export function splitPane(sessionTarget: string, vertical = true): PsmuxPane | n
 // Layouts: 'even-horizontal' (side by side), 'even-vertical' (stacked), 'tiled', 'main-horizontal', 'main-vertical'
 export function selectLayout(windowTarget: string, layout: string): boolean {
   try {
-    exec(`psmux select-layout -t "${windowTarget}" ${layout}`);
+    exec(`psmux select-layout -t "${sanitizeTarget(windowTarget)}" ${layout}`);
     return true;
   } catch {
     return false;
@@ -215,8 +214,8 @@ export function selectLayout(windowTarget: string, layout: string): boolean {
 // Create a new window in an existing session
 export function newWindow(session: string, name?: string): boolean {
   try {
-    const nameArg = name ? ` -n "${name}"` : '';
-    exec(`psmux new-window -t "${session}"${nameArg}`);
+    const nameArg = name ? ` -n "${sanitizeName(name)}"` : '';
+    exec(`psmux new-window -t "${sanitizeName(session)}"${nameArg}`);
     return true;
   } catch {
     return false;
