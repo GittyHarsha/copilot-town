@@ -151,12 +151,14 @@ rl.on('line', (line) => {
               },
               {
                 name: 'copilot_town_register',
-                description: 'Register this Copilot session as a named agent in Copilot Town so it appears in the dashboard',
+                description: 'Register this Copilot session as a named agent in Copilot Town so it appears in the dashboard. You MUST pass your own session_id — find it from your session-state folder path or COPILOT_SESSION_ID env var.',
                 inputSchema: {
                   type: 'object',
                   properties: {
-                    name: { type: 'string', description: 'Display name for this agent (optional — defaults to session-XXXXXXXX)' }
-                  }
+                    name: { type: 'string', description: 'Display name for this agent (optional — defaults to session-XXXXXXXX)' },
+                    session_id: { type: 'string', description: 'Your Copilot session ID (UUID). Required — look in your session-state path or COPILOT_SESSION_ID.' }
+                  },
+                  required: ['session_id']
                 }
               }
             ]
@@ -243,28 +245,15 @@ rl.on('line', (line) => {
             }) + '\n');
           });
         } else if (tool === 'copilot_town_register') {
-          const { name } = msg.params?.arguments || {};
+          const { name, session_id } = msg.params?.arguments || {};
 
-          // Try env var first, then fall back to most recently touched session-state dir
-          let sessionId = process.env.COPILOT_SESSION_ID;
-          if (!sessionId) {
-            try {
-              const stateDir = path.join(process.env.USERPROFILE || process.env.HOME || '', '.copilot', 'session-state');
-              if (fs.existsSync(stateDir)) {
-                const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                const entries = fs.readdirSync(stateDir)
-                  .filter(d => UUID_RE.test(d))
-                  .map(d => ({ id: d, mtime: fs.statSync(path.join(stateDir, d)).mtimeMs }))
-                  .sort((a, b) => b.mtime - a.mtime);
-                if (entries.length > 0) sessionId = entries[0].id;
-              }
-            } catch {}
-          }
+          // session_id is required — passed explicitly by the calling agent
+          let sessionId = session_id || process.env.COPILOT_SESSION_ID;
 
           if (!sessionId) {
             process.stdout.write(JSON.stringify({
               jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'No session ID found (COPILOT_SESSION_ID not set and no session-state dir found).' }] }
+              result: { content: [{ type: 'text', text: 'Missing session_id parameter. Pass your Copilot session UUID so we can register the correct session.' }] }
             }) + '\n');
           } else {
             const HOME = process.env.USERPROFILE || process.env.HOME || '';
