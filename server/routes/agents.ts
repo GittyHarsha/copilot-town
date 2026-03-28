@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { join } from 'path';
 import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates } from '../services/agents.js';
 import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
@@ -116,6 +117,83 @@ function isPaneFree(pane: { command: string; target: string }): boolean {
 
 router.get('/templates', (_req, res) => {
   res.json(loadAgentTemplates());
+});
+
+// ── Register (session-first, auto-detect pane via PID) ────────────
+
+router.post('/register', (_req, res) => {
+  const { name, session_id, ppid } = _req.body;
+  if (!session_id) return res.status(400).json({ error: 'session_id required' });
+
+  const agentName = (name && name.trim()) ? name.trim() : `session-${session_id.slice(0, 8)}`;
+
+  // 1. Write to agent-sessions.json
+  withSessionFile(raw => {
+    if (!raw.agents) raw.agents = {};
+
+    // Move if session exists under different name
+    const existingKey = Object.keys(raw.agents).find(k => {
+      const v = raw.agents[k];
+      return (v.session || v.sessionId || v.session_id) === session_id;
+    });
+    if (existingKey && existingKey !== agentName) {
+      const old = raw.agents[existingKey];
+      delete raw.agents[existingKey];
+      raw.agents[agentName] = old;
+      if (raw.metadata?.[existingKey]) {
+        if (!raw.metadata[agentName]) raw.metadata[agentName] = {};
+        Object.assign(raw.metadata[agentName], raw.metadata[existingKey]);
+        delete raw.metadata[existingKey];
+      }
+    }
+
+    const existing = raw.agents[agentName] || {};
+    raw.agents[agentName] = {
+      ...existing,
+      session: session_id,
+      startedAt: existing.startedAt || new Date().toISOString(),
+    };
+    delete raw.agents[agentName].stoppedAt;
+  });
+
+  // 2. Auto-detect pane via PID ancestry
+  //    MCP bridge sends ppid (= copilot CLI PID)
+  //    Walk up: copilot CLI → shell → pane_pid
+  let foundPane: string | null = null;
+  if (ppid) {
+    try {
+      const allPanes = listPanes();
+      const panePids = new Map(allPanes.map(p => [String(p.pid), p.target]));
+
+      // Check if copilot PID directly matches a pane PID
+      if (panePids.has(String(ppid))) {
+        foundPane = panePids.get(String(ppid))!;
+      } else {
+        // Walk up: get copilot's parent PID (should be the shell = pane_pid)
+        try {
+          const isWin = process.platform === 'win32';
+          const cmd = isWin
+            ? `powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${ppid}').ParentProcessId"`
+            : `ps -o ppid= -p ${ppid}`;
+          const result = execSync(cmd, { timeout: 3000, encoding: 'utf-8', windowsHide: true }).trim();
+          if (result && panePids.has(result)) {
+            foundPane = panePids.get(result)!;
+          }
+        } catch {}
+      }
+
+      if (foundPane) {
+        updatePaneMapping(agentName, foundPane);
+      }
+    } catch {}
+  }
+
+  res.json({
+    ok: true,
+    name: agentName,
+    sessionId: session_id,
+    pane: foundPane,
+  });
 });
 
 // ── Agent CRUD ────────────────────────────────────────────────────

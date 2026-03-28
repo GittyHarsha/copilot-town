@@ -407,57 +407,41 @@ rl.on('line', (line) => {
             .catch(() => replyError(msg.id, 'Hub server not running'));
         } else if (tool === 'copilot_town_register') {
           const { name, session_id } = msg.params?.arguments || {};
-
-          // session_id is required — passed explicitly by the calling agent
           let sessionId = session_id || process.env.COPILOT_SESSION_ID;
 
           if (!sessionId) {
-            process.stdout.write(JSON.stringify({
-              jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'Missing session_id parameter. Pass your Copilot session UUID so we can register the correct session.' }] }
-            }) + '\n');
+            reply(msg.id, 'Missing session_id parameter. Pass your Copilot session UUID so we can register the correct session.');
           } else {
-            const HOME = process.env.USERPROFILE || process.env.HOME || '';
-            const SESSION_FILE = path.join(HOME, '.copilot', 'agent-sessions.json');
             const agentName = (name && name.trim()) ? name.trim() : `session-${sessionId.slice(0, 8)}`;
-            try {
-              let data = { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-              if (fs.existsSync(SESSION_FILE)) {
-                data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
-              }
-              if (!data.agents) data.agents = {};
-
-              // If this session is already stored under a different key, move it
-              const existingKey = Object.keys(data.agents).find(k => {
-                const v = data.agents[k];
-                return (v.session || v.sessionId || v.session_id) === sessionId;
+            httpPost('/api/agents/register', { name: agentName, session_id: sessionId, ppid: process.ppid })
+              .then(data => {
+                if (data.error) return replyError(msg.id, data.error);
+                const paneMsg = data.pane ? ` (detected in pane ${data.pane})` : '';
+                reply(msg.id, `✅ Registered as "${data.name}" in Copilot Town${paneMsg}. Open the dashboard to see it.`);
+              })
+              .catch(() => {
+                // Fallback: write directly if server is down
+                const HOME = process.env.USERPROFILE || process.env.HOME || '';
+                const SESSION_FILE = path.join(HOME, '.copilot', 'agent-sessions.json');
+                try {
+                  let data = { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+                  if (fs.existsSync(SESSION_FILE)) {
+                    data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf-8'));
+                  }
+                  if (!data.agents) data.agents = {};
+                  const existing = data.agents[agentName] || {};
+                  data.agents[agentName] = {
+                    ...existing,
+                    session: sessionId,
+                    startedAt: existing.startedAt || new Date().toISOString(),
+                  };
+                  delete data.agents[agentName].stoppedAt;
+                  fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
+                  reply(msg.id, `✅ Registered as "${agentName}" (server offline, pane not auto-detected).`);
+                } catch (e) {
+                  replyError(msg.id, `Failed to register: ${e.message}`);
+                }
               });
-              if (existingKey && existingKey !== agentName) {
-                const old = data.agents[existingKey];
-                delete data.agents[existingKey];
-                data.agents[agentName] = old;
-              }
-
-              const existing = data.agents[agentName] || {};
-              data.agents[agentName] = {
-                ...existing,
-                session: sessionId,
-                startedAt: existing.startedAt || new Date().toISOString(),
-              };
-              // Remove stoppedAt in case session was previously marked stopped
-              delete data.agents[agentName].stoppedAt;
-
-              fs.writeFileSync(SESSION_FILE, JSON.stringify(data, null, 2));
-              process.stdout.write(JSON.stringify({
-                jsonrpc: '2.0', id: msg.id,
-                result: { content: [{ type: 'text', text: `✅ Registered as "${agentName}" in Copilot Town. Open the dashboard to see it.` }] }
-              }) + '\n');
-            } catch (e) {
-              process.stdout.write(JSON.stringify({
-                jsonrpc: '2.0', id: msg.id,
-                result: { content: [{ type: 'text', text: `Failed to register: ${e.message}` }] }
-              }) + '\n');
-            }
           }
         } else if (tool === 'copilot_town_status') {
           httpGet('/api/agents')
