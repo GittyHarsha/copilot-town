@@ -248,10 +248,11 @@ router.post('/:id/message', (req, res) => {
 async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: boolean; target: string; command: string }> {
   if (!agent || !agent.sessionId) return { ok: false, target: '', command: '' };
 
+  // Always create a fresh pane — never reuse, to avoid sending keys to wrong pane
   const provisionCfg: Partial<ProvisionConfig> = {};
-  const result = provisionPane(provisionCfg, isPaneFree);
+  const result = provisionPane(provisionCfg);
   const target = result.target;
-  if (result.created !== 'reused') await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 500));
 
   let meta: any = {};
   try {
