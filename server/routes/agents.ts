@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates } from '../services/agents.js';
-import { capturePane, sendKeys, listPanes, provisionPane, type ProvisionConfig } from '../services/psmux.js';
+import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
 
@@ -50,6 +50,12 @@ function updatePaneMapping(agentName: string, paneTarget: string) {
     layout[sessionName][wp] = agentName;
     raw.psmux_layout = layout;
   });
+
+  // Set the psmux window title to the agent name for easy identification
+  try {
+    const windowTarget = paneTarget.replace(/\.\d+$/, ''); // "town:0.1" → "town:0"
+    renameWindow(windowTarget, agentName);
+  } catch {}
 }
 
 // Clear stoppedAt when an agent is resumed/started
@@ -543,6 +549,12 @@ router.post('/spawn', async (req, res) => {
       if (!raw.psmux_layout[sn]) raw.psmux_layout[sn] = {};
       raw.psmux_layout[sn][wp] = name;
     });
+
+    // Title the psmux window to the agent name
+    try {
+      const windowTarget = pane.target.replace(/\.\d+$/, '');
+      renameWindow(windowTarget, name);
+    } catch {}
 
     pushEvent({ type: 'spawn', agentName: name, detail: `Spawned in ${pane.target} with: ${cmd}` });
     res.json({ ok: true, name, pane: pane.target, command: cmd });

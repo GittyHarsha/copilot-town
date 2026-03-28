@@ -16,7 +16,7 @@ import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
 import notesRoutes from './routes/notes.js';
 import { getAllAgents, refreshAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
-import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary } from './services/psmux.js';
+import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary, renameWindow } from './services/psmux.js';
 import { invalidateSessionCache } from './services/sessions.js';
 import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
@@ -112,8 +112,26 @@ async function buildAndBroadcast() {
     for (const client of wssStatus.clients) {
       if (client.readyState === WebSocket.OPEN) client.send(payload);
     }
+
+    // Auto-title psmux windows to match agent names
+    syncPaneTitles(cachedAgents);
   } catch (err) {
     console.error('Status broadcast error:', err);
+  }
+}
+
+// Track which windows we've already titled to avoid repeated calls
+const titledWindows = new Map<string, string>(); // windowTarget → agentName
+
+function syncPaneTitles(agents: typeof cachedAgents) {
+  for (const agent of agents) {
+    if (!agent.pane?.target || agent.status === 'stopped') continue;
+    const windowTarget = agent.pane.target.replace(/\.\d+$/, ''); // "town:0.1" → "town:0"
+    if (titledWindows.get(windowTarget) === agent.name) continue; // already set
+    try {
+      renameWindow(windowTarget, agent.name);
+      titledWindows.set(windowTarget, agent.name);
+    } catch {}
   }
 }
 
