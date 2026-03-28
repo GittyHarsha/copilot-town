@@ -445,4 +445,110 @@ router.delete('/:id/settings', (req, res) => {
   }
 });
 
+// ── Task status (in-memory) ─────────────────────────────────────
+// Lightweight "what am I working on" — stored in memory, shown on dashboard
+const agentTasks = new Map<string, { task: string; updatedAt: string }>();
+
+router.post('/:id/task', (req, res) => {
+  const { task } = req.body;
+  if (!task) return res.status(400).json({ error: 'task string required' });
+  const agent = getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+  agentTasks.set(agent.id, { task, updatedAt: new Date().toISOString() });
+  pushEvent({ type: 'task', agentName: agent.name, detail: task });
+  res.json({ ok: true, agent: agent.name, task });
+});
+
+router.get('/:id/task', (req, res) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  const entry = agentTasks.get(agent.id);
+  res.json(entry || { task: null });
+});
+
+export function getAgentTask(idOrName: string): string | null {
+  return agentTasks.get(idOrName)?.task || null;
+}
+
+export function getAllAgentTasks(): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [id, entry] of agentTasks) result[id] = entry.task;
+  return result;
+}
+
+// ── Broadcast (relay to ALL agents) ─────────────────────────────
+router.post('/broadcast', (req, res) => {
+  const { from, message } = req.body;
+  if (!from || !message) return res.status(400).json({ error: 'from and message required' });
+
+  const sender = getAgent(from);
+  if (!sender) return res.status(404).json({ error: `Sender "${from}" not found` });
+
+  const agents = getAllAgents().filter(a => a.name !== sender.name && a.pane);
+  const delivered: string[] = [];
+  const failed: string[] = [];
+
+  for (const agent of agents) {
+    try {
+      const formatted = `[broadcast from ${sender.name}]: ${message}`;
+      sendKeys(agent.pane!.target, formatted, true);
+      recordRelay(sender.name, agent.name, message);
+      delivered.push(agent.name);
+    } catch {
+      failed.push(agent.name);
+    }
+  }
+
+  pushEvent({ type: 'broadcast', agentName: sender.name, detail: `→ ${delivered.length} agents: ${message.slice(0, 100)}` });
+  res.json({ ok: true, delivered, failed, total: agents.length });
+});
+
+// ── Spawn (create new agent in a new pane) ──────────────────────
+router.post('/spawn', async (req, res) => {
+  const { name, template, model, flags, session: sessionName } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+
+  // Provision a pane
+  const psmuxSession = sessionName || 'town';
+  const config: ProvisionConfig = { session: psmuxSession };
+
+  try {
+    const pane = provisionPane(config);
+    if (!pane?.target) return res.status(500).json({ error: 'Failed to provision pane' });
+
+    // Build copilot command
+    const parts = ['copilot'];
+    if (template) parts.push(`--agent=${template}`);
+    if (model) parts.push(`--model=${model}`);
+    if (flags && Array.isArray(flags)) {
+      for (const f of flags) parts.push(f);
+    }
+    const cmd = parts.join(' ');
+
+    // Small delay for pane to initialize
+    await new Promise(r => setTimeout(r, 500));
+    sendKeys(pane.target, cmd, true);
+
+    // Register in agent-sessions.json
+    withSessionFile(raw => {
+      if (!raw.agents) raw.agents = {};
+      raw.agents[name] = {
+        session: '',   // will be filled by session hook or register tool
+        startedAt: new Date().toISOString(),
+      };
+      // Track pane layout
+      if (!raw.psmux_layout) raw.psmux_layout = {};
+      const [sn, wp] = pane.target.split(':');
+      if (!raw.psmux_layout[sn]) raw.psmux_layout[sn] = {};
+      raw.psmux_layout[sn][wp] = name;
+    });
+
+    pushEvent({ type: 'spawn', agentName: name, detail: `Spawned in ${pane.target} with: ${cmd}` });
+    res.json({ ok: true, name, pane: pane.target, command: cmd });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to spawn agent' });
+  }
+});
+
 export default router;

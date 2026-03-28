@@ -101,6 +101,73 @@ const rl = readline.createInterface({ input: process.stdin });
 // Fire and forget — don't block MCP handshake
 ensureServer().catch(() => {});
 
+// ── HTTP helpers for tool handlers ──────────────────────────────
+const http = require('http');
+
+function httpGet(urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get(`http://localhost:${PORT}${urlPath}`, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(data); }
+      });
+    }).on('error', reject);
+  });
+}
+
+function httpPost(urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify(body);
+    const req = http.request({
+      hostname: 'localhost', port: PORT, path: urlPath,
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(data); }
+      });
+    });
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+function httpPut(urlPath, body) {
+  return new Promise((resolve, reject) => {
+    const putData = JSON.stringify(body);
+    const req = http.request({
+      hostname: 'localhost', port: PORT, path: urlPath,
+      method: 'PUT', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(putData) }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { resolve(data); }
+      });
+    });
+    req.on('error', reject);
+    req.write(putData);
+    req.end();
+  });
+}
+
+function reply(id, text) {
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0', id,
+    result: { content: [{ type: 'text', text }] }
+  }) + '\n');
+}
+
+function replyError(id, text) {
+  process.stdout.write(JSON.stringify({
+    jsonrpc: '2.0', id,
+    result: { content: [{ type: 'text', text: `❌ ${text}` }] }
+  }) + '\n');
+}
+
 rl.on('line', (line) => {
     try {
       const msg = JSON.parse(line);
@@ -160,6 +227,128 @@ rl.on('line', (line) => {
                   },
                   required: ['session_id']
                 }
+              },
+              {
+                name: 'copilot_town_whoami',
+                description: 'Get your own agent identity — name, session ID, pane, status. Pass your session_id so the server can find you.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    session_id: { type: 'string', description: 'Your Copilot session ID (UUID).' }
+                  },
+                  required: ['session_id']
+                }
+              },
+              {
+                name: 'copilot_town_get_agent',
+                description: 'Get details of a specific agent by name or ID — status, pane, template, metadata.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name or session ID' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_set_status',
+                description: 'Set your current task/status text so other agents and the dashboard can see what you are working on.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Your agent name or ID' },
+                    task: { type: 'string', description: 'What you are currently working on (short text)' }
+                  },
+                  required: ['agent', 'task']
+                }
+              },
+              {
+                name: 'copilot_town_broadcast',
+                description: 'Send a message to ALL other agents at once.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    from: { type: 'string', description: 'Your agent name' },
+                    message: { type: 'string', description: 'Message to broadcast' }
+                  },
+                  required: ['from', 'message']
+                }
+              },
+              {
+                name: 'copilot_town_read_output',
+                description: 'Read the last N lines of another agent\'s terminal output without messaging them.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name or ID to read from' },
+                    lines: { type: 'number', description: 'Number of lines to read (default: 50)' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_set_meta',
+                description: 'Update your own agent metadata — description, model, flags, template.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Your agent name or ID' },
+                    description: { type: 'string', description: 'Agent description' },
+                    model: { type: 'string', description: 'Model to use (e.g., claude-sonnet-4)' },
+                    template: { type: 'string', description: 'Agent template name' },
+                    flags: { type: 'array', items: { type: 'string' }, description: 'CLI flags (e.g., ["--yolo"])' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_spawn',
+                description: 'Spawn a new agent in a new terminal pane. Creates a pane and starts a copilot session.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', description: 'Name for the new agent' },
+                    template: { type: 'string', description: 'Agent template to use (optional)' },
+                    model: { type: 'string', description: 'Model to use (optional)' },
+                    flags: { type: 'array', items: { type: 'string' }, description: 'CLI flags (optional)' },
+                    session: { type: 'string', description: 'psmux session name (default: town)' }
+                  },
+                  required: ['name']
+                }
+              },
+              {
+                name: 'copilot_town_stop_agent',
+                description: 'Stop another agent by name or ID.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name or ID to stop' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_share_note',
+                description: 'Share a note with the team — a key-value pair that any agent can read. Use for sharing decisions, API interfaces, file locations, etc.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    key: { type: 'string', description: 'Note key (e.g., "auth-api", "db-schema")' },
+                    value: { type: 'string', description: 'Note content (text/markdown)' },
+                    author: { type: 'string', description: 'Your agent name' }
+                  },
+                  required: ['key', 'value']
+                }
+              },
+              {
+                name: 'copilot_town_get_notes',
+                description: 'Read shared notes from the team. Call with no key to get all notes, or with a key to get a specific one.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    key: { type: 'string', description: 'Note key to read (optional — omit for all notes)' }
+                  }
+                }
               }
             ]
           }
@@ -187,63 +376,18 @@ rl.on('line', (line) => {
           }) + '\n');
         } else if (tool === 'copilot_town_relay') {
           const { from, to, message } = msg.params?.arguments || {};
-          const postData = JSON.stringify({ from, to, message });
-          const http = require('http');
-          const req = http.request({
-            hostname: 'localhost', port: PORT, path: '/api/agents/relay',
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) }
-          }, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-              try {
-                const result = JSON.parse(data);
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: result.message || `Relayed message from ${from} to ${to}` }] }
-                }) + '\n');
-              } catch {
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: data || 'Relay sent' }] }
-                }) + '\n');
-              }
-            });
-          });
-          req.on('error', () => {
-            process.stdout.write(JSON.stringify({
-              jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
-            }) + '\n');
-          });
-          req.write(postData);
-          req.end();
+          httpPost('/api/agents/relay', { from, to, message })
+            .then(result => reply(msg.id, result.message || `Relayed message from ${from} to ${to}`))
+            .catch(() => replyError(msg.id, 'Hub server not running'));
         } else if (tool === 'copilot_town_list_templates') {
-          const http = require('http');
-          http.get(`http://localhost:${PORT}/api/templates`, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-              try {
-                const templates = JSON.parse(data);
-                const summary = templates.map(t => `${t.name}: ${t.description || 'No description'}`).join('\n');
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: summary || 'No templates found' }] }
-                }) + '\n');
-              } catch {
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: 'Hub server not responding' }] }
-                }) + '\n');
-              }
-            });
-          }).on('error', () => {
-            process.stdout.write(JSON.stringify({
-              jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
-            }) + '\n');
-          });
+          httpGet('/api/templates')
+            .then(templates => {
+              const summary = Array.isArray(templates)
+                ? templates.map(t => `${t.name}: ${t.description || 'No description'}`).join('\n')
+                : 'No templates found';
+              reply(msg.id, summary || 'No templates found');
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
         } else if (tool === 'copilot_town_register') {
           const { name, session_id } = msg.params?.arguments || {};
 
@@ -299,32 +443,131 @@ rl.on('line', (line) => {
             }
           }
         } else if (tool === 'copilot_town_status') {
-          // Fetch from local API
-          const http = require('http');
-          http.get(`http://localhost:${PORT}/api/agents`, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-              try {
-                const agents = JSON.parse(data);
-                const summary = agents.map(a => `${a.name}: ${a.status}`).join('\n');
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: summary || 'No agents found' }] }
-                }) + '\n');
-              } catch {
-                process.stdout.write(JSON.stringify({
-                  jsonrpc: '2.0', id: msg.id,
-                  result: { content: [{ type: 'text', text: 'Hub server not responding' }] }
-                }) + '\n');
+          httpGet('/api/agents')
+            .then(agents => {
+              const summary = Array.isArray(agents)
+                ? agents.map(a => `${a.name}: ${a.status}${a.task ? ` (${a.task})` : ''}`).join('\n')
+                : 'No agents found';
+              reply(msg.id, summary || 'No agents found');
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        // ── New tools ────────────────────────────────────────────
+
+        } else if (tool === 'copilot_town_whoami') {
+          const { session_id } = msg.params?.arguments || {};
+          if (!session_id) return replyError(msg.id, 'session_id required');
+          httpGet('/api/agents')
+            .then(agents => {
+              if (!Array.isArray(agents)) return replyError(msg.id, 'Hub server not responding');
+              const me = agents.find(a => a.id === session_id || a.sessionId === session_id);
+              if (!me) return reply(msg.id, `No agent found for session ${session_id}. You may need to register first.`);
+              reply(msg.id, JSON.stringify({ name: me.name, id: me.id, status: me.status, pane: me.pane?.target || null, template: me.template?.name || null }, null, 2));
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_get_agent') {
+          const { agent } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name or ID required');
+          httpGet(`/api/agents/${encodeURIComponent(agent)}`)
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, JSON.stringify(data, null, 2));
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_set_status') {
+          const { agent, task } = msg.params?.arguments || {};
+          if (!agent || !task) return replyError(msg.id, 'agent and task required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/task`, { task })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `✅ Status set: "${task}"`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_broadcast') {
+          const { from, message } = msg.params?.arguments || {};
+          if (!from || !message) return replyError(msg.id, 'from and message required');
+          httpPost('/api/agents/broadcast', { from, message })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `📢 Broadcast sent to ${data.delivered?.length || 0} agents: ${(data.delivered || []).join(', ') || 'none'}${data.failed?.length ? ` (failed: ${data.failed.join(', ')})` : ''}`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_read_output') {
+          const { agent, lines } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name or ID required');
+          const n = lines || 50;
+          httpGet(`/api/agents/${encodeURIComponent(agent)}/output?lines=${n}`)
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, data.output || '(empty output)');
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_set_meta') {
+          const { agent, description, model, template, flags } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name or ID required');
+          const body = {};
+          if (description !== undefined) body.description = description;
+          if (model !== undefined) body.model = model;
+          if (template !== undefined) body.template = template;
+          if (flags !== undefined) body.flags = flags;
+          httpPut(`/api/agents/${encodeURIComponent(agent)}/settings`, body)
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `✅ Metadata updated for ${agent}`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_spawn') {
+          const { name, template, model, flags, session } = msg.params?.arguments || {};
+          if (!name) return replyError(msg.id, 'name required');
+          httpPost('/api/agents/spawn', { name, template, model, flags, session })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `✅ Spawned "${name}" in pane ${data.pane}\nCommand: ${data.command}`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_stop_agent') {
+          const { agent } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name or ID required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/stop`, {})
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `✅ Stopped agent "${agent}"`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_share_note') {
+          const { key, value, author } = msg.params?.arguments || {};
+          if (!key || !value) return replyError(msg.id, 'key and value required');
+          httpPost('/api/notes', { key, value, author })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `📝 Note "${key}" shared with the team`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_get_notes') {
+          const { key } = msg.params?.arguments || {};
+          const urlPath = key ? `/api/notes/${encodeURIComponent(key)}` : '/api/notes';
+          httpGet(urlPath)
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              if (key) {
+                reply(msg.id, `📝 ${key}:\n${data.value}\n(by ${data.author}, ${data.updatedAt})`);
+              } else {
+                const entries = Object.entries(data);
+                if (entries.length === 0) return reply(msg.id, 'No shared notes yet.');
+                const summary = entries.map(([k, v]) => `• ${k}: ${v.value.slice(0, 100)}${v.value.length > 100 ? '...' : ''} (by ${v.author})`).join('\n');
+                reply(msg.id, `📝 Shared notes (${entries.length}):\n${summary}`);
               }
-            });
-          }).on('error', () => {
-            process.stdout.write(JSON.stringify({
-              jsonrpc: '2.0', id: msg.id,
-              result: { content: [{ type: 'text', text: 'Hub server not running' }] }
-            }) + '\n');
-          });
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
         }
       } else if (msg.method === 'notifications/initialized') {
         // No response needed

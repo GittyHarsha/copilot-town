@@ -14,11 +14,13 @@ import relayRoutes from './routes/relays.js';
 import eventRoutes from './routes/events.js';
 import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
+import notesRoutes from './routes/notes.js';
 import { getAllAgents, refreshAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
 import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary } from './services/psmux.js';
 import { invalidateSessionCache } from './services/sessions.js';
 import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
+import { getAllAgentTasks } from './routes/agents.js';
 
 const app = express();
 const PORT = 3848;
@@ -36,6 +38,7 @@ app.use('/api/relays', relayRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/status-history', statusHistoryRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/notes', notesRoutes);
 
 app.get('/api/templates', (_req, res) => {
   res.json(loadAgentTemplates());
@@ -88,6 +91,7 @@ async function buildAndBroadcast() {
     cachedAgents = await refreshAgents();
     // listPanes result is cached in psmux.ts — cheap to call again
     cachedPanes = listPanes();
+    const tasks = getAllAgentTasks();
     const payload = JSON.stringify({
       type: 'status',
       timestamp: new Date().toISOString(),
@@ -96,6 +100,7 @@ async function buildAndBroadcast() {
         name: a.name,
         status: a.status,
         pane: a.pane ? a.pane.target : null,
+        task: tasks[a.id] || null,
       })),
       psmux: {
         totalPanes: cachedPanes.length,
