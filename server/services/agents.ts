@@ -160,6 +160,7 @@ interface SessionMapEntry {
   displayName?: string;
   startedAt?: string;
   stoppedAt?: string;
+  panePid?: number;
 }
 
 // ── Consolidated session file reader (single read, three views) ────
@@ -167,6 +168,7 @@ interface SessionFileData {
   sessionMap: Map<string, SessionMapEntry>;
   nameToSessionId: Map<string, string>;
   paneLayout: Map<string, string>;
+  nameToPanePid: Map<string, number>;
 }
 
 let _sessionFileCache: SessionFileData | null = null;
@@ -182,10 +184,11 @@ function loadSessionFile(): SessionFileData {
   const sessionMap = new Map<string, SessionMapEntry>();
   const nameToSessionId = new Map<string, string>();
   const paneLayout = new Map<string, string>();
+  const nameToPanePid = new Map<string, number>();
 
   try {
     if (!existsSync(SESSION_MAP_FILE)) {
-      _sessionFileCache = { sessionMap, nameToSessionId, paneLayout };
+      _sessionFileCache = { sessionMap, nameToSessionId, paneLayout, nameToPanePid };
       _sessionFileCacheTime = now;
       return _sessionFileCache;
     }
@@ -202,8 +205,10 @@ function loadSessionFile(): SessionFileData {
           displayName: data.displayName || data.display_name,
           startedAt: data.startedAt,
           stoppedAt: data.stoppedAt,
+          panePid: data.panePid,
         });
         nameToSessionId.set(name, sessionId);
+        if (data.panePid) nameToPanePid.set(name, data.panePid);
       }
     }
 
@@ -216,7 +221,7 @@ function loadSessionFile(): SessionFileData {
     }
   } catch { /* ignore */ }
 
-  _sessionFileCache = { sessionMap, nameToSessionId, paneLayout };
+  _sessionFileCache = { sessionMap, nameToSessionId, paneLayout, nameToPanePid };
   _sessionFileCacheTime = now;
   return _sessionFileCache;
 }
@@ -346,8 +351,14 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   const templateMap = new Map<string, AgentTemplate>();
   for (const t of templates) templateMap.set(t.name, t);
 
-  const { sessionMap, nameToSessionId, paneLayout } = loadSessionFile();
+  const { sessionMap, nameToSessionId, paneLayout, nameToPanePid } = loadSessionFile();
   const allPanes = listPanes();
+
+  // Build PID → pane target lookup for reliable matching
+  const pidToPane = new Map<number, PsmuxPane>();
+  for (const pane of allPanes) {
+    if (pane.pid) pidToPane.set(pane.pid, pane);
+  }
 
   const agents: Agent[] = [];
   const seenSessionIds = new Set<string>();
@@ -360,23 +371,27 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
 
     let { agentName, sessionId, state } = info;
 
-    // Strategy A: Use psmux_layout mapping (most reliable — set by resume/start)
-    const layoutName = paneLayout.get(pane.target);
-    if (layoutName) agentName = layoutName; // layout always wins over regex extraction
+    // Strategy A (PRIMARY): Match by stored pane PID — survives pane renumbering
+    let pidMatchedName: string | null = null;
+    for (const [name, pid] of nameToPanePid) {
+      if (pid === pane.pid) { pidMatchedName = name; break; }
+    }
+    if (pidMatchedName) agentName = pidMatchedName;
 
-    // Strategy B: Resolve session ID from agent-sessions.json by name
+    // Strategy B: Use psmux_layout mapping (fallback — can go stale on renumber)
+    if (!pidMatchedName) {
+      const layoutName = paneLayout.get(pane.target);
+      if (layoutName) agentName = layoutName;
+    }
+
+    // Strategy C: Resolve session ID from agent-sessions.json by name
     if (!sessionId && agentName) {
       sessionId = nameToSessionId.get(agentName) || null;
     }
 
-    // Strategy C: If psmux_layout gave us a name, find the session ID
-    if (!sessionId && layoutName) {
-      sessionId = nameToSessionId.get(layoutName) || null;
-    }
-
     // Strategy D: Match by agent name across all registered entries
     if (!sessionId) {
-      const nameToMatch = agentName || layoutName;
+      const nameToMatch = agentName;
       if (nameToMatch) {
         for (const [sid, entry] of sessionMap) {
           if (entry.agentName === nameToMatch || entry.displayName === nameToMatch) {
@@ -405,12 +420,28 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   }
 
   // Phase 2: Known sessions from agent-sessions.json not in any pane
-  // Use lock files to determine real status: inuse.<PID>.lock in session-state dir
+  // Try PID matching first, then fall back to lock file status
   for (const [sessionId, entry] of sessionMap) {
     if (seenSessionIds.has(sessionId)) continue;
 
     const template = templateMap.get(entry.agentName);
     const name = entry.displayName || template?.name || entry.agentName || sessionId.slice(0, 8);
+
+    // Try to find pane by stored PID
+    let matchedPane: PsmuxPane | undefined;
+    if (entry.panePid) {
+      matchedPane = pidToPane.get(entry.panePid);
+      if (matchedPane && !seenPanes.has(matchedPane.target)) {
+        // Found pane by PID — check if copilot is running in it
+        const info = paneData.get(matchedPane.target);
+        if (info) {
+          agents.push({ id: sessionId, name, template, status: info.state, pane: matchedPane, sessionId });
+          seenSessionIds.add(sessionId);
+          seenPanes.add(matchedPane.target);
+          continue;
+        }
+      }
+    }
 
     let status: AgentStatus;
     if (entry.stoppedAt) {

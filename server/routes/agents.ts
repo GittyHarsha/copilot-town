@@ -184,6 +184,15 @@ router.post('/register', (_req, res) => {
 
       if (foundPane) {
         updatePaneMapping(agentName, foundPane);
+        // Store pane PID for reliable matching (survives pane renumbering)
+        const matchedPane = allPanes.find(p => p.target === foundPane);
+        if (matchedPane) {
+          withSessionFile(raw => {
+            if (raw.agents?.[agentName]) {
+              raw.agents[agentName].panePid = matchedPane.pid;
+            }
+          });
+        }
       }
     } catch {}
   }
@@ -276,6 +285,16 @@ async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: bo
   if (ok) {
     updatePaneMapping(agent.name, target);
     clearStoppedAt(agent.name);
+    // Store pane PID for reliable matching
+    const panes = listPanes();
+    const matchedPane = panes.find(p => p.target === target);
+    if (matchedPane) {
+      withSessionFile(raw => {
+        if (raw.agents?.[agent.name]) {
+          raw.agents[agent.name].panePid = matchedPane.pid;
+        }
+      });
+    }
   }
   return { ok, target, command: cmd };
 }
