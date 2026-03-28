@@ -349,6 +349,19 @@ rl.on('line', (line) => {
                     key: { type: 'string', description: 'Note key to read (optional — omit for all notes)' }
                   }
                 }
+              },
+              {
+                name: 'copilot_town_wake',
+                description: 'Wake up a stopped agent and optionally send it an initial message. Resumes the agent\'s previous session in a new pane, then relays a message so it knows why it was woken.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name or ID to wake up' },
+                    message: { type: 'string', description: 'Message to send after the agent starts (optional — tells it why it was woken)' },
+                    from: { type: 'string', description: 'Your agent name (for the message attribution)' }
+                  },
+                  required: ['agent']
+                }
               }
             ]
           }
@@ -549,6 +562,27 @@ rl.on('line', (line) => {
             .then(data => {
               if (data.error) return replyError(msg.id, data.error);
               reply(msg.id, `📝 Note "${key}" shared with the team`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_wake') {
+          const { agent, message, from } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name or ID required');
+          // Step 1: Resume the agent (provisions pane + starts copilot --resume)
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/resume`, {})
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              const pane = data.target || 'unknown';
+              // Step 2: If a message was provided, relay it after a brief delay
+              if (message && from) {
+                setTimeout(() => {
+                  httpPost('/api/agents/relay', { from, to: agent, message })
+                    .then(() => reply(msg.id, `⏰ Woke "${agent}" in pane ${pane} and sent: "${message}"`))
+                    .catch(() => reply(msg.id, `⏰ Woke "${agent}" in pane ${pane} but message relay failed (agent may still be booting)`));
+                }, 5000); // wait 5s for copilot session to initialize
+              } else {
+                reply(msg.id, `⏰ Woke "${agent}" in pane ${pane}\nSession: ${data.sessionId || 'unknown'}\nCommand: ${data.command || 'copilot'}`);
+              }
             })
             .catch(() => replyError(msg.id, 'Hub server not running'));
 
