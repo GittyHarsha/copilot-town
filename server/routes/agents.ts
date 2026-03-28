@@ -223,8 +223,16 @@ router.post('/relay', async (req, res) => {
     woke = true;
     wakeTarget = resumed.target;
     pushEvent('agent_resumed', `Auto-woke ${receiver.name} for relay from ${sender?.name || from}`, 'info', receiver.name);
-    // Wait for copilot to boot before sending message
-    await new Promise(r => setTimeout(r, 5000));
+    // Poll until copilot prompt is ready (up to 30s)
+    const readyTarget = wakeTarget;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const output = capturePane(readyTarget, 5);
+        // Copilot shows this line when ready for input
+        if (output.includes('switch mode') || output.includes('for shortcuts') || output.includes('for commands')) break;
+      } catch {}
+    }
   }
 
   const target = wakeTarget || receiver.pane?.target;

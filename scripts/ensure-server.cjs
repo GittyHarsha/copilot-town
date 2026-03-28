@@ -572,23 +572,23 @@ rl.on('line', (line) => {
         } else if (tool === 'copilot_town_wake') {
           const { agent, message, from } = msg.params?.arguments || {};
           if (!agent) return replyError(msg.id, 'agent name or ID required');
-          // Step 1: Resume the agent (provisions pane + starts copilot --resume)
-          httpPost(`/api/agents/${encodeURIComponent(agent)}/resume`, {})
-            .then(data => {
-              if (data.error) return replyError(msg.id, data.error);
-              const pane = data.target || 'unknown';
-              // Step 2: If a message was provided, relay it after a brief delay
-              if (message && from) {
-                setTimeout(() => {
-                  httpPost('/api/agents/relay', { from, to: agent, message })
-                    .then(() => reply(msg.id, `⏰ Woke "${agent}" in pane ${pane} and sent: "${message}"`))
-                    .catch(() => reply(msg.id, `⏰ Woke "${agent}" in pane ${pane} but message relay failed (agent may still be booting)`));
-                }, 5000); // wait 5s for copilot session to initialize
-              } else {
-                reply(msg.id, `⏰ Woke "${agent}" in pane ${pane}\nSession: ${data.sessionId || 'unknown'}\nCommand: ${data.command || 'copilot'}`);
-              }
-            })
-            .catch(() => replyError(msg.id, 'Hub server not running'));
+          if (message && from) {
+            // Use relay which auto-wakes + polls for prompt readiness
+            httpPost('/api/agents/relay', { from, to: agent, message })
+              .then(data => {
+                if (data.error) return replyError(msg.id, data.error);
+                reply(msg.id, `⏰ Woke "${agent}" in pane ${data.target} and sent: "${message}"`);
+              })
+              .catch(() => replyError(msg.id, 'Hub server not running'));
+          } else {
+            // Just resume, no message
+            httpPost(`/api/agents/${encodeURIComponent(agent)}/resume`, {})
+              .then(data => {
+                if (data.error) return replyError(msg.id, data.error);
+                reply(msg.id, `⏰ Woke "${agent}" in pane ${data.target || 'unknown'}\nSession: ${data.sessionId || 'unknown'}\nCommand: ${data.command || 'copilot'}`);
+              })
+              .catch(() => replyError(msg.id, 'Hub server not running'));
+          }
 
         } else if (tool === 'copilot_town_get_notes') {
           const { key } = msg.params?.arguments || {};
