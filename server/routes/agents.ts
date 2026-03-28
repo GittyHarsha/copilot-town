@@ -168,28 +168,80 @@ router.post('/:id/message', (req, res) => {
   res.json({ success: ok, target, message });
 });
 
+// ── Reusable resume helper (used by relay auto-wake and resume endpoint) ────
+async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: boolean; target: string; command: string }> {
+  if (!agent || !agent.sessionId) return { ok: false, target: '', command: '' };
+
+  const provisionCfg: Partial<ProvisionConfig> = {};
+  const result = provisionPane(provisionCfg, isPaneFree);
+  const target = result.target;
+  if (result.created !== 'reused') await new Promise(r => setTimeout(r, 500));
+
+  let meta: any = {};
+  try {
+    if (existsSync(SESSION_MAP_FILE)) {
+      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      meta = raw.metadata?.[agent.name] || {};
+    }
+  } catch {}
+
+  const agentFlag = meta.template || agent.template?.name;
+  const parts = ['copilot'];
+  if (agentFlag) parts.push(`--agent=${agentFlag}`);
+  parts.push(`--resume=${agent.sessionId}`);
+  const model = meta.model;
+  if (model) parts.push(`--model=${model}`);
+  const flags = meta.flags || [];
+  for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
+  const cmd = parts.join(' ');
+
+  const ok = sendToPane(target, cmd);
+  if (ok) {
+    updatePaneMapping(agent.name, target);
+    clearStoppedAt(agent.name);
+  }
+  return { ok, target, command: cmd };
+}
+
 // Agent-to-agent relay: auto-resolves panes, wraps return address
-router.post('/relay', (req, res) => {
+// If target agent is stopped/idle with no pane, auto-wakes it first
+router.post('/relay', async (req, res) => {
   const { from, to, message } = req.body;
   if (!from || !to || !message) {
     return res.status(400).json({ error: 'from, to, and message required' });
   }
 
   const sender = getAgent(from);
-  const receiver = getAgent(to);
+  let receiver = getAgent(to);
   if (!receiver) return res.status(404).json({ error: `Agent "${to}" not found` });
-  if (!receiver.pane) return res.status(400).json({ error: `Agent "${to}" has no active pane` });
+
+  let woke = false;
+  let wakeTarget: string | null = null;
+
+  // Auto-wake: if receiver has no pane but has a session ID, resume it
+  if (!receiver.pane && receiver.sessionId) {
+    const resumed = await resumeAgent(receiver);
+    if (!resumed.ok) return res.status(500).json({ error: `Failed to wake agent "${to}"` });
+    woke = true;
+    wakeTarget = resumed.target;
+    pushEvent('agent_resumed', `Auto-woke ${receiver.name} for relay from ${sender?.name || from}`, 'info', receiver.name);
+    // Wait for copilot to boot before sending message
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  const target = wakeTarget || receiver.pane?.target;
+  if (!target) return res.status(400).json({ error: `Agent "${to}" has no active pane` });
 
   const envelope = wrapEnvelope(from, to, message);
-  const target = receiver.pane.target;
   const ok = sendToPane(target, envelope, true);
-  if (ok) pushEvent('relay', `Relay from ${sender?.name || from} → ${receiver.name}`, 'info', receiver.name);
+  if (ok) pushEvent('relay', `Relay from ${sender?.name || from} → ${receiver.name}${woke ? ' (auto-woke)' : ''}`, 'info', receiver.name);
   recordRelay(sender?.name || from, receiver.name, message);
   res.json({
     success: ok,
     from: sender?.name || from,
     to: receiver.name,
     target,
+    woke,
     senderPane: sender?.pane?.target || 'unknown',
     senderSession: sender?.id || 'unknown',
   });

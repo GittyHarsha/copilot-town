@@ -390,7 +390,11 @@ rl.on('line', (line) => {
         } else if (tool === 'copilot_town_relay') {
           const { from, to, message } = msg.params?.arguments || {};
           httpPost('/api/agents/relay', { from, to, message })
-            .then(result => reply(msg.id, result.message || `Relayed message from ${from} to ${to}`))
+            .then(result => {
+              if (result.error) return replyError(msg.id, result.error);
+              const wokeMsg = result.woke ? ' (auto-woke agent first)' : '';
+              reply(msg.id, `Relayed message from ${result.from} to ${result.to}${wokeMsg}`);
+            })
             .catch(() => replyError(msg.id, 'Hub server not running'));
         } else if (tool === 'copilot_town_list_templates') {
           httpGet('/api/templates')
