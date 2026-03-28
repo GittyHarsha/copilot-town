@@ -73,14 +73,12 @@ function clearStoppedAt(agentName: string) {
 // Build message envelope with return-address metadata
 function wrapEnvelope(from: string, to: string, message: string): string {
   const sender = getAgent(from);
-  const senderPane = sender?.pane?.target || '?';
-  const senderSid = sender?.id?.slice(0, 8) || '?';
   const senderName = sender?.name || from;
 
   return [
-    `[relay from=${senderName} pane=${senderPane} sid=${senderSid}]`,
+    `[relay from=${senderName}]`,
     message,
-    `[reply with: relay_message(to="${senderName}", message="...")]`,
+    `[reply with: relay(from=YOUR_NAME, to="${senderName}", message="...")]`,
   ].join('\n');
 }
 

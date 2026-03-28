@@ -462,7 +462,9 @@ export async function refreshAgents(): Promise<Agent[]> {
 
 export function getAgent(idOrName: string): Agent | undefined {
   const agents = getAllAgents();
-  return agents.find(a => a.id === idOrName) || agents.find(a => a.name === idOrName);
+  return agents.find(a => a.id === idOrName)
+    || agents.find(a => a.name === idOrName)
+    || agents.find(a => a.id.startsWith(idOrName)); // partial session ID match
 }
 
 export function getAgentMdContent(templateName: string): string | null {
