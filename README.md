@@ -13,10 +13,11 @@ Run a fleet of specialized Copilot agents that discover each other, relay messag
 One Copilot session is powerful. A **team** of them is unstoppable.
 
 - 🧠 **Specialized agents** — A docs expert, a test writer, a code reviewer — each with domain knowledge via `.agent.md` templates
-- 🔄 **Inter-agent messaging** — Agents relay messages to each other through the hub
+- 🔄 **Inter-agent messaging** — Agents relay messages to each other through the hub, with auto-wake for stopped agents
 - 🏗️ **Session-first model** — Every Copilot CLI session is an agent. Templates are optional roles. Zero config to start
-- 📡 **MCP-powered** — 5 tools (`copilot_town_status`, `copilot_town_relay`, etc.) let any agent programmatically query and talk to others
+- 📡 **MCP-powered** — 16 tools let any agent programmatically query, talk to, spawn, and manage others
 - 🪟 **psmux orchestration** — Auto-provision terminal panes, manage windows, launch agents from the dashboard
+- 🏷️ **Auto-titling** — psmux windows automatically show agent names
 
 ## Features
 
@@ -36,25 +37,25 @@ One Copilot session is powerful. A **team** of them is unstoppable.
 
 ```powershell
 # Install the plugin
-copilot plugin install harshanp_microsoft/copilot-town
-
-# Start the server yourself (no Copilot session needed):
-.\start.ps1              # starts server + opens dashboard
-.\start.ps1 -NoBrowser   # starts server only
-.\stop.ps1               # stops the server
-
-# Or via npm:
-npm start                # foreground
-npm run start:bg         # background (silent)
-npm run stop             # stop background server
+copilot plugin install GittyHarsha/copilot-town
 ```
 
-The server also auto-starts when Copilot loads the MCP plugin, but you don't need to burn an LLM call for that — just run the script.
+The server **auto-starts** when Copilot loads the plugin — no manual setup needed.
 
-From any copilot session, use the MCP tools:
+To start the server manually (no Copilot session required):
+```powershell
+# After first plugin load, a global launcher is created at ~/.copilot/
+~/.copilot/copilot-town start     # start server (background)
+~/.copilot/copilot-town stop      # stop server
+~/.copilot/copilot-town status    # check if running
+~/.copilot/copilot-town open      # open dashboard in browser
+```
+
+From any Copilot session, use natural language — the MCP tools are invoked automatically:
 - `"open copilot town"` → opens dashboard
 - `"show agent status"` → lists all agents
 - `"relay a message to X"` → sends message to another agent
+- `"spawn a new agent called researcher"` → creates agent in new pane
 
 ## How It Works
 
@@ -70,7 +71,7 @@ From any copilot session, use the MCP tools:
 
 1. **Agents launch** in psmux panes (manually, or auto-provisioned from the dashboard)
 2. **Auto-discovery** — the hub scans all psmux panes for Copilot CLI indicators, detecting status in real time
-3. **Relay messaging** — agents send messages through the hub via HTTP API or MCP tools
+3. **Relay messaging** — agents send messages through the hub via HTTP API or MCP tools. If the target is stopped, it's auto-woken first
 4. **Observe & orchestrate** — the dashboard shows live status, or use MCP tools programmatically
 
 ### Agent Lifecycle
@@ -85,15 +86,26 @@ Detection uses a multi-strategy approach: lock files (`inuse.<PID>.lock`), pane 
 
 ## MCP Tools
 
-Every Copilot session with the plugin installed gets these tools automatically:
+Every Copilot session with the plugin installed gets these 16 tools automatically:
 
 | Tool | Description |
 |------|-------------|
 | `copilot_town_open` | Open the dashboard in your browser |
 | `copilot_town_status` | Get status of all agents |
-| `copilot_town_relay` | Send a message from one agent to another |
+| `copilot_town_relay` | Send a message between agents (auto-wakes stopped targets) |
 | `copilot_town_list_templates` | List available `.agent.md` templates |
-| `copilot_town_register` | Register current session as a named agent |
+| `copilot_town_register` | Register current session as a named agent (auto-detects pane via PID) |
+| `copilot_town_whoami` | Get your own agent identity — name, session ID, pane, status |
+| `copilot_town_get_agent` | Get details of a specific agent by name or ID |
+| `copilot_town_set_status` | Set your current task/status text (visible to other agents and dashboard) |
+| `copilot_town_broadcast` | Send a message to ALL other agents at once |
+| `copilot_town_read_output` | Read the last N lines of another agent's terminal output |
+| `copilot_town_set_meta` | Update your agent metadata — description, model, flags, template |
+| `copilot_town_spawn` | Spawn a new agent in a new terminal pane |
+| `copilot_town_stop_agent` | Stop another agent by name or ID |
+| `copilot_town_share_note` | Share a key-value note with the team (any agent can read it) |
+| `copilot_town_get_notes` | Read shared notes from the team |
+| `copilot_town_wake` | Wake a stopped agent and optionally send a message |
 
 ## Pane Management
 
@@ -111,12 +123,12 @@ Create · Rename · Kill · Add windows
 ## Install
 
 ```powershell
-copilot plugin install harshanp_microsoft/copilot-town
+copilot plugin install GittyHarsha/copilot-town
 ```
 
 Or from source:
 ```powershell
-git clone https://github.com/harshanp_microsoft/copilot-town.git
+git clone https://github.com/GittyHarsha/copilot-town.git
 cd copilot-town
 npm install
 cd client && npm install && npx vite build
@@ -152,8 +164,9 @@ copilot-town/
 ├── .mcp.json                # MCP server config → runs ensure-server.cjs
 ├── hooks.json               # sessionStart/sessionEnd lifecycle hooks
 ├── scripts/
-│   ├── ensure-server.cjs    # MCP bridge + silent server auto-launcher
-│   └── session-hook.cjs     # Auto-registers sessions to agent-sessions.json
+│   ├── ensure-server.cjs    # MCP bridge (16 tools) + silent server auto-launcher
+│   ├── session-hook.cjs     # Auto-registers sessions + creates global launcher
+│   └── copilot-town.ps1     # CLI wrapper for start/stop/open/status
 ├── server/
 │   ├── index.ts             # Express + dual WebSocket (status + terminal)
 │   ├── routes/              # REST API (agents, psmux, relays, sessions, config, …)
@@ -169,6 +182,9 @@ copilot-town/
 **Key design decisions:**
 - **Session-first identity** — `agent.id` = Copilot session UUID. Templates are optional roles, not identities
 - **Silent server** — `ensure-server.cjs` spawns the server with `detached: false` on Windows (no console flash) and responds to MCP `initialize` immediately (no blocking)
+- **Auto-wake relay** — when relaying to a stopped agent, the hub auto-resumes it in a new pane, polls for copilot prompt readiness, then delivers the message
+- **PID-based pane detection** — on register, the MCP bridge sends `process.ppid` and the server walks the process tree to match against pane PIDs (cross-platform: Win32_Process on Windows, `ps -o ppid` on Unix)
+- **Auto-titling** — psmux windows are automatically renamed to match agent names on spawn, resume, and periodic sync
 - **Pane layout tracking** — `psmux_layout` in `agent-sessions.json` maps pane targets to agent names, surviving pane renumbering
 - **Lock file detection** — checks `inuse.<PID>.lock` files with `process.kill(pid, 0)` for reliable stopped-state detection
 
@@ -180,12 +196,19 @@ The server exposes a REST API at `http://localhost:3848/api/`:
 |----------|-------------|
 | `GET /agents` | List all agents with status |
 | `GET /agents/:id` | Agent details |
+| `PUT /agents/:id` | Update agent metadata (name, description, model, flags) |
 | `GET /agents/:id/output` | Capture pane output |
-| `POST /agents/relay` | Relay message between agents |
+| `POST /agents/relay` | Relay message between agents (auto-wakes stopped targets) |
+| `POST /agents/register` | Register a session as an agent (with PID-based pane detection) |
 | `POST /agents/:id/stop` | Stop agent |
 | `POST /agents/:id/resume` | Resume agent (auto-provisions pane) |
 | `POST /agents/:id/start` | Start from template |
+| `POST /agents/:id/task` | Set agent task/status text |
+| `POST /agents/broadcast` | Send message to all agents |
+| `POST /agents/spawn` | Spawn a new agent in a new pane |
 | `GET /agents/templates` | List `.agent.md` templates |
+| `GET /notes` | Read shared notes |
+| `POST /notes` | Share a note (key-value) |
 | `GET /conversations` | List sessions (supports `?q=` FTS) |
 | `GET /conversations/:id` | Conversation turns |
 | `GET /psmux/sessions` | List psmux sessions |
