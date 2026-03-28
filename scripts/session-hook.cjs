@@ -53,6 +53,23 @@ function ensureLaunchers() {
   }
 }
 
+// ── Register with server for PID-based pane detection ──────────────
+// Fire-and-forget HTTP POST — if server is down, silently skip.
+function tryServerRegister(agentName, sid) {
+  try {
+    const http = require('http');
+    const port = process.env.COPILOT_TOWN_PORT || 3848;
+    const body = JSON.stringify({ name: agentName, session_id: sid, ppid: process.ppid });
+    const req = http.request({
+      hostname: '127.0.0.1', port, path: '/api/agents/register',
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      timeout: 2000,
+    });
+    req.on('error', () => {}); // silent
+    req.end(body);
+  } catch {}
+}
+
 try {
   let data = { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
   if (fs.existsSync(SESSION_FILE)) {
@@ -70,6 +87,8 @@ try {
     };
     // Create global launchers on every session start (idempotent, updates path if plugin moved)
     ensureLaunchers();
+    // Try to register with server for PID-based pane detection + auto-titling
+    tryServerRegister(name, sessionId);
   } else if (hookType === 'sessionEnd') {
     if (data.agents[name]) {
       data.agents[name].stoppedAt = new Date().toISOString();
