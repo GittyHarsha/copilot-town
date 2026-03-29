@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import type { AgentData, AgentTemplate } from '../lib/api';
-import { MODELS, MODEL_IDS } from '../lib/models';
+import { fetchModels, type ModelInfo } from '../lib/models';
 
 interface Props {
   agent: AgentData;
@@ -26,6 +26,7 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
   const [customFlags, setCustomFlags] = useState('');
   const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>([]);
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -34,7 +35,8 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
     Promise.all([
       api.getAgent(agent.id),
       api.getTemplates(),
-    ]).then(([detail, tmpl]) => {
+      fetchModels(),
+    ]).then(([detail, tmpl, mdls]) => {
       const d = detail as any;
       setDescription(d.description || agent.template?.description || '');
       setTemplate(d.template || agent.template?.name || '');
@@ -44,6 +46,7 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
         setEnvVars(Object.entries(d.envVars).map(([key, value]) => ({ key, value: value as string })));
       }
       setTemplates(tmpl);
+      setModels(mdls);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [agent.id]);
 
@@ -140,10 +143,10 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
               <select className="flex-1 bg-bg-1 border border-border rounded px-3 py-1.5 text-sm text-fg outline-none focus:border-blue"
                 value={model} onChange={e => setModel(e.target.value)}>
                 <option value="">Default</option>
-                {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                {models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <input className="w-40 bg-bg-1 border border-border rounded px-3 py-1.5 text-xs text-fg outline-none focus:border-blue"
-                placeholder="Custom model…" value={MODEL_IDS.includes(model) ? '' : model}
+                placeholder="Custom model…" value={models.some(m => m.value === model) ? '' : model}
                 onChange={e => setModel(e.target.value)} />
             </div>
           </div>

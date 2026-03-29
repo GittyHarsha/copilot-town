@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MODELS as ALL_MODELS } from '../lib/models';
+import { fetchModels, type ModelInfo } from '../lib/models';
 
 export interface LaunchConfig {
   model: string;
@@ -31,11 +31,6 @@ const DEFAULT_CONFIG: LaunchConfig = {
   extraFlags: '',
 };
 
-const MODELS = [
-  { value: '', label: 'Default' },
-  ...ALL_MODELS,
-];
-
 interface Props {
   agentName: string;
   sessionId?: string;
@@ -45,6 +40,12 @@ interface Props {
 }
 
 export function LaunchConfigPanel({ agentName, sessionId, isResume, onLaunch, onCancel }: Props) {
+  const [models, setModels] = useState<ModelInfo[]>([]);
+
+  useEffect(() => {
+    fetchModels().then(setModels).catch(() => {});
+  }, []);
+
   const [config, setConfig] = useState<LaunchConfig>(() => {
     try {
       const saved = localStorage.getItem(`agent-config:${agentName}`);
@@ -107,7 +108,8 @@ export function LaunchConfigPanel({ agentName, sessionId, isResume, onLaunch, on
           <div>
             <label className="block text-[11px] text-fg-2 mb-1">Model</label>
             <select className={inputCls} value={config.model} onChange={e => set('model', e.target.value)}>
-              {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <option value="">Default</option>
+              {models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
 

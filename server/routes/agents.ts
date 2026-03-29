@@ -634,7 +634,7 @@ router.post('/:id/task', (req, res) => {
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
   agentTasks.set(agent.id, { task, updatedAt: new Date().toISOString() });
-  pushEvent({ type: 'task', agentName: agent.name, detail: task });
+  pushEvent('task', `${agent.name}: ${task}`, 'info', agent.name);
   res.json({ ok: true, agent: agent.name, task });
 });
 
@@ -678,7 +678,7 @@ router.post('/broadcast', (req, res) => {
     }
   }
 
-  pushEvent({ type: 'broadcast', agentName: sender.name, detail: `→ ${delivered.length} agents: ${message.slice(0, 100)}` });
+  pushEvent('broadcast', `${sender.name} → ${delivered.length} agents: ${message.slice(0, 100)}`, 'info', sender.name);
   res.json({ ok: true, delivered, failed, total: agents.length });
 });
 
@@ -689,7 +689,7 @@ router.post('/spawn', async (req, res) => {
 
   // Provision a pane
   const psmuxSession = sessionName || 'town';
-  const config: ProvisionConfig = { session: psmuxSession };
+  const config: Partial<ProvisionConfig> = { defaultSession: psmuxSession };
 
   try {
     const pane = provisionPane(config, isPaneFree);
@@ -739,7 +739,7 @@ router.post('/spawn', async (req, res) => {
       renameWindow(windowTarget, name);
     } catch {}
 
-    pushEvent({ type: 'spawn', agentName: name, detail: `Spawned in ${pane.target} with: ${cmd}` });
+    pushEvent('spawn', `Spawned ${name} in ${pane.target} with: ${cmd}`, 'info', name);
     res.json({ ok: true, name, pane: pane.target, command: cmd });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to spawn agent' });

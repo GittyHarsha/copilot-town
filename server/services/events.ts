@@ -8,7 +8,10 @@ export type EventType =
   | 'pane_killed'
   | 'error'
   | 'health_warning'
-  | 'status_change';
+  | 'status_change'
+  | 'task'
+  | 'broadcast'
+  | 'spawn';
 
 export type Severity = 'info' | 'warn' | 'error';
 

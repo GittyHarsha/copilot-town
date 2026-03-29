@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import matter from 'gray-matter';
 import { listPanes, capturePane, capturePaneAsync, type PsmuxPane } from './psmux.js';
 import { trackStatusChanges } from './statusHistory.js';
+import { listCopilotSessions, getCopilotSession, type CopilotSessionInfo } from './copilot-sdk.js';
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const USER_AGENTS_DIR = process.env.COPILOT_TOWN_USER_AGENTS_DIR || join(HOME, '.copilot', 'agents');
@@ -58,6 +59,11 @@ export interface Agent {
   status: AgentStatus;
   pane?: PsmuxPane;
   sessionId: string;       // same as id, but explicit
+  // Enriched from @github/copilot-sdk
+  summary?: string;
+  context?: { cwd: string; gitRoot: string; repository: string; branch: string };
+  modifiedTime?: string;
+  startTime?: string;
 }
 
 // ── Template loading ──────────────────────────────────────────────
@@ -534,6 +540,24 @@ let _agentListCache: Agent[] = [];
 let _agentListCacheTime = 0;
 let _refreshInProgress = false;
 
+/** Enrich agent list with metadata from @github/copilot-sdk */
+async function enrichWithSdk(agents: Agent[]): Promise<void> {
+  try {
+    await listCopilotSessions(); // warm the cache
+    for (const agent of agents) {
+      const sdkSession = getCopilotSession(agent.id);
+      if (sdkSession) {
+        agent.summary = sdkSession.summary;
+        agent.context = sdkSession.context;
+        agent.modifiedTime = sdkSession.modifiedTime;
+        agent.startTime = sdkSession.startTime;
+      }
+    }
+  } catch {
+    // SDK enrichment is best-effort — don't break agent list
+  }
+}
+
 /** Returns cached agent list instantly. Never blocks on pane capture. */
 export function getAllAgents(): Agent[] {
   // Clean stale data once on first call
@@ -556,6 +580,7 @@ export async function refreshAgents(): Promise<Agent[]> {
     const allPanes = listPanes();
     const paneData = await scanPanesAsync(allPanes);
     _agentListCache = buildAgentList(paneData);
+    await enrichWithSdk(_agentListCache);
     _agentListCacheTime = Date.now();
     return _agentListCache;
   } finally {

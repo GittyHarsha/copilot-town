@@ -1,11 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api, type AgentData, type AgentTemplate } from '../lib/api';
-import { MODELS as ALL_MODELS } from '../lib/models';
-
-const MODELS = [
-  { value: '', label: 'Default (copilot default)' },
-  ...ALL_MODELS,
-];
+import { fetchModels, type ModelInfo } from '../lib/models';
 
 interface Props {
   open: boolean;
@@ -18,6 +13,7 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
   const [stoppedAgents, setStoppedAgents] = useState<AgentData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [models, setModels] = useState<ModelInfo[]>([]);
 
   // Form state
   const [template, setTemplate] = useState('');
@@ -29,13 +25,14 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
   const [yolo, setYolo] = useState(false);
   const [customFlags, setCustomFlags] = useState('');
 
-  // Fetch templates and stopped agents when dialog opens
+  // Fetch templates, stopped agents, and dynamic models when dialog opens
   useEffect(() => {
     if (!open) return;
     api.getTemplates().then(setTemplates).catch(() => {});
     api.getAgents().then(agents => {
       setStoppedAgents(agents.filter(a => a.status === 'stopped'));
     }).catch(() => {});
+    fetchModels().then(setModels).catch(() => {});
   }, [open]);
 
   // Reset form on open
@@ -149,7 +146,8 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
           <div>
             <label className={labelCls}>Model</label>
             <select className={inputCls} value={model} onChange={e => setModel(e.target.value)}>
-              {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              <option value="">Default (copilot default)</option>
+              {models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </div>
 

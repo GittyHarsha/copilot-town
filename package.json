@@ -15,6 +15,7 @@
     "stop": "powershell -ExecutionPolicy Bypass -File stop.ps1"
   },
   "dependencies": {
+    "@github/copilot-sdk": "^0.2.0",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",

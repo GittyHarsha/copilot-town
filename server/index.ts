@@ -21,6 +21,7 @@ import { invalidateSessionCache } from './services/sessions.js';
 import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
 import { getAllAgentTasks } from './routes/agents.js';
+import { listCopilotModels, listCopilotSessions, stopClient } from './services/copilot-sdk.js';
 
 const app = express();
 const PORT = 3848;
@@ -55,6 +56,31 @@ app.get('/api/health', (_req, res) => {
       binary: getMuxBinary(),
     },
   });
+});
+
+// Dynamic models from @github/copilot-sdk
+app.get('/api/models', async (_req, res) => {
+  try {
+    const models = await listCopilotModels();
+    res.json(models);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to fetch models' });
+  }
+});
+
+// SDK sessions — full list with metadata
+app.get('/api/copilot-sessions', async (req, res) => {
+  try {
+    const sessions = await listCopilotSessions();
+    const limit = parseInt(req.query.limit as string) || 50;
+    // Return most recently modified first, limited
+    const sorted = [...sessions].sort((a, b) =>
+      new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime()
+    );
+    res.json(sorted.slice(0, limit));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to fetch sessions' });
+  }
 });
 
 // Serve built frontend if available (single-server mode)
@@ -334,4 +360,14 @@ server.listen(PORT, () => {
   }
   console.log('');
   startHealthMonitor();
+});
+
+// Graceful shutdown — stop SDK client
+process.on('SIGINT', async () => {
+  await stopClient();
+  process.exit(0);
+});
+process.on('SIGTERM', async () => {
+  await stopClient();
+  process.exit(0);
 });
