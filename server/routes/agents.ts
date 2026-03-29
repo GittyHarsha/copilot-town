@@ -211,19 +211,20 @@ router.post('/register', (_req, res) => {
 // List all agents
 router.get('/', (_req, res) => {
   const agents = getAllAgents();
-  // Merge metadata into each agent
+  const tasks = getAllAgentTasks();
+  // Merge metadata + task into each agent
   try {
     if (existsSync(SESSION_MAP_FILE)) {
       const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
       const metadata = raw.metadata || {};
       const enriched = agents.map(a => {
         const meta = metadata[a.name] || {};
-        return { ...a, ...meta };
+        return { ...a, ...meta, task: tasks[a.id] || null };
       });
       return res.json(enriched);
     }
   } catch {}
-  res.json(agents);
+  res.json(agents.map(a => ({ ...a, task: tasks[a.id] || null })));
 });
 
 // Get single agent detail (by session ID or name)
@@ -239,7 +240,8 @@ router.get('/:id', (req, res) => {
       meta = raw.metadata?.[agent.name] || {};
     }
   } catch {}
-  res.json({ ...agent, ...meta, mdContent, meta });
+  const task = getAgentTask(agent.id);
+  res.json({ ...agent, ...meta, mdContent, meta, task });
 });
 
 // Get agent's pane output
