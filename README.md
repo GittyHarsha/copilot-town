@@ -42,18 +42,21 @@ copilot plugin install GittyHarsha/copilot-town
 
 The server **auto-starts** when Copilot loads the plugin — no manual setup needed.
 
-To start the server manually (no Copilot session required), run the script from the plugin's `scripts/` directory:
+To start the server manually (no Copilot session required):
 ```powershell
-# Windows (PowerShell)
-& "~/.copilot/installed-plugins/_direct/GittyHarsha--copilot-town/scripts/copilot-town.ps1" start
+# After first Copilot session, a launcher is created automatically:
+~\.copilot\copilot-town.cmd start    # start | stop | status | open
 
-# All commands: start | stop | status | open
+# Or run the script directly from the plugin directory:
+# (path depends on how the plugin was installed)
+copilot plugin list   # confirm copilot-town is installed
 ```
 
-> **Tip:** Add an alias to your PowerShell profile for convenience:
+> **Tip:** The plugin ships `scripts/copilot-town.ps1` which handles start/stop/status/open.
+> Add an alias to your PowerShell profile for convenience:
 > ```powershell
-> Set-Alias copilot-town "~/.copilot/installed-plugins/_direct/GittyHarsha--copilot-town/scripts/copilot-town.ps1"
-> # Then just: copilot-town start
+> # Find your plugin path first, then:
+> Set-Alias copilot-town "<plugin-path>/scripts/copilot-town.ps1"
 > ```
 
 From any Copilot session, use natural language — the MCP tools are invoked automatically:
