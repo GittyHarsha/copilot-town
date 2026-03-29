@@ -229,17 +229,36 @@ export function createSession(name: string): boolean {
 export function splitPane(sessionTarget: string, vertical = true): PsmuxPane | null {
   try {
     const flag = vertical ? '-v' : '-h';
-    // split-window creates a new pane; capture its info
-    exec(`psmux split-window ${flag} -t "${sanitizeTarget(sessionTarget)}"`);
-    // Invalidate cache so listPanes returns fresh data including the new pane
+    // Use -P -F to have psmux directly print the new pane's info
+    const format = '#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_pid}|#{pane_active}|#{pane_width}|#{pane_height}|#{window_name}';
+    const raw = exec(`psmux split-window ${flag} -t "${sanitizeTarget(sessionTarget)}" -P -F "${format}"`);
     invalidatePaneCache();
-    const panes = listPanes();
-    // The newest pane in this session is the one just created (highest pane index)
-    const session = sessionTarget.split(':')[0];
-    const sessionPanes = panes.filter(p => p.sessionName === session);
-    if (sessionPanes.length === 0) return null;
-    // Return the pane with highest index (just created)
-    return sessionPanes.reduce((a, b) => a.paneIndex > b.paneIndex ? a : b);
+
+    if (!raw || !raw.trim()) {
+      // Fallback: if -P -F didn't return output, scan panes
+      const panes = listPanes();
+      const session = sessionTarget.split(':')[0];
+      const sessionPanes = panes.filter(p => p.sessionName === session);
+      if (sessionPanes.length === 0) return null;
+      return sessionPanes.reduce((a, b) => a.paneIndex > b.paneIndex ? a : b);
+    }
+
+    // Parse the new pane's info directly from split-window output
+    const [sessionName, windowIndex, paneIndex, command, pid, active, width, height, windowName] = raw.trim().split('|');
+    const wi = parseInt(windowIndex) || 0;
+    const pi = parseInt(paneIndex) || 0;
+    return {
+      sessionName,
+      windowIndex: wi,
+      paneIndex: pi,
+      command,
+      pid: parseInt(pid) || 0,
+      active: active === '1',
+      width: parseInt(width) || 0,
+      height: parseInt(height) || 0,
+      target: `${sessionName}:${wi}.${pi}`,
+      windowName: windowName || '',
+    };
   } catch {
     return null;
   }
@@ -256,15 +275,32 @@ export function selectLayout(windowTarget: string, layout: string): boolean {
   }
 }
 
-// Create a new window in an existing session
-export function newWindow(session: string, name?: string): boolean {
+// Create a new window in an existing session — returns the new pane or null
+export function newWindow(session: string, name?: string): PsmuxPane | null {
   try {
     const nameArg = name ? ` -n "${sanitizeName(name)}"` : '';
-    exec(`psmux new-window -t "${sanitizeName(session)}"${nameArg}`);
+    const format = '#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_pid}|#{pane_active}|#{pane_width}|#{pane_height}|#{window_name}';
+    const raw = exec(`psmux new-window -t "${sanitizeName(session)}"${nameArg} -P -F "${format}"`);
     invalidatePaneCache();
-    return true;
+
+    if (!raw || !raw.trim()) return null;
+    const [sessionName, windowIndex, paneIndex, command, pid, active, width, height, windowName] = raw.trim().split('|');
+    const wi = parseInt(windowIndex) || 0;
+    const pi = parseInt(paneIndex) || 0;
+    return {
+      sessionName,
+      windowIndex: wi,
+      paneIndex: pi,
+      command,
+      pid: parseInt(pid) || 0,
+      active: active === '1',
+      width: parseInt(width) || 0,
+      height: parseInt(height) || 0,
+      target: `${sessionName}:${wi}.${pi}`,
+      windowName: windowName || '',
+    };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -451,20 +487,9 @@ export function provisionPane(
 
     // 3) All windows full → create new window in preferred session
     const preferredSession = sessions.find(s => s.name === cfg.defaultSession) || sessions[0];
-    if (newWindow(preferredSession.name)) {
-      // New window comes with 1 free pane — find it
-      const updatedPanes = listPanes(preferredSession.name);
-      const newWinPanes = updatedPanes.filter(p =>
-        !allPanes.some(old => old.target === p.target)
-      );
-      if (newWinPanes.length > 0) {
-        return { target: newWinPanes[0].target, created: 'new-window' };
-      }
-      // Fallback: highest window index pane
-      const highest = updatedPanes.reduce((a, b) =>
-        a.windowIndex > b.windowIndex ? a : (a.windowIndex === b.windowIndex && a.paneIndex > b.paneIndex ? a : b)
-      );
-      return { target: highest.target, created: 'new-window' };
+    const newWinPane = newWindow(preferredSession.name);
+    if (newWinPane) {
+      return { target: newWinPane.target, created: 'new-window' };
     }
   }
 
