@@ -72,19 +72,43 @@ function InlineEdit({ value, onSave, placeholder, multiline }: {
 // ── General section ───────────────────────────────────────────────
 function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: Config) => void }) {
   const [saving, setSaving] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const latestConfig = useRef(config);
+  latestConfig.current = config;
 
-  const save = useCallback(async (updates: Partial<Config>) => {
-    setSaving(true);
-    try {
-      const updated = await api.updateConfig(updates);
-      setConfig(updated);
-    } catch { /* ignore */ }
-    setSaving(false);
+  // Debounced auto-save: persists 400ms after last change
+  const debouncedSave = useCallback((updates: Partial<Config>) => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        const updated = await api.updateConfig(updates);
+        setConfig(updated);
+      } catch { /* ignore */ }
+      setSaving(false);
+    }, 400);
   }, [setConfig]);
+
+  // Flush pending save on unmount / page unload
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        // Fire-and-forget save with latest config
+        api.updateConfig(latestConfig.current).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      flush();
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
 
   return (
     <section className="space-y-3">
       <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">General</h2>
+      {saving && <span className="text-[10px] text-blue animate-pulse">Saving…</span>}
       <div className="grid grid-cols-[180px_1fr] gap-y-2.5 gap-x-4 items-center text-xs">
         <label className="text-fg-2">Hub Port</label>
         <input
@@ -94,8 +118,8 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
           onChange={e => {
             const v = parseInt(e.target.value) || 3848;
             setConfig({ ...config, port: v });
+            debouncedSave({ port: v });
           }}
-          onBlur={() => save({ port: config.port })}
         />
 
         <label className="text-fg-2">Default psmux session</label>
@@ -103,8 +127,10 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
           type="text"
           className="bg-bg-2 border border-border rounded px-2 py-1 text-xs text-fg w-40"
           value={config.defaultSession}
-          onChange={e => setConfig({ ...config, defaultSession: e.target.value })}
-          onBlur={() => save({ defaultSession: config.defaultSession })}
+          onChange={e => {
+            setConfig({ ...config, defaultSession: e.target.value });
+            debouncedSave({ defaultSession: e.target.value });
+          }}
         />
 
         <label className="text-fg-2">Max panes per window</label>
@@ -117,8 +143,8 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
           onChange={e => {
             const v = parseInt(e.target.value) || 4;
             setConfig({ ...config, maxPanesPerWindow: v });
+            debouncedSave({ maxPanesPerWindow: v });
           }}
-          onBlur={() => save({ maxPanesPerWindow: config.maxPanesPerWindow })}
         />
 
         <label className="text-fg-2">Auto-open browser on start</label>
@@ -127,7 +153,7 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
           onClick={() => {
             const next = !config.autoOpenBrowser;
             setConfig({ ...config, autoOpenBrowser: next });
-            save({ autoOpenBrowser: next });
+            debouncedSave({ autoOpenBrowser: next });
           }}
           aria-pressed={config.autoOpenBrowser}
           disabled={saving}
