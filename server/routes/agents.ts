@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates } from '../services/agents.js';
+import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates, cleanSessionFile } from '../services/agents.js';
 import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
@@ -742,6 +742,30 @@ router.post('/spawn', async (req, res) => {
     res.json({ ok: true, name, pane: pane.target, command: cmd });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to spawn agent' });
+  }
+});
+
+// ── Prune stale entries from agent-sessions.json ─────────────────
+router.post('/prune', (_req, res) => {
+  try {
+    // Read before
+    const beforeRaw = existsSync(SESSION_MAP_FILE)
+      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+      : { agents: {} };
+    const beforeCount = Object.keys(beforeRaw.agents || {}).length;
+
+    // Force re-cleanup
+    cleanSessionFile(true);
+
+    const afterRaw = existsSync(SESSION_MAP_FILE)
+      ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+      : { agents: {} };
+    const afterCount = Object.keys(afterRaw.agents || {}).length;
+    const removed = beforeCount - afterCount;
+
+    res.json({ ok: true, before: beforeCount, after: afterCount, removed });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

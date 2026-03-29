@@ -46,6 +46,7 @@ export interface PsmuxPane {
   width: number;
   height: number;
   target: string; // "session:window.pane"
+  windowName: string;
 }
 
 const IS_WIN = process.platform === 'win32';
@@ -125,11 +126,11 @@ export function listPanes(session?: string): PsmuxPane[] {
 
   const target = session ? `-t ${session}` : '-a';
   const raw = exec(
-    `psmux list-panes ${target} -F "#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_pid}|#{pane_active}|#{pane_width}|#{pane_height}"`
+    `psmux list-panes ${target} -F "#{session_name}|#{window_index}|#{pane_index}|#{pane_current_command}|#{pane_pid}|#{pane_active}|#{pane_width}|#{pane_height}|#{window_name}"`
   );
   if (!raw) return [];
   const result = raw.split('\n').filter(Boolean).map(line => {
-    const [sessionName, windowIndex, paneIndex, command, pid, active, width, height] = line.split('|');
+    const [sessionName, windowIndex, paneIndex, command, pid, active, width, height, windowName] = line.split('|');
     const wi = parseInt(windowIndex) || 0;
     const pi = parseInt(paneIndex) || 0;
     return {
@@ -142,6 +143,7 @@ export function listPanes(session?: string): PsmuxPane[] {
       width: parseInt(width) || 0,
       height: parseInt(height) || 0,
       target: `${sessionName}:${wi}.${pi}`,
+      windowName: windowName || '',
     };
   });
 

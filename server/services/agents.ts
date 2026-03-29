@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import { execSync } from 'child_process';
 import matter from 'gray-matter';
@@ -174,6 +174,67 @@ interface SessionFileData {
 let _sessionFileCache: SessionFileData | null = null;
 let _sessionFileCacheTime = 0;
 const SESSION_FILE_TTL = 3000; // 3s cache
+
+// ── Cleanup stale data from agent-sessions.json ──────────────────
+
+let _cleanupDone = false;
+
+export function cleanSessionFile(force = false): void {
+  if (_cleanupDone && !force) return;
+  _cleanupDone = true;
+
+  try {
+    if (!existsSync(SESSION_MAP_FILE)) return;
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    const agents = raw.agents || {};
+    let changed = false;
+
+    // 1. Remove agents with empty session IDs (spawn never completed)
+    //    or with fake/non-existent session-state directories
+    for (const [name, data] of Object.entries(agents as Record<string, any>)) {
+      const sid = data.session || data.sessionId || data.session_id || '';
+      if (!sid) {
+        delete agents[name];
+        if (raw.metadata?.[name]) delete raw.metadata[name];
+        changed = true;
+        continue;
+      }
+      // Check if session-state directory exists (filters out fake test IDs)
+      const sessionDir = join(SESSION_STATE_DIR, sid);
+      if (!existsSync(sessionDir)) {
+        delete agents[name];
+        if (raw.metadata?.[name]) delete raw.metadata[name];
+        changed = true;
+      }
+    }
+
+    // 2. Prune psmux_layout entries that reference agent names not in agents map
+    const layout = raw.psmux_layout || {};
+    const agentNames = new Set(Object.keys(agents));
+    for (const [sessName, panes] of Object.entries(layout as Record<string, any>)) {
+      if (sessName.startsWith('_')) continue;
+      for (const [wp, aName] of Object.entries(panes as Record<string, string>)) {
+        if (!agentNames.has(aName)) {
+          delete panes[wp];
+          changed = true;
+        }
+      }
+      // Remove empty session entries
+      if (Object.keys(panes).length === 0) {
+        delete layout[sessName];
+        changed = true;
+      }
+    }
+    raw.psmux_layout = layout;
+
+    if (changed) {
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+      _sessionFileCache = null; // invalidate cache
+    }
+  } catch (e) {
+    console.error('cleanSessionFile error:', e);
+  }
+}
 
 function loadSessionFile(): SessionFileData {
   const now = Date.now();
@@ -360,6 +421,9 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
     if (pane.pid) pidToPane.set(pane.pid, pane);
   }
 
+  // Build set of actual pane targets for layout validation
+  const livePaneTargets = new Set(allPanes.map(p => p.target));
+
   const agents: Agent[] = [];
   const seenSessionIds = new Set<string>();
   const seenPanes = new Set<string>();
@@ -378,7 +442,7 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
     }
     if (pidMatchedName) agentName = pidMatchedName;
 
-    // Strategy B: Use psmux_layout mapping (fallback — can go stale on renumber)
+    // Strategy B: Use psmux_layout mapping (only if target still exists as a live pane)
     const layoutName = paneLayout.get(pane.target) || null;
     if (!pidMatchedName && layoutName) {
       agentName = layoutName;
@@ -404,15 +468,13 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
 
     const id = sessionId || syntheticId(pane.target);
 
-    // Custom name from agent-sessions.json always wins
+    // Custom name from agent-sessions.json always wins, then psmux window name
     const sessionEntry = sessionMap.get(id);
     const customName = sessionEntry?.displayName || sessionEntry?.agentName || layoutName || null;
+    const windowFallback = pane.windowName && !pane.windowName.startsWith('pane ') ? pane.windowName : null;
     const resolvedName = customName || agentName;
     const template = resolvedName ? templateMap.get(resolvedName) : undefined;
-    const name = customName || template?.name || agentName || id.slice(0, 8);
-
-    // Only include if registered (in session map) — skip anonymous pane-XXXX
-    if (!sessionEntry) continue;
+    const name = customName || template?.name || agentName || windowFallback || id.slice(0, 8);
 
     agents.push({ id, name, template, status: state, pane, sessionId: id });
     seenSessionIds.add(id);
@@ -443,12 +505,20 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
       }
     }
 
+    // Validate: does this session actually have a state directory?
+    // Skip phantom entries (fake IDs, old test data) with no real session
+    const sessionDir = join(SESSION_STATE_DIR, sessionId);
+    const hasSessionDir = existsSync(sessionDir);
+
     let status: AgentStatus;
     if (entry.stoppedAt) {
       status = 'stopped';
-    } else {
+    } else if (hasSessionDir) {
       const lockStatus = getLockFileStatus(sessionId);
-      status = lockStatus ?? 'idle'; // lock file alive → running, no locks → idle
+      status = lockStatus ?? 'idle';
+    } else {
+      // No session dir = phantom entry, skip it
+      continue;
     }
 
     agents.push({ id: sessionId, name, template, status, sessionId });
@@ -466,6 +536,8 @@ let _refreshInProgress = false;
 
 /** Returns cached agent list instantly. Never blocks on pane capture. */
 export function getAllAgents(): Agent[] {
+  // Clean stale data once on first call
+  cleanSessionFile();
   // On very first call, do a sync scan to bootstrap
   if (_agentListCacheTime === 0) {
     const allPanes = listPanes();
