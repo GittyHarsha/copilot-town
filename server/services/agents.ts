@@ -13,34 +13,14 @@ const PROJECT_AGENTS_DIR = join(PROJECT_DIR, '.github', 'agents');
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
 const SESSION_STATE_DIR = join(HOME, '.copilot', 'session-state');
 
-// ── Lock-file based status detection ─────────────────────────────
-// Each active copilot session writes inuse.<PID>.lock into its session dir.
-// If any lock file exists AND its PID is alive → session is running.
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0); // signal 0 = just check existence
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getLockFileStatus(sessionId: string): 'running' | 'idle' | null {
-  const sessionDir = join(SESSION_STATE_DIR, sessionId);
-  if (!existsSync(sessionDir)) return null;
-  try {
-    const locks = readdirSync(sessionDir).filter(f => /^inuse\.\d+\.lock$/.test(f));
-    if (locks.length === 0) return null;
-    const alive = locks.some(f => {
-      const pid = parseInt(f.replace('inuse.', '').replace('.lock', ''));
-      return isProcessAlive(pid);
-    });
-    return alive ? 'running' : 'idle';
-  } catch {
-    return null;
-  }
-}
+// ── Session status detection ─────────────────────────────────────
+// Status is determined by:
+//   1. Pane scanning (Phase 1): session found in an active pane → "running"
+//   2. SDK session list: session exists in copilot-sdk → real session
+//   3. stoppedAt flag: explicitly stopped by user → "stopped"
+//   4. Otherwise: session exists but not in any pane → "idle"
+// Lock files are NOT used — the shared CLI daemon PID creates lock
+// files for every session it touches, making them unreliable.
 
 export type AgentStatus = 'running' | 'idle' | 'stopped';
 
@@ -511,20 +491,23 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
       }
     }
 
-    // Validate: does this session actually have a state directory?
-    // Skip phantom entries (fake IDs, old test data) with no real session
+    // Validate: does this session exist in the SDK's session list?
+    // Falls back to checking session-state directory on disk.
+    const sdkSession = getCopilotSession(sessionId);
     const sessionDir = join(SESSION_STATE_DIR, sessionId);
-    const hasSessionDir = existsSync(sessionDir);
+    const isRealSession = !!sdkSession || existsSync(sessionDir);
+
+    if (!isRealSession) {
+      // Not in SDK and no session dir = phantom entry, skip it
+      continue;
+    }
 
     let status: AgentStatus;
     if (entry.stoppedAt) {
       status = 'stopped';
-    } else if (hasSessionDir) {
-      const lockStatus = getLockFileStatus(sessionId);
-      status = lockStatus ?? 'idle';
     } else {
-      // No session dir = phantom entry, skip it
-      continue;
+      // Session exists but not in any pane → idle (can be resumed)
+      status = 'idle';
     }
 
     agents.push({ id: sessionId, name, template, status, sessionId });
@@ -539,24 +522,6 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
 let _agentListCache: Agent[] = [];
 let _agentListCacheTime = 0;
 let _refreshInProgress = false;
-
-/** Enrich agent list with metadata from @github/copilot-sdk */
-async function enrichWithSdk(agents: Agent[]): Promise<void> {
-  try {
-    await listCopilotSessions(); // warm the cache
-    for (const agent of agents) {
-      const sdkSession = getCopilotSession(agent.id);
-      if (sdkSession) {
-        agent.summary = sdkSession.summary;
-        agent.context = sdkSession.context;
-        agent.modifiedTime = sdkSession.modifiedTime;
-        agent.startTime = sdkSession.startTime;
-      }
-    }
-  } catch {
-    // SDK enrichment is best-effort — don't break agent list
-  }
-}
 
 /** Returns cached agent list instantly. Never blocks on pane capture. */
 export function getAllAgents(): Agent[] {
@@ -577,10 +542,25 @@ export async function refreshAgents(): Promise<Agent[]> {
   if (_refreshInProgress) return _agentListCache;
   _refreshInProgress = true;
   try {
+    // Warm SDK session cache FIRST — buildAgentList Phase 2 needs it
+    try { await listCopilotSessions(); } catch {}
+
     const allPanes = listPanes();
     const paneData = await scanPanesAsync(allPanes);
     _agentListCache = buildAgentList(paneData);
-    await enrichWithSdk(_agentListCache);
+
+    // Enrich agents with SDK metadata (summary, context, timestamps)
+    // Cache is already warm so getCopilotSession() is instant
+    for (const agent of _agentListCache) {
+      const sdkSession = getCopilotSession(agent.id);
+      if (sdkSession) {
+        agent.summary = sdkSession.summary;
+        agent.context = sdkSession.context;
+        agent.modifiedTime = sdkSession.modifiedTime;
+        agent.startTime = sdkSession.startTime;
+      }
+    }
+
     _agentListCacheTime = Date.now();
     return _agentListCache;
   } finally {
