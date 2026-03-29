@@ -222,10 +222,10 @@ rl.on('line', (line) => {
                 inputSchema: {
                   type: 'object',
                   properties: {
-                    name: { type: 'string', description: 'Display name for this agent (optional — defaults to session-XXXXXXXX)' },
+                    name: { type: 'string', description: 'Agent name — a short, unique, human-readable name other agents use to communicate with you (e.g. "code-reviewer", "docs-writer")' },
                     session_id: { type: 'string', description: 'Your Copilot session ID (UUID). Required — look in your session-state path or COPILOT_SESSION_ID.' }
                   },
-                  required: ['session_id']
+                  required: ['session_id', 'name']
                 }
               },
               {
@@ -411,8 +411,10 @@ rl.on('line', (line) => {
 
           if (!sessionId) {
             reply(msg.id, 'Missing session_id parameter. Pass your Copilot session UUID so we can register the correct session.');
+          } else if (!name || !name.trim()) {
+            reply(msg.id, 'Missing name parameter. Provide a short, unique name so other agents can communicate with you (e.g. "code-reviewer", "docs-writer").');
           } else {
-            const agentName = (name && name.trim()) ? name.trim() : `session-${sessionId.slice(0, 8)}`;
+            const agentName = name.trim();
             httpPost('/api/agents/register', { name: agentName, session_id: sessionId, ppid: process.ppid })
               .then(data => {
                 if (data.error) return replyError(msg.id, data.error);

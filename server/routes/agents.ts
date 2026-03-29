@@ -124,8 +124,9 @@ router.get('/templates', (_req, res) => {
 router.post('/register', (_req, res) => {
   const { name, session_id, ppid } = _req.body;
   if (!session_id) return res.status(400).json({ error: 'session_id required' });
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name required — other agents need a name to communicate with you' });
 
-  const agentName = (name && name.trim()) ? name.trim() : `session-${session_id.slice(0, 8)}`;
+  const agentName = name.trim();
 
   // 1. Write to agent-sessions.json
   withSessionFile(raw => {

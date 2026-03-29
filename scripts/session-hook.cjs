@@ -87,8 +87,8 @@ try {
     };
     // Create global launchers on every session start (idempotent, updates path if plugin moved)
     ensureLaunchers();
-    // Try to register with server for PID-based pane detection + auto-titling
-    tryServerRegister(name, sessionId);
+    // Register with server for PID-based pane detection + auto-titling (only if real name)
+    if (agentName) tryServerRegister(name, sessionId);
   } else if (hookType === 'sessionEnd') {
     if (data.agents[name]) {
       data.agents[name].stoppedAt = new Date().toISOString();
