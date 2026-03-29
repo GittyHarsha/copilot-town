@@ -71,9 +71,10 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
     }
   };
 
-  const desc = agent.template?.description || 'Copilot session';
+  const desc = agent.description || agent.template?.description || 'Copilot session';
   const truncDesc = desc.length > 45 ? desc.slice(0, 42) + '…' : desc;
   const paneLabel = agent.pane?.target;
+  const displayModel = agent.model || agent.template?.model;
 
   return (
     <div className={`group/card border border-border rounded-lg overflow-hidden transition-colors hover:border-border-1 ${GLOW[status] || ''}`}>
@@ -112,6 +113,23 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
         <div className="px-3 py-2.5 border-t border-border bg-bg-1/50 space-y-2">
           {/* Description */}
           <p className="text-[11px] text-fg-2 leading-relaxed">{desc}</p>
+
+          {/* Metadata badges */}
+          {(displayModel || (agent.flags && agent.flags.length > 0)) && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {displayModel && (
+                <span className="text-[9px] font-mono text-green/70 bg-green/5 px-1.5 py-0.5 rounded">{displayModel}</span>
+              )}
+              {agent.flags?.map(f => (
+                <span key={f} className="text-[9px] font-mono text-yellow/70 bg-yellow/5 px-1.5 py-0.5 rounded">{f}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Task status */}
+          {agent.task && (
+            <p className="text-[10px] text-blue italic">📋 {agent.task}</p>
+          )}
 
           {/* Actions */}
           <div className="flex items-center gap-1.5 flex-wrap">

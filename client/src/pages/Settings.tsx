@@ -232,7 +232,7 @@ function SessionsSection() {
               <div className="px-3 py-2 border-t border-border bg-bg-2/30">
                 <label className="text-[10px] text-fg-2 uppercase tracking-wider block mb-1">Description</label>
                 <InlineEdit
-                  value={(agent as any).description || ''}
+                  value={agent.description || ''}
                   onSave={description => updateAgent(agent.id, { description })}
                   placeholder="Add a description…"
                   multiline

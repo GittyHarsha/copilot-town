@@ -379,9 +379,9 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
     if (pidMatchedName) agentName = pidMatchedName;
 
     // Strategy B: Use psmux_layout mapping (fallback — can go stale on renumber)
-    if (!pidMatchedName) {
-      const layoutName = paneLayout.get(pane.target);
-      if (layoutName) agentName = layoutName;
+    const layoutName = paneLayout.get(pane.target) || null;
+    if (!pidMatchedName && layoutName) {
+      agentName = layoutName;
     }
 
     // Strategy C: Resolve session ID from agent-sessions.json by name

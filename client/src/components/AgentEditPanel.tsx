@@ -40,13 +40,13 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
       api.getAgent(agent.id),
       api.getTemplates(),
     ]).then(([detail, tmpl]) => {
-      const meta = (detail as any).meta || {};
-      setDescription(meta.description || agent.template?.description || '');
-      setTemplate(meta.template || agent.template?.name || '');
-      setModel(meta.model || agent.template?.model || '');
-      setFlags(meta.flags || []);
-      if (meta.envVars) {
-        setEnvVars(Object.entries(meta.envVars).map(([key, value]) => ({ key, value: value as string })));
+      const d = detail as any;
+      setDescription(d.description || agent.template?.description || '');
+      setTemplate(d.template || agent.template?.name || '');
+      setModel(d.model || agent.template?.model || '');
+      setFlags(d.flags || []);
+      if (d.envVars) {
+        setEnvVars(Object.entries(d.envVars).map(([key, value]) => ({ key, value: value as string })));
       }
       setTemplates(tmpl);
     }).catch(() => {}).finally(() => setLoading(false));

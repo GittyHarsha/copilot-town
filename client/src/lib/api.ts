@@ -20,6 +20,12 @@ export interface AgentData {
     target: string;
   };
   sessionId: string;
+  // Persisted metadata (from agent-sessions.json)
+  description?: string;
+  model?: string;
+  flags?: string[];
+  envVars?: Record<string, string>;
+  task?: string;
 }
 
 export interface AgentTemplate {
