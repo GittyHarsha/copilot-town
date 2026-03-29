@@ -415,52 +415,46 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   const seenPanes = new Set<string>();
 
   // Phase 1: Discover agents from live panes (copilot running)
+  // Only match panes to registered agents when there's strong evidence:
+  //   - Extracted session ID matches a registered agent
+  //   - Pane PID matches a stored panePid for a registered agent
+  // Unmatched copilot panes are NOT auto-promoted to agents.
   for (const pane of allPanes) {
     const info = paneData.get(pane.target);
     if (!info) continue;
 
     let { agentName, sessionId, state } = info;
+    let matchedVia: string | null = null;
 
-    // Strategy A (PRIMARY): Match by stored pane PID — survives pane renumbering
-    let pidMatchedName: string | null = null;
+    // Strategy A (PRIMARY): Match by stored pane PID — most reliable
     for (const [name, pid] of nameToPanePid) {
-      if (pid === pane.pid) { pidMatchedName = name; break; }
-    }
-    if (pidMatchedName) agentName = pidMatchedName;
-
-    // Strategy B: Use psmux_layout mapping (only if target still exists as a live pane)
-    const layoutName = paneLayout.get(pane.target) || null;
-    if (!pidMatchedName && layoutName) {
-      agentName = layoutName;
-    }
-
-    // Strategy C: Resolve session ID from agent-sessions.json by name
-    if (!sessionId && agentName) {
-      sessionId = nameToSessionId.get(agentName) || null;
-    }
-
-    // Strategy D: Match by agent name across all registered entries
-    if (!sessionId) {
-      const nameToMatch = agentName;
-      if (nameToMatch) {
-        for (const [sid, entry] of sessionMap) {
-          if (entry.agentName === nameToMatch || entry.displayName === nameToMatch) {
-            sessionId = sid;
-            break;
-          }
-        }
+      if (pid === pane.pid) {
+        agentName = name;
+        sessionId = nameToSessionId.get(name) || sessionId;
+        matchedVia = 'pid';
+        break;
       }
     }
 
-    const id = sessionId || syntheticId(pane.target);
+    // Strategy B: Extracted session ID matches a registered session
+    if (!matchedVia && sessionId && sessionMap.has(sessionId)) {
+      matchedVia = 'session-id';
+    }
 
-    // Custom name from agent-sessions.json always wins, then psmux window name
+    // Strategy C: Extracted agent name matches a registered agent
+    if (!matchedVia && agentName && nameToSessionId.has(agentName)) {
+      sessionId = nameToSessionId.get(agentName) || sessionId;
+      matchedVia = 'agent-name';
+    }
+
+    // No strong match — skip this pane (don't create phantom agents)
+    if (!matchedVia) continue;
+
+    const id = sessionId || syntheticId(pane.target);
     const sessionEntry = sessionMap.get(id);
-    const customName = sessionEntry?.displayName || sessionEntry?.agentName || layoutName || null;
-    const windowFallback = pane.windowName && !pane.windowName.startsWith('pane ') ? pane.windowName : null;
-    const resolvedName = customName || agentName;
-    const template = resolvedName ? templateMap.get(resolvedName) : undefined;
-    const name = customName || template?.name || agentName || windowFallback || id.slice(0, 8);
+    const customName = sessionEntry?.displayName || sessionEntry?.agentName || null;
+    const template = (customName || agentName) ? templateMap.get(customName || agentName!) : undefined;
+    const name = customName || template?.name || agentName || id.slice(0, 8);
 
     agents.push({ id, name, template, status: state, pane, sessionId: id });
     seenSessionIds.add(id);
@@ -504,7 +498,11 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
 
     let status: AgentStatus;
     if (entry.stoppedAt) {
-      status = 'stopped';
+      // Check if SDK shows activity after the stoppedAt timestamp
+      // (session-hook may have set stoppedAt on a different pane's exit)
+      const stoppedTime = new Date(entry.stoppedAt).getTime();
+      const sdkModified = sdkSession?.modifiedTime ? new Date(sdkSession.modifiedTime).getTime() : 0;
+      status = sdkModified > stoppedTime ? 'idle' : 'stopped';
     } else {
       // Session exists but not in any pane → idle (can be resumed)
       status = 'idle';
