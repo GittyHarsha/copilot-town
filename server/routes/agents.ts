@@ -508,6 +508,7 @@ router.post('/:id/start', async (req, res) => {
     try {
       const result = provisionPane(
         { defaultSession: req.body.session, maxPanesPerWindow: req.body.maxPanesPerWindow },
+        isPaneFree,
       );
       target = result.target;
       how = result.created;
@@ -691,7 +692,7 @@ router.post('/spawn', async (req, res) => {
   const config: ProvisionConfig = { session: psmuxSession };
 
   try {
-    const pane = provisionPane(config);
+    const pane = provisionPane(config, isPaneFree);
     if (!pane?.target) return res.status(500).json({ error: 'Failed to provision pane' });
 
     // Build copilot command

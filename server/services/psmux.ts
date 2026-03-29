@@ -219,6 +219,7 @@ export function sendEscape(target: string): boolean {
 export function createSession(name: string): boolean {
   try {
     exec(`psmux new-session -d -s "${sanitizeName(name)}"`);
+    invalidatePaneCache();
     return true;
   } catch {
     return false;
@@ -230,7 +231,8 @@ export function splitPane(sessionTarget: string, vertical = true): PsmuxPane | n
     const flag = vertical ? '-v' : '-h';
     // split-window creates a new pane; capture its info
     exec(`psmux split-window ${flag} -t "${sanitizeTarget(sessionTarget)}"`);
-    // New pane becomes the active pane — find it
+    // Invalidate cache so listPanes returns fresh data including the new pane
+    invalidatePaneCache();
     const panes = listPanes();
     // The newest pane in this session is the one just created (highest pane index)
     const session = sessionTarget.split(':')[0];
@@ -259,6 +261,7 @@ export function newWindow(session: string, name?: string): boolean {
   try {
     const nameArg = name ? ` -n "${sanitizeName(name)}"` : '';
     exec(`psmux new-window -t "${sanitizeName(session)}"${nameArg}`);
+    invalidatePaneCache();
     return true;
   } catch {
     return false;
@@ -269,14 +272,17 @@ export function newWindow(session: string, name?: string): boolean {
 
 export function killPane(target: string): void {
   strictExec(`psmux kill-pane -t "${sanitizeTarget(target)}"`);
+  invalidatePaneCache();
 }
 
 export function killWindow(target: string): void {
   strictExec(`psmux kill-window -t "${sanitizeTarget(target)}"`);
+  invalidatePaneCache();
 }
 
 export function killSession(name: string): void {
   strictExec(`psmux kill-session -t "${sanitizeName(name)}"`);
+  invalidatePaneCache();
 }
 
 export function killServer(): void {
