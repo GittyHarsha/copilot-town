@@ -11,19 +11,17 @@ import ToastContainer from './components/ToastContainer';
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));
-const Conversations = lazy(() => import('./pages/Conversations'));
 const Graph = lazy(() => import('./pages/Graph'));
 const TownView = lazy(() => import('./pages/TownView'));
 const Settings = lazy(() => import('./pages/Settings'));
 
-type Page = 'dashboard' | 'town' | 'panes' | 'sessions' | 'conversations' | 'graph' | 'settings';
+type Page = 'dashboard' | 'town' | 'panes' | 'sessions' | 'graph' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '⊞' },
   { id: 'town', label: 'Town', icon: '🏘️' },
   { id: 'panes', label: 'Panes', icon: '▦' },
-  { id: 'conversations', label: 'Chat', icon: '💬' },
-  { id: 'sessions', label: 'Sessions', icon: '⏱' },
+  { id: 'sessions', label: 'Sessions', icon: '💬' },
   { id: 'graph', label: 'Graph', icon: '⊙' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
@@ -94,7 +92,7 @@ function AppInner() {
         return;
       }
       if (isInputFocused()) return;
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'town', '3': 'panes', '4': 'conversations', '5': 'sessions', '6': 'graph', '7': 'settings' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'town', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -195,14 +193,13 @@ function AppInner() {
         {page === 'dashboard' && (
           <Dashboard
             agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
-            onViewHistory={(id) => { setConversationAgent(id); setPage('conversations'); }}
+            onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
           />
         )}
         <Suspense fallback={LazyFallback}>
           {page === 'town' && <TownView />}
           {page === 'panes' && <Towns />}
-          {page === 'sessions' && <Sessions />}
-          {page === 'conversations' && <Conversations agents={agents} initialAgent={conversationAgent} />}
+          {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
           {page === 'graph' && <Graph />}
           {page === 'settings' && <Settings />}
         </Suspense>
