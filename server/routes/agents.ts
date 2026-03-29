@@ -479,11 +479,10 @@ router.post('/:id/start', async (req, res) => {
   if (agent) {
     templateName = agent.template?.name || agent.name;
   } else {
-    // Check if :id is a template name
+    // Check if :id is a template name, otherwise use as plain agent name
     const templates = loadAgentTemplates();
     const template = templates.find(t => t.name === req.params.id);
-    if (!template) return res.status(404).json({ error: 'Agent or template not found' });
-    templateName = template.name;
+    templateName = template?.name || req.params.id;
   }
 
   let target: string;
@@ -515,7 +514,9 @@ router.post('/:id/start', async (req, res) => {
 
   let cmd = req.body.command;
   if (!cmd) {
-    const parts = ['copilot', `--agent=${meta.template || templateName}`];
+    const parts = ['copilot'];
+    const agentTemplate = meta.template || (loadAgentTemplates().some(t => t.name === templateName) ? templateName : null);
+    if (agentTemplate) parts.push(`--agent=${agentTemplate}`);
     const model = req.body.model || meta.model;
     if (model) parts.push(`--model=${model}`);
     const flags = req.body.flags || meta.flags || [];
