@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { MODELS as ALL_MODELS } from '../lib/models';
 
 export interface LaunchConfig {
   model: string;
@@ -32,13 +33,7 @@ const DEFAULT_CONFIG: LaunchConfig = {
 
 const MODELS = [
   { value: '', label: 'Default' },
-  { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-opus-4.6', label: 'Claude Opus 4.6' },
-  { value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
-  { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
-  { value: 'gpt-4.1', label: 'GPT-4.1' },
-  { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+  ...ALL_MODELS,
 ];
 
 interface Props {

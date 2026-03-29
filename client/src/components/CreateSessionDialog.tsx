@@ -1,15 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api, type AgentData, type AgentTemplate } from '../lib/api';
+import { MODELS as ALL_MODELS } from '../lib/models';
 
 const MODELS = [
   { value: '', label: 'Default (copilot default)' },
-  { value: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
-  { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' },
-  { value: 'claude-opus-4.5', label: 'Claude Opus 4.5' },
-  { value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5' },
-  { value: 'gpt-5.1', label: 'GPT-5.1' },
-  { value: 'gpt-5.2', label: 'GPT-5.2' },
-  { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
+  ...ALL_MODELS,
 ];
 
 interface Props {

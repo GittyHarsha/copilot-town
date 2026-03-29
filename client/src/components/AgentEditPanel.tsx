@@ -1,18 +1,13 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import type { AgentData, AgentTemplate } from '../lib/api';
+import { MODELS, MODEL_IDS } from '../lib/models';
 
 interface Props {
   agent: AgentData;
   onClose: () => void;
   onSaved?: () => void;
 }
-
-const MODELS = [
-  'claude-sonnet-4', 'claude-sonnet-4.5', 'claude-opus-4',
-  'gpt-4.1', 'gpt-5.1', 'gpt-5.2',
-  'gemini-3-pro', 'o3',
-];
 
 const KNOWN_FLAGS = [
   { flag: '--yolo', label: 'YOLO', desc: 'Auto-approve everything' },
@@ -145,10 +140,10 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
               <select className="flex-1 bg-bg-1 border border-border rounded px-3 py-1.5 text-sm text-fg outline-none focus:border-blue"
                 value={model} onChange={e => setModel(e.target.value)}>
                 <option value="">Default</option>
-                {MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
               <input className="w-40 bg-bg-1 border border-border rounded px-3 py-1.5 text-xs text-fg outline-none focus:border-blue"
-                placeholder="Custom model…" value={MODELS.includes(model) ? '' : model}
+                placeholder="Custom model…" value={MODEL_IDS.includes(model) ? '' : model}
                 onChange={e => setModel(e.target.value)} />
             </div>
           </div>
