@@ -148,6 +148,8 @@ export const api = {
     postJson<{ success: boolean; from: string; to: string }>('/agents/relay', { from, to, message }),
   startAgent: (id: string, target?: string) =>
     postJson<{ success: boolean }>(`/agents/${encodeURIComponent(id)}/start`, { target }),
+  spawnAgent: (opts: { name: string; template?: string; model?: string; flags?: string[]; session?: string }) =>
+    postJson<{ ok: boolean; name: string; pane: string; command: string }>('/agents/spawn', opts),
   resumeAgent: (id: string, target?: string, autoCreate?: boolean, session?: string, command?: string) => {
     const body: any = {};
     if (target) body.target = target;

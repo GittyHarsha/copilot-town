@@ -66,6 +66,10 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
   }, [template, model, resumeId, allowAll, experimental, yolo, customFlags]);
 
   const handleLaunch = async () => {
+    if (!resumeId && !displayName.trim()) {
+      setError('Name is required — other agents need a name to communicate with this session');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -74,11 +78,21 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
         const agent = stoppedAgents.find(a => a.sessionId === resumeId || a.id === resumeId);
         const id = agent?.id ?? resumeId;
         await api.resumeAgent(id, undefined, undefined, undefined, command);
-      } else if (template) {
-        await api.startAgent(template, undefined);
       } else {
-        // Vanilla session — start with command override via a generic start
-        await api.startAgent('_new', undefined);
+        // Spawn new session via /agents/spawn — auto-registers with name
+        const flags: string[] = [];
+        if (yolo) flags.push('--yolo');
+        else if (allowAll) flags.push('--allow-all');
+        if (experimental) flags.push('--experimental');
+        if (customFlags.trim()) {
+          flags.push(...customFlags.trim().split(/\s+/));
+        }
+        await api.spawnAgent({
+          name: displayName.trim(),
+          template: template || undefined,
+          model: model || undefined,
+          flags: flags.length > 0 ? flags : undefined,
+        });
       }
       onLaunched();
       onClose();
@@ -111,6 +125,15 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
         </div>
 
         <div className="p-4 space-y-3">
+          {/* Display Name — required */}
+          <div>
+            <label className={labelCls}>Name <span className="text-red">*</span></label>
+            <input type="text" className={inputCls} value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              placeholder="e.g. researcher, code-reviewer, bug-fixer" />
+            <p className="text-[9px] text-fg-2 mt-0.5">Required — this is how other agents will address this session</p>
+          </div>
+
           {/* Template */}
           <div>
             <label className={labelCls}>Template</label>
@@ -141,14 +164,6 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
                 </option>
               ))}
             </select>
-          </div>
-
-          {/* Display Name */}
-          <div>
-            <label className={labelCls}>Display Name</label>
-            <input type="text" className={inputCls} value={displayName}
-              onChange={e => setDisplayName(e.target.value)}
-              placeholder="Optional friendly name" />
           </div>
 
           {/* Flags */}

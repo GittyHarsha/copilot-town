@@ -712,8 +712,19 @@ router.post('/spawn', async (req, res) => {
       if (!raw.agents) raw.agents = {};
       raw.agents[name] = {
         session: '',   // will be filled by session hook or register tool
+        displayName: name,
         startedAt: new Date().toISOString(),
       };
+      // Store metadata (model, flags)
+      if (model || (flags && flags.length)) {
+        if (!raw.metadata) raw.metadata = {};
+        raw.metadata[name] = {
+          ...(raw.metadata[name] || {}),
+          ...(model ? { model } : {}),
+          ...(flags && flags.length ? { flags } : {}),
+          ...(template ? { template } : {}),
+        };
+      }
       // Track pane layout
       if (!raw.psmux_layout) raw.psmux_layout = {};
       const [sn, wp] = pane.target.split(':');
