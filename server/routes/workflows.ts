@@ -21,6 +21,16 @@ router.post('/reload', async (_req, res) => {
   res.json({ count: defs.length, workflows: defs });
 });
 
+// Serve YAML reference doc (must be before /:id)
+router.get('/reference', async (_req, res) => {
+  try {
+    const content = await readFile(join(WORKFLOWS_DIR, 'WORKFLOW_REFERENCE.md'), 'utf-8');
+    res.json({ content });
+  } catch {
+    res.status(404).json({ error: 'Reference doc not found' });
+  }
+});
+
 // Get single workflow definition
 router.get('/:id', async (req, res) => {
   const def = getWorkflow(req.params.id);

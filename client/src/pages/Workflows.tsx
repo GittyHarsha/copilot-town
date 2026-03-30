@@ -627,11 +627,56 @@ function WorkflowEditor(props:
         <textarea
           value={props.yaml}
           onChange={e => props.onYamlChange(e.target.value)}
-          className="w-full h-[calc(100vh-280px)] bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+          className="w-full h-[calc(100vh-380px)] bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
           placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
           spellCheck={false}
         />
       </div>
+
+      {/* Inline YAML Reference */}
+      <details className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg">
+        <summary className="px-4 py-2.5 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200 select-none flex items-center gap-2">
+          <span>📖</span> YAML Reference — step fields, expressions, examples
+        </summary>
+        <div className="px-4 py-3 border-t border-zinc-800 text-xs text-zinc-400 font-mono leading-relaxed max-h-72 overflow-y-auto space-y-3">
+          <div>
+            <div className="text-zinc-300 font-semibold mb-1">Step Fields</div>
+            <pre className="text-zinc-500 whitespace-pre">{`id: unique-id           # required
+name: Display Name       # optional
+needs: [step-a, step-b]  # DAG dependencies
+prompt: "..."            # agent prompt
+prompt_file: stage.md    # load from data/stages/
+type: step | gate        # gate = human approval
+timeout: 120             # seconds
+agent:
+  model: claude-sonnet-4
+  systemPrompt: "..."
+if: "expression"         # conditional execution
+outputs: json            # parse JSON from output
+retry: 3                 # retry attempts
+retry_delay: 5           # seconds between retries
+on_fail: fallback-id     # fallback step on failure
+continue_on_fail: true   # don't fail workflow
+review:
+  criteria: "..."        # auto-review criteria
+  max_iterations: 3`}</pre>
+          </div>
+          <div>
+            <div className="text-zinc-300 font-semibold mb-1">Variables</div>
+            <pre className="text-zinc-500 whitespace-pre">{`\${{ inputs.name }}              # input value
+\${{ steps.X.output }}           # step output text
+\${{ steps.X.status }}           # complete|failed|skipped
+\${{ steps.X.error }}            # error message
+\${{ steps.X.outputs.key }}      # parsed JSON field`}</pre>
+          </div>
+          <div>
+            <div className="text-zinc-300 font-semibold mb-1">Expressions (if:)</div>
+            <pre className="text-zinc-500 whitespace-pre">{`==  !=  contains  startsWith  >  <
+&&  ||  !
+Example: "\${{ steps.x.outputs.level }} == 'high' || \${{ inputs.force }} == 'true'"`}</pre>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
