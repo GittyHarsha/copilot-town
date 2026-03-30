@@ -31,7 +31,7 @@ export default function StatsBar({ agents }: Props) {
   const stats = [
     { label: 'active', value: running, color: 'bg-emerald-500', textColor: 'text-emerald-400', bgTint: 'rgba(34, 197, 94, 0.04)' },
     { label: 'idle', value: idle, color: 'bg-amber-400', textColor: 'text-amber-400', bgTint: 'rgba(234, 179, 8, 0.04)' },
-    { label: 'stopped', value: stopped, color: 'bg-zinc-500', textColor: 'text-zinc-400', bgTint: undefined },
+    { label: 'stopped', value: stopped, color: 'bg-fg-2', textColor: 'text-fg-1', bgTint: undefined },
   ];
 
   return (

@@ -209,7 +209,7 @@ export default function Graph() {
             <h2 className="text-[15px] font-semibold text-fg">Relay Graph</h2>
             <div className="flex items-center gap-2 text-[11px] text-fg-2">
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />{runCount + idleCount} active</span>
-              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />{stopCount} stopped</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-fg-2" />{stopCount} stopped</span>
               <span className="text-fg-2/30">·</span>
               <span>{edges.length} connection{edges.length !== 1 ? 's' : ''}</span>
               <span className="text-fg-2/30">·</span>

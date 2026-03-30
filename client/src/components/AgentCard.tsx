@@ -17,8 +17,8 @@ interface Props {
 }
 
 const DOT: Record<string, string> = {
-  running: 'bg-emerald-500', idle: 'bg-amber-400', stopped: 'bg-zinc-600',
-  stopping: 'bg-zinc-500', starting: 'bg-blue-400',
+  running: 'bg-emerald-500', idle: 'bg-amber-400', stopped: 'bg-fg-2',
+  stopping: 'bg-fg-2', starting: 'bg-blue-400',
 };
 const GLOW: Record<string, string> = {
   running: 'glow-green', idle: 'glow-yellow',
@@ -117,10 +117,10 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
   const displayModel = agent.model || agent.template?.model;
 
   return (
-    <div className={`card-surface overflow-hidden group/card ${GLOW[status] || ''} ${isStopped ? 'opacity-75 hover:opacity-100' : ''}`}>
+    <div className={`card-surface overflow-hidden group/card ${GLOW[status] || ''} ${isStopped ? 'saturate-50 hover:saturate-100' : ''}`}>
       {/* Header row */}
       <button
-        className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.02] transition-all duration-200"
+        className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-fg/[0.02] transition-all duration-200"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Status dot */}
@@ -208,7 +208,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
                   <button className="btn" onClick={(e) => { e.stopPropagation(); setShowMoreMenu(!showMoreMenu); }}>⋯</button>
                   {showMoreMenu && (
                     <div className="absolute top-full left-0 mt-1.5 z-50 bg-bg-1 border border-border-1 rounded-xl py-1.5 min-w-[170px] animate-slide-down"
-                      style={{ boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
+                      style={{ boxShadow: 'var(--card-shadow-hover)' }}>
                       {isHeadless ? (
                         <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                           style={{ width: 'calc(100% - 4px)' }}

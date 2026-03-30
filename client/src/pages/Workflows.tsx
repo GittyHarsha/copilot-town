@@ -35,8 +35,8 @@ interface ChatMessage {
 /* ─── 2. Helpers ────────────────────────────────────────────────── */
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-zinc-600', running: 'bg-blue-500 animate-pulse', complete: 'bg-emerald-500',
-  failed: 'bg-red-500', skipped: 'bg-zinc-500', cancelled: 'bg-amber-500',
+  pending: 'bg-fg-2', running: 'bg-blue-500 animate-pulse', complete: 'bg-emerald-500',
+  failed: 'bg-red-500', skipped: 'bg-fg-2', cancelled: 'bg-amber-500',
   reviewing: 'bg-purple-500 animate-pulse', waiting: 'bg-amber-500 animate-pulse',
 };
 
@@ -230,58 +230,58 @@ export default function Workflows() {
 
   // ─── Render ────────────────────────────────────────────────────
   return (
-    <div className="flex h-full bg-zinc-950 text-zinc-100">
+    <div className="flex h-full bg-bg text-fg">
       {/* Left: Sidebar */}
-      <div className="w-80 border-r border-zinc-800 flex flex-col">
+      <div className="w-80 border-r border-border flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-zinc-800">
+        <div className="p-4 border-b border-border">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-lg font-semibold">⚡ Workflows</h2>
             <div className="flex items-center gap-1">
               <button
                 onClick={openNewWorkflow}
-                className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                className="text-xs text-fg-1 hover:text-fg px-2 py-1 rounded bg-bg-2 hover:bg-bg-3 transition-colors"
                 title="New Workflow"
               >
                 + New
               </button>
               <button
                 onClick={load}
-                className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 transition-colors"
+                className="text-xs text-fg-1 hover:text-fg px-2 py-1 rounded bg-bg-2 hover:bg-bg-3 transition-colors"
               >
                 ↻
               </button>
             </div>
           </div>
-          <p className="text-xs text-zinc-500">Multi-agent pipelines</p>
+          <p className="text-xs text-fg-2">Multi-agent pipelines</p>
         </div>
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto">
           {/* Workflow definitions */}
-          <div className="px-3 py-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+          <div className="px-3 py-2 text-xs font-medium text-fg-2 uppercase tracking-wider">
             Definitions ({workflows.length})
           </div>
           {workflows.map(wf => (
             <button
               key={wf.id}
               onClick={() => { selectWorkflow(wf); setView('list'); setSelectedRun(null); setEditingStageName(null); }}
-              className={`w-full text-left px-4 py-3 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors ${
-                selectedWf?.id === wf.id && view === 'list' ? 'bg-zinc-800/70 border-l-2 border-l-emerald-500' : ''
+              className={`w-full text-left px-4 py-3 border-b border-border hover:bg-bg-2/50 transition-colors ${
+                selectedWf?.id === wf.id && view === 'list' ? 'bg-bg-2/70 border-l-2 border-l-emerald-500' : ''
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-lg">{wf.icon || '📋'}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium truncate">{wf.name}</div>
-                  <div className="text-xs text-zinc-500 truncate">{wf.description || `${wf.steps.length} steps`}</div>
+                  <div className="text-xs text-fg-2 truncate">{wf.description || `${wf.steps.length} steps`}</div>
                 </div>
               </div>
             </button>
           ))}
 
           {workflows.length === 0 && (
-            <div className="px-4 py-8 text-center text-zinc-500 text-sm">
+            <div className="px-4 py-8 text-center text-fg-2 text-sm">
               No workflows found.<br/>
               <span className="text-xs">Add YAML files to data/workflows/</span>
             </div>
@@ -290,22 +290,22 @@ export default function Workflows() {
           {/* Run history */}
           {runs.length > 0 && (
             <>
-              <div className="px-3 py-2 mt-2 text-xs font-medium text-zinc-500 uppercase tracking-wider border-t border-zinc-800">
+              <div className="px-3 py-2 mt-2 text-xs font-medium text-fg-2 uppercase tracking-wider border-t border-border">
                 Recent Runs ({runs.length})
               </div>
               {runs.slice(0, 20).map(run => (
                 <button
                   key={run.runId}
                   onClick={() => { setSelectedRun(run); setView('run-monitor'); setEditingStageName(null); }}
-                  className={`w-full text-left px-4 py-2.5 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors ${
-                    selectedRun?.runId === run.runId ? 'bg-zinc-800/70 border-l-2 border-l-blue-500' : ''
+                  className={`w-full text-left px-4 py-2.5 border-b border-border hover:bg-bg-2/50 transition-colors ${
+                    selectedRun?.runId === run.runId ? 'bg-bg-2/70 border-l-2 border-l-blue-500' : ''
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[run.status]}`} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm truncate">{run.workflowName}</div>
-                      <div className="text-xs text-zinc-500">
+                      <div className="text-xs text-fg-2">
                         {run.status} · {elapsed(run.startedAt, run.finishedAt)}
                       </div>
                     </div>
@@ -316,11 +316,11 @@ export default function Workflows() {
           )}
 
           {/* Stage files */}
-          <div className="px-3 py-2 mt-2 text-xs font-medium text-zinc-500 uppercase tracking-wider border-t border-zinc-800 flex items-center justify-between">
+          <div className="px-3 py-2 mt-2 text-xs font-medium text-fg-2 uppercase tracking-wider border-t border-border flex items-center justify-between">
             <span>📄 Stages ({stageFiles.length})</span>
             <button
               onClick={openNewStage}
-              className="text-[10px] text-zinc-500 hover:text-zinc-300 px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 transition-colors"
+              className="text-[10px] text-fg-2 hover:text-fg-1 px-1.5 py-0.5 rounded bg-bg-2 hover:bg-bg-3 transition-colors"
             >
               + New
             </button>
@@ -329,8 +329,8 @@ export default function Workflows() {
             <button
               key={sf}
               onClick={() => openStageFile(sf)}
-              className={`w-full text-left px-4 py-2 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors ${
-                editingStageName === sf && view === 'editor' ? 'bg-zinc-800/70 border-l-2 border-l-amber-500' : ''
+              className={`w-full text-left px-4 py-2 border-b border-border hover:bg-bg-2/50 transition-colors ${
+                editingStageName === sf && view === 'editor' ? 'bg-bg-2/70 border-l-2 border-l-amber-500' : ''
               }`}
             >
               <div className="flex items-center gap-2">
@@ -371,7 +371,7 @@ export default function Workflows() {
             />
           )
         ) : !selectedWf && !selectedRun ? (
-          <div className="flex items-center justify-center h-full text-zinc-500">
+          <div className="flex items-center justify-center h-full text-fg-2">
             <div className="text-center">
               <div className="text-5xl mb-4">⚡</div>
               <div className="text-lg font-medium mb-2">Agent Workflows</div>
@@ -379,7 +379,7 @@ export default function Workflows() {
                 Define multi-agent pipelines in YAML. Each step spawns a headless agent,
                 runs a prompt, and passes output to downstream steps.
               </div>
-              <div className="mt-4 text-xs text-zinc-600">
+              <div className="mt-4 text-xs text-fg-2">
                 Like GitHub Actions — for AI agents
               </div>
             </div>
@@ -404,12 +404,12 @@ export default function Workflows() {
               <div className="flex-1">
                 <h2 className="text-xl font-bold">{selectedWf.name}</h2>
                 {selectedWf.description && (
-                  <p className="text-sm text-zinc-400">{selectedWf.description}</p>
+                  <p className="text-sm text-fg-1">{selectedWf.description}</p>
                 )}
               </div>
               <button
                 onClick={() => openEditWorkflow(selectedWf)}
-                className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-sm bg-bg-2 hover:bg-bg-3 rounded-lg transition-colors flex items-center gap-1.5"
                 title="Edit workflow YAML"
               >
                 ✏️ Edit
@@ -418,21 +418,21 @@ export default function Workflows() {
 
             {/* Pipeline visualization */}
             <div className="mb-6">
-              <h3 className="text-sm font-medium text-zinc-400 mb-3 uppercase tracking-wider">Pipeline</h3>
+              <h3 className="text-sm font-medium text-fg-1 mb-3 uppercase tracking-wider">Pipeline</h3>
               <div className="flex flex-wrap gap-2 items-center">
                 {selectedWf.steps.map((step, i) => (
                   <div key={step.id} className="flex items-center gap-2">
-                    <div className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2">
+                    <div className="bg-bg-2 border border-border-1 rounded-lg px-3 py-2">
                       <div className="text-sm font-medium">{step.name || step.id}</div>
                       {step.agent?.model && (
-                        <div className="text-xs text-zinc-500">{step.agent.model}</div>
+                        <div className="text-xs text-fg-2">{step.agent.model}</div>
                       )}
                       {step.needs?.length ? (
-                        <div className="text-xs text-zinc-600 mt-1">← {step.needs.join(', ')}</div>
+                        <div className="text-xs text-fg-2 mt-1">← {step.needs.join(', ')}</div>
                       ) : null}
                     </div>
                     {i < selectedWf.steps.length - 1 && (
-                      <span className="text-zinc-600">→</span>
+                      <span className="text-fg-2">→</span>
                     )}
                   </div>
                 ))}
@@ -442,21 +442,21 @@ export default function Workflows() {
             {/* Input form */}
             {selectedWf.inputs && Object.keys(selectedWf.inputs).length > 0 && (
               <div className="mb-6">
-                <h3 className="text-sm font-medium text-zinc-400 mb-3 uppercase tracking-wider">Inputs</h3>
+                <h3 className="text-sm font-medium text-fg-1 mb-3 uppercase tracking-wider">Inputs</h3>
                 <div className="space-y-3">
                   {Object.entries(selectedWf.inputs).map(([key, spec]) => (
                     <div key={key}>
-                      <label className="block text-sm text-zinc-300 mb-1">
+                      <label className="block text-sm text-fg-1 mb-1">
                         {key}
                         {spec.required && <span className="text-red-400 ml-1">*</span>}
                         {spec.description && (
-                          <span className="text-zinc-500 ml-2 text-xs">— {spec.description}</span>
+                          <span className="text-fg-2 ml-2 text-xs">— {spec.description}</span>
                         )}
                       </label>
                       <textarea
                         value={inputs[key] || ''}
                         onChange={e => setInputs(prev => ({ ...prev, [key]: e.target.value }))}
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-500 resize-y min-h-[60px]"
+                        className="w-full bg-bg-1 border border-border-1 rounded-lg px-3 py-2 text-sm text-fg focus:outline-none focus:border-emerald-500 resize-y min-h-[60px]"
                         placeholder={spec.default || `Enter ${key}...`}
                         rows={3}
                       />
@@ -472,7 +472,7 @@ export default function Workflows() {
               disabled={running}
               className={`px-6 py-2.5 rounded-lg font-medium text-sm transition-colors ${
                 running
-                  ? 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
+                  ? 'bg-bg-3 text-fg-1 cursor-not-allowed'
                   : 'bg-emerald-600 hover:bg-emerald-500 text-white'
               }`}
             >
@@ -482,7 +482,7 @@ export default function Workflows() {
             {/* Recent runs for this workflow */}
             {runs.filter(r => r.workflowId === selectedWf.id).length > 0 && (
               <div className="mt-8">
-                <h3 className="text-sm font-medium text-zinc-400 mb-3 uppercase tracking-wider">
+                <h3 className="text-sm font-medium text-fg-1 mb-3 uppercase tracking-wider">
                   Previous Runs
                 </h3>
                 <div className="space-y-2">
@@ -490,15 +490,15 @@ export default function Workflows() {
                     <button
                       key={run.runId}
                       onClick={() => { setSelectedRun(run); setView('run-monitor'); }}
-                      className="w-full text-left bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-3 hover:border-zinc-600 transition-colors"
+                      className="w-full text-left bg-bg-1 border border-border rounded-lg px-4 py-3 hover:border-border-1 transition-colors"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[run.status]}`} />
                           <span className="text-sm">{run.status}</span>
-                          <span className="text-xs text-zinc-500">{run.runId}</span>
+                          <span className="text-xs text-fg-2">{run.runId}</span>
                         </div>
-                        <span className="text-xs text-zinc-500">{elapsed(run.startedAt, run.finishedAt)}</span>
+                        <span className="text-xs text-fg-2">{elapsed(run.startedAt, run.finishedAt)}</span>
                       </div>
                       <div className="flex gap-1 mt-2">
                         {run.steps.map(s => (
@@ -547,7 +547,7 @@ function WorkflowEditor(props:
           <div className="flex items-center gap-2">
             <button
               onClick={props.onCancel}
-              className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm bg-bg-2 hover:bg-bg-3 rounded-lg transition-colors"
             >
               Cancel
             </button>
@@ -563,13 +563,13 @@ function WorkflowEditor(props:
 
         {props.stageIsNew && (
           <div className="mb-4">
-            <label className="block text-sm text-zinc-400 mb-1">File Name</label>
+            <label className="block text-sm text-fg-1 mb-1">File Name</label>
             <input
               type="text"
               value={props.stageFileName || ''}
               onChange={e => props.onStageNameChange(e.target.value)}
               placeholder="my-stage.md"
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500"
+              className="w-full bg-bg-1 border border-border-1 rounded-lg px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500"
             />
           </div>
         )}
@@ -577,7 +577,7 @@ function WorkflowEditor(props:
         <textarea
           value={props.stageContent}
           onChange={e => props.onStageContentChange(e.target.value)}
-          className="w-full h-[calc(100vh-240px)] bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+          className="w-full h-[calc(100vh-240px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
           placeholder="# Stage content (Markdown)..."
           spellCheck={false}
         />
@@ -594,7 +594,7 @@ function WorkflowEditor(props:
         <div className="flex items-center gap-2">
           <button
             onClick={props.onCancel}
-            className="px-4 py-2 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+            className="px-4 py-2 text-sm bg-bg-2 hover:bg-bg-3 rounded-lg transition-colors"
           >
             Cancel
           </button>
@@ -609,39 +609,39 @@ function WorkflowEditor(props:
       </div>
 
       <div className="mb-4">
-        <label className="block text-sm text-zinc-400 mb-1">Workflow ID</label>
+        <label className="block text-sm text-fg-1 mb-1">Workflow ID</label>
         <input
           type="text"
           value={props.workflowId}
           onChange={e => props.onIdChange(e.target.value)}
           readOnly={!props.isNew}
           placeholder="my-workflow"
-          className={`w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500 ${
+          className={`w-full bg-bg-1 border border-border-1 rounded-lg px-3 py-2 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 ${
             !props.isNew ? 'opacity-60 cursor-not-allowed' : ''
           }`}
         />
       </div>
 
       <div>
-        <label className="block text-sm text-zinc-400 mb-1">YAML Definition</label>
+        <label className="block text-sm text-fg-1 mb-1">YAML Definition</label>
         <textarea
           value={props.yaml}
           onChange={e => props.onYamlChange(e.target.value)}
-          className="w-full h-[calc(100vh-380px)] bg-zinc-900 border border-zinc-700 rounded-lg px-4 py-3 text-sm text-zinc-100 font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+          className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
           placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
           spellCheck={false}
         />
       </div>
 
       {/* Inline YAML Reference */}
-      <details className="mt-3 bg-zinc-900 border border-zinc-800 rounded-lg">
-        <summary className="px-4 py-2.5 cursor-pointer text-sm text-zinc-400 hover:text-zinc-200 select-none flex items-center gap-2">
+      <details className="mt-3 bg-bg-1 border border-border rounded-lg">
+        <summary className="px-4 py-2.5 cursor-pointer text-sm text-fg-1 hover:text-fg select-none flex items-center gap-2">
           <span>📖</span> YAML Reference — step fields, expressions, examples
         </summary>
-        <div className="px-4 py-3 border-t border-zinc-800 text-xs text-zinc-400 font-mono leading-relaxed max-h-72 overflow-y-auto space-y-3">
+        <div className="px-4 py-3 border-t border-border text-xs text-fg-1 font-mono leading-relaxed max-h-72 overflow-y-auto space-y-3">
           <div>
-            <div className="text-zinc-300 font-semibold mb-1">Step Fields</div>
-            <pre className="text-zinc-500 whitespace-pre">{`id: unique-id           # required
+            <div className="text-fg-1 font-semibold mb-1">Step Fields</div>
+            <pre className="text-fg-2 whitespace-pre">{`id: unique-id           # required
 name: Display Name       # optional
 needs: [step-a, step-b]  # DAG dependencies
 prompt: "..."            # agent prompt
@@ -664,16 +664,16 @@ review:
   max_iterations: 3`}</pre>
           </div>
           <div>
-            <div className="text-zinc-300 font-semibold mb-1">Variables</div>
-            <pre className="text-zinc-500 whitespace-pre">{`\${{ inputs.name }}              # input value
+            <div className="text-fg-1 font-semibold mb-1">Variables</div>
+            <pre className="text-fg-2 whitespace-pre">{`\${{ inputs.name }}              # input value
 \${{ steps.X.output }}           # step output text
 \${{ steps.X.status }}           # complete|failed|skipped
 \${{ steps.X.error }}            # error message
 \${{ steps.X.outputs.key }}      # parsed JSON field`}</pre>
           </div>
           <div>
-            <div className="text-zinc-300 font-semibold mb-1">Expressions (if:)</div>
-            <pre className="text-zinc-500 whitespace-pre">{`==  !=  contains  startsWith  >  <
+            <div className="text-fg-1 font-semibold mb-1">Expressions (if:)</div>
+            <pre className="text-fg-2 whitespace-pre">{`==  !=  contains  startsWith  >  <
 &&  ||  !
 Example: "\${{ steps.x.outputs.level }} == 'high' || \${{ inputs.force }} == 'true'"`}</pre>
           </div>
@@ -707,7 +707,7 @@ function RunMonitor({
             <span className={`w-3 h-3 rounded-full ${STATUS_COLORS[run.status]}`} />
             {run.workflowName}
           </h2>
-          <div className="text-sm text-zinc-400 mt-1">
+          <div className="text-sm text-fg-1 mt-1">
             Run {run.runId} · Started {new Date(run.startedAt).toLocaleTimeString()}
             {run.finishedAt && ` · ${elapsed(run.startedAt, run.finishedAt)}`}
           </div>
@@ -724,11 +724,11 @@ function RunMonitor({
 
       {/* Progress bar */}
       <div className="mb-6">
-        <div className="flex justify-between text-xs text-zinc-500 mb-1">
+        <div className="flex justify-between text-xs text-fg-2 mb-1">
           <span>{completedSteps}/{run.steps.length} steps</span>
           <span>{Math.round(progress)}%</span>
         </div>
-        <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
+        <div className="h-2 bg-bg-2 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
               run.status === 'failed' ? 'bg-red-500' :
@@ -741,12 +741,12 @@ function RunMonitor({
 
       {/* Inputs summary */}
       {Object.keys(run.inputs).length > 0 && (
-        <div className="mb-6 bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-          <div className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">Inputs</div>
+        <div className="mb-6 bg-bg-1 rounded-lg border border-border p-4">
+          <div className="text-xs font-medium text-fg-2 mb-2 uppercase tracking-wider">Inputs</div>
           {Object.entries(run.inputs).map(([k, v]) => (
             <div key={k} className="text-sm">
-              <span className="text-zinc-400">{k}:</span>{' '}
-              <span className="text-zinc-300">{v.length > 100 ? v.slice(0, 100) + '...' : v}</span>
+              <span className="text-fg-1">{k}:</span>{' '}
+              <span className="text-fg-1">{v.length > 100 ? v.slice(0, 100) + '...' : v}</span>
             </div>
           ))}
         </div>
@@ -759,21 +759,21 @@ function RunMonitor({
           return (
             <div
               key={step.id}
-              className={`bg-zinc-900 border rounded-lg overflow-hidden transition-colors ${
+              className={`bg-bg-1 border rounded-lg overflow-hidden transition-colors ${
                 step.status === 'running' ? 'border-blue-500/50' :
                 step.status === 'failed' ? 'border-red-500/30' :
-                step.status === 'complete' ? 'border-emerald-500/20' : 'border-zinc-800'
+                step.status === 'complete' ? 'border-emerald-500/20' : 'border-border'
               }`}
             >
               {/* Step header */}
               <button
                 onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-800/50 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-2/50 transition-colors"
               >
                 <span className="text-lg font-mono">{STATUS_ICONS[step.status] || '○'}</span>
                 <div className="flex-1 min-w-0 text-left">
                   <div className="text-sm font-medium flex items-center gap-2">
-                    <span className="text-zinc-500 mr-1">#{i + 1}</span>
+                    <span className="text-fg-2 mr-1">#{i + 1}</span>
                     {step.name || step.id}
                     {(step.iteration || 0) > 1 && (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">
@@ -785,22 +785,22 @@ function RunMonitor({
                     )}
                   </div>
                   {step.startedAt && (
-                    <div className="text-xs text-zinc-500">
+                    <div className="text-xs text-fg-2">
                       {elapsed(step.startedAt, step.finishedAt)}
                       {step.tokens ? ` · ${step.tokens} tokens` : ''}
                       {step.error ? ` · Error: ${step.error}` : ''}
                     </div>
                   )}
                 </div>
-                <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status] || 'bg-zinc-600'} text-white`}>
+                <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status] || 'bg-fg-2'} text-white`}>
                   {step.status}
                 </span>
-                <span className="text-zinc-500 text-sm">{expandedStep === step.id ? '▾' : '▸'}</span>
+                <span className="text-fg-2 text-sm">{expandedStep === step.id ? '▾' : '▸'}</span>
               </button>
 
               {/* Step detail */}
               {expandedStep === step.id && (
-                <div className="border-t border-zinc-800 px-4 py-3">
+                <div className="border-t border-border px-4 py-3">
                   {/* Gate approval UI */}
                   {step.status === 'waiting' && (
                     <GateApproval runId={run.runId} stepId={step.id} message={step.output} />
@@ -809,20 +809,20 @@ function RunMonitor({
                   {/* Iteration history */}
                   {(step.iterations?.length || 0) > 1 && (
                     <div className="mb-3">
-                      <div className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">
+                      <div className="text-xs font-medium text-fg-2 mb-2 uppercase tracking-wider">
                         Iterations ({step.iterations!.length})
                       </div>
                       <div className="space-y-2">
                         {step.iterations!.map((iter, idx) => (
                           <div key={idx} className={`rounded-lg border p-3 text-sm ${
                             idx === step.iterations!.length - 1
-                              ? 'border-zinc-700 bg-zinc-800/50'
-                              : 'border-zinc-800/50 bg-zinc-900/50'
+                              ? 'border-border-1 bg-bg-2/50'
+                              : 'border-border bg-bg-1/50'
                           }`}>
                             <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs font-medium text-zinc-400">Attempt {iter.attempt}</span>
+                              <span className="text-xs font-medium text-fg-1">Attempt {iter.attempt}</span>
                               <div className="flex items-center gap-2">
-                                {iter.tokens && <span className="text-[10px] text-zinc-600">{iter.tokens} tok</span>}
+                                {iter.tokens && <span className="text-[10px] text-fg-2">{iter.tokens} tok</span>}
                                 {iter.review && (
                                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                                     iter.review.pass
@@ -843,10 +843,10 @@ function RunMonitor({
                             )}
                             {idx < step.iterations!.length - 1 && (
                               <details className="mt-1">
-                                <summary className="text-[10px] text-zinc-600 cursor-pointer hover:text-zinc-400">
+                                <summary className="text-[10px] text-fg-2 cursor-pointer hover:text-fg-1">
                                   Show output ({iter.output.length} chars)
                                 </summary>
-                                <pre className="text-xs text-zinc-500 whitespace-pre-wrap font-mono mt-1 max-h-32 overflow-y-auto">
+                                <pre className="text-xs text-fg-2 whitespace-pre-wrap font-mono mt-1 max-h-32 overflow-y-auto">
                                   {iter.output}
                                 </pre>
                               </details>
@@ -859,15 +859,15 @@ function RunMonitor({
 
                   {/* Current/final output */}
                   {step.output && step.status !== 'waiting' ? (
-                    <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
+                    <pre className="text-sm text-fg-1 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
                       {step.output}
                     </pre>
                   ) : step.status === 'running' ? (
-                    <div className="text-sm text-zinc-500 animate-pulse">Processing...</div>
+                    <div className="text-sm text-fg-2 animate-pulse">Processing...</div>
                   ) : step.status === 'reviewing' ? (
                     <div className="text-sm text-purple-400 animate-pulse">🔍 Reviewing output against criteria...</div>
                   ) : step.status !== 'waiting' && (
-                    <div className="text-sm text-zinc-600">No output</div>
+                    <div className="text-sm text-fg-2">No output</div>
                   )}
 
                   {/* Live stream for running/reviewing steps */}
@@ -886,7 +886,7 @@ function RunMonitor({
                       ) : (
                         <button
                           onClick={() => setSteerStep(step.id)}
-                          className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
+                          className="px-3 py-1.5 text-xs bg-bg-2 hover:bg-bg-3 border border-border-1 rounded-lg transition-colors"
                         >
                           🔗 Connect
                         </button>
@@ -963,13 +963,13 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
       <div className="flex items-center gap-2 mb-1">
         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
         <span className="text-xs text-emerald-400 font-medium">● Live</span>
-        <span className="text-[10px] text-zinc-600">{agentName}</span>
+        <span className="text-[10px] text-fg-2">{agentName}</span>
       </div>
       <div
         ref={containerRef}
-        className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 max-h-64 overflow-y-auto"
+        className="bg-bg border border-border rounded-lg p-3 max-h-64 overflow-y-auto"
       >
-        <pre className="text-xs text-zinc-400 whitespace-pre-wrap font-mono leading-relaxed">
+        <pre className="text-xs text-fg-1 whitespace-pre-wrap font-mono leading-relaxed">
           {text}
         </pre>
       </div>
@@ -1033,15 +1033,15 @@ function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => 
   };
 
   return (
-    <div className="bg-zinc-950 border border-zinc-700 rounded-lg overflow-hidden">
+    <div className="bg-bg border border-border-1 rounded-lg overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800">
-        <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+      <div className="flex items-center justify-between px-3 py-2 bg-bg-1 border-b border-border">
+        <span className="text-xs font-medium text-fg-1 flex items-center gap-1.5">
           🔗 Connected to {agentName}
         </span>
         <button
           onClick={onClose}
-          className="text-zinc-500 hover:text-zinc-300 text-xs transition-colors"
+          className="text-fg-2 hover:text-fg-1 text-xs transition-colors"
         >
           ✕
         </button>
@@ -1050,16 +1050,16 @@ function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => 
       {/* Messages */}
       <div className="max-h-48 overflow-y-auto px-3 py-2 space-y-2">
         {messages.map((msg, i) => (
-          <div key={i} className={`text-xs ${msg.role === 'user' ? 'text-blue-300' : 'text-zinc-300'}`}>
-            <span className="font-medium text-[10px] uppercase text-zinc-500 mr-1">
+          <div key={i} className={`text-xs ${msg.role === 'user' ? 'text-blue-300' : 'text-fg-1'}`}>
+            <span className="font-medium text-[10px] uppercase text-fg-2 mr-1">
               {msg.role === 'user' ? 'you' : 'agent'}:
             </span>
             <span className="whitespace-pre-wrap font-mono">{msg.text}</span>
           </div>
         ))}
         {streaming && (
-          <div className="text-xs text-zinc-400">
-            <span className="font-medium text-[10px] uppercase text-zinc-500 mr-1">agent:</span>
+          <div className="text-xs text-fg-1">
+            <span className="font-medium text-[10px] uppercase text-fg-2 mr-1">agent:</span>
             <span className="whitespace-pre-wrap font-mono">{streaming}</span>
             <span className="animate-pulse">▊</span>
           </div>
@@ -1068,14 +1068,14 @@ function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => 
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-zinc-800">
+      <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
         <input
           type="text"
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           placeholder="Send a message..."
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-bg-1 border border-border-1 rounded px-2 py-1.5 text-xs text-fg font-mono focus:outline-none focus:border-blue-500"
         />
         <button
           onClick={send}
@@ -1112,7 +1112,7 @@ function GateApproval({ runId, stepId, message }: { runId: string; stepId: strin
         <span className="text-sm font-medium text-amber-300">Waiting for approval</span>
       </div>
       {message && (
-        <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono mb-3 max-h-48 overflow-y-auto bg-zinc-900/50 rounded p-2">
+        <pre className="text-sm text-fg-1 whitespace-pre-wrap font-mono mb-3 max-h-48 overflow-y-auto bg-bg-1/50 rounded p-2">
           {message}
         </pre>
       )}
@@ -1120,7 +1120,7 @@ function GateApproval({ runId, stepId, message }: { runId: string; stepId: strin
         value={feedback}
         onChange={e => setFeedback(e.target.value)}
         placeholder="Optional feedback..."
-        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 resize-y mb-3"
+        className="w-full bg-bg-1 border border-border-1 rounded-lg px-3 py-2 text-sm text-fg focus:outline-none focus:border-amber-500 resize-y mb-3"
         rows={2}
       />
       <div className="flex gap-2">
