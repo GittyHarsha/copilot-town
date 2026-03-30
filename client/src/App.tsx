@@ -14,15 +14,17 @@ const Sessions = lazy(() => import('./pages/Sessions'));
 const Graph = lazy(() => import('./pages/Graph'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Workflows = lazy(() => import('./pages/Workflows'));
+const LiveGrid = lazy(() => import('./pages/LiveGrid'));
 
-type Page = 'dashboard' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
+  { id: 'live', label: 'Live', icon: '⚡' },
   { id: 'panes', label: 'Panes', icon: '▦' },
   { id: 'sessions', label: 'Sessions', icon: '💬' },
   { id: 'graph', label: 'Graph', icon: '⊙' },
-  { id: 'workflows', label: 'Workflows', icon: '⚡' },
+  { id: 'workflows', label: 'Workflows', icon: '⛓' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
@@ -92,7 +94,7 @@ function AppInner() {
         return;
       }
       if (isInputFocused()) return;
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'panes', '3': 'sessions', '4': 'graph', '5': 'workflows', '6': 'settings' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -194,6 +196,7 @@ function AppInner() {
           />
         )}
         <Suspense fallback={LazyFallback}>
+          {page === 'live' && <LiveGrid />}
           {page === 'panes' && <Towns />}
           {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
           {page === 'graph' && <Graph />}
