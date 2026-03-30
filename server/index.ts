@@ -351,7 +351,7 @@ wssHeadless.on('connection', async (ws, req) => {
   console.log(`Headless WS connected to agent "${agentName}"`);
 
   // Register as a stream listener for live token-by-token output
-  const { addStreamListener, removeStreamListener, getHeadlessAgent } = await import('./services/headless.js');
+  const { addStreamListener, removeStreamListener, getHeadlessAgent, getOrReviveHeadless } = await import('./services/headless.js');
   const streamHandler = (event: any) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   };
@@ -365,10 +365,14 @@ wssHeadless.on('connection', async (ws, req) => {
         return;
       }
 
-      const agent = getHeadlessAgent(agentName);
+      let agent = getHeadlessAgent(agentName);
       if (!agent) {
-        ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
-        return;
+        // Try auto-revive from session file
+        agent = await getOrReviveHeadless(agentName);
+        if (!agent) {
+          ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
+          return;
+        }
       }
 
       agent.status = 'running';

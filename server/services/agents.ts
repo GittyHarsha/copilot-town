@@ -668,8 +668,8 @@ export async function getAgentAsync(idOrName: string): Promise<Agent | undefined
 
   // Check headless agents directly
   try {
-    const { getHeadlessAgent } = await import('./headless.js');
-    const h = getHeadlessAgent(idOrName);
+    const { getOrReviveHeadless } = await import('./headless.js');
+    const h = await getOrReviveHeadless(idOrName);
     if (h) {
       return {
         id: h.sessionId,

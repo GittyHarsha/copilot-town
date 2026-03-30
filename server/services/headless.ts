@@ -242,8 +242,12 @@ export async function sendToHeadless(
   message: string,
   options?: { timeoutMs?: number; attachments?: Attachment[] }
 ): Promise<HeadlessResponse> {
-  const agent = _headlessAgents.get(name);
-  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  let agent = _headlessAgents.get(name);
+  if (!agent) {
+    // Try auto-revive from session file
+    agent = await getOrReviveHeadless(name);
+    if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  }
 
   agent.status = 'running';
   agent.lastMessageAt = new Date().toISOString();
@@ -283,8 +287,12 @@ export async function sendToHeadless(
  * Get structured conversation history for a headless agent.
  */
 export async function getHeadlessMessages(name: string): Promise<any[]> {
-  const agent = _headlessAgents.get(name);
-  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  let agent = _headlessAgents.get(name);
+  if (!agent) {
+    // Try auto-revive from session file
+    agent = await getOrReviveHeadless(name);
+    if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  }
 
   const raw = await agent.session.getMessages();
   // SDK user.message events lack prompt text — inject from our stored prompts
@@ -492,6 +500,44 @@ export async function attachHeadless(
 
 export function getHeadlessAgent(name: string): HeadlessAgent | undefined {
   return _headlessAgents.get(name);
+}
+
+/**
+ * Get or auto-revive a headless agent. If the agent isn't in the in-memory map
+ * but exists in agent-sessions.json with type: 'headless', auto-attach it.
+ */
+export async function getOrReviveHeadless(name: string): Promise<HeadlessAgent | undefined> {
+  const existing = _headlessAgents.get(name);
+  if (existing) return existing;
+
+  // Check agent-sessions.json for a stopped headless entry
+  try {
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    const agents = raw.agents || {};
+
+    // Search by name (key) or by displayName
+    let sessionId: string | null = null;
+    if (agents[name]?.session && agents[name]?.type === 'headless') {
+      sessionId = agents[name].session;
+    } else {
+      for (const [, data] of Object.entries(agents as Record<string, any>)) {
+        if (data.displayName === name && data.type === 'headless' && data.session) {
+          sessionId = data.session;
+          break;
+        }
+      }
+    }
+
+    if (sessionId) {
+      console.log(`Auto-reviving headless agent "${name}" from session ${sessionId.slice(0, 8)}...`);
+      pushEvent('auto_revive', `Auto-reviving headless agent "${name}"`, 'info', name);
+      return await attachHeadless(name, sessionId);
+    }
+  } catch (e) {
+    console.error(`Failed to auto-revive headless agent "${name}":`, e);
+  }
+
+  return undefined;
 }
 
 export function listHeadlessAgents(): HeadlessAgent[] {
