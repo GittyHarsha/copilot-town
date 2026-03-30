@@ -223,6 +223,17 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
       duration: e?.data?.duration,
     });
   });
+  // assistant.message fires with complete response data before turn_end
+  sess.on('assistant.message', (e: any) => {
+    const data = e?.data || {};
+    emit({
+      type: 'response',
+      content: data.content || '',
+      thinking: data.reasoningText || undefined,
+      outputTokens: data.outputTokens,
+      messageId: data.messageId,
+    });
+  });
   sess.on('assistant.turn_end', () => {
     agent.status = 'idle';
     emit({ type: 'turn_end' });

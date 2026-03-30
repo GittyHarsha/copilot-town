@@ -432,20 +432,10 @@ wssHeadless.on('connection', async (ws, req) => {
         const sendOpts: any = { prompt: msg.prompt };
         if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
 
-        const result = await agent.session.sendAndWait(sendOpts);
-        const data = (result as any)?.data || {};
+        // sendAndWait blocks until done — response is sent via streaming events
+        // (assistant.message → response event). This just ensures we catch errors.
+        await agent.session.sendAndWait(sendOpts, 600_000);
         agent.status = 'idle';
-
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'response',
-            content: data.content || '',
-            thinking: data.reasoningText || undefined,
-            messageId: data.messageId,
-            outputTokens: data.outputTokens,
-            toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
-          }));
-        }
       } catch (e: any) {
         agent.status = 'idle';
         if (ws.readyState === WebSocket.OPEN) {
