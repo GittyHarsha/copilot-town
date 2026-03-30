@@ -12,7 +12,10 @@ export type EventType =
   | 'task'
   | 'broadcast'
   | 'spawn'
-  | 'mode_switch';
+  | 'mode_switch'
+  | 'model_change'
+  | 'tool_use'
+  | 'user_prompt';
 
 export type Severity = 'info' | 'warn' | 'error';
 

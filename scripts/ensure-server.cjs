@@ -312,7 +312,9 @@ rl.on('line', (line) => {
                     model: { type: 'string', description: 'Model to use (optional)' },
                     flags: { type: 'array', items: { type: 'string' }, description: 'CLI flags (optional)' },
                     session: { type: 'string', description: 'psmux session name (default: town)' },
-                    headless: { type: 'boolean', description: 'If true, create a headless agent (SDK session, no terminal pane). Default: false' }
+                    headless: { type: 'boolean', description: 'If true, create a headless agent (SDK session, no terminal pane). Default: false' },
+                    role: { type: 'string', description: 'Agent role description injected into system prompt (headless only)' },
+                    reasoningEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'], description: 'Reasoning effort level (headless only)' }
                   },
                   required: ['name']
                 }
@@ -349,6 +351,31 @@ rl.on('line', (line) => {
                     agent: { type: 'string', description: 'Agent name to demote' }
                   },
                   required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_set_model',
+                description: 'Change the model and/or reasoning effort on a running headless agent mid-session. No need to restart.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name' },
+                    model: { type: 'string', description: 'New model ID (e.g. claude-sonnet-4, gpt-4.1)' },
+                    reasoningEffort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'], description: 'Reasoning effort level (optional)' }
+                  },
+                  required: ['agent', 'model']
+                }
+              },
+              {
+                name: 'copilot_town_set_mode',
+                description: 'Switch a headless agent between interactive, plan, and autopilot modes. Autopilot lets the agent work autonomously.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name' },
+                    mode: { type: 'string', enum: ['interactive', 'plan', 'autopilot'], description: 'Agent mode' }
+                  },
+                  required: ['agent', 'mode']
                 }
               },
               {
@@ -557,9 +584,9 @@ rl.on('line', (line) => {
             .catch(() => replyError(msg.id, 'Hub server not running'));
 
         } else if (tool === 'copilot_town_spawn') {
-          const { name, template, model, flags, session, headless } = msg.params?.arguments || {};
+          const { name, template, model, flags, session, headless, role, reasoningEffort } = msg.params?.arguments || {};
           if (!name) return replyError(msg.id, 'name required');
-          httpPost('/api/agents/spawn', { name, template, model, flags, session, headless: !!headless })
+          httpPost('/api/agents/spawn', { name, template, model, flags, session, headless: !!headless, role, reasoningEffort })
             .then(data => {
               if (data.error) return replyError(msg.id, data.error);
               if (data.type === 'headless') {
@@ -597,6 +624,26 @@ rl.on('line', (line) => {
             .then(data => {
               if (data.error) return replyError(msg.id, data.error);
               reply(msg.id, `⬇️ Demoted "${agent}" to headless mode\nSession ${data.sessionId} running via SDK (model: ${data.model}). Use relay to communicate.`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_set_model') {
+          const { agent, model, reasoningEffort } = msg.params?.arguments || {};
+          if (!agent || !model) return replyError(msg.id, 'agent and model required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/model`, { model, reasoningEffort })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `🔄 Model changed for "${agent}": ${model}${reasoningEffort ? ` (effort: ${reasoningEffort})` : ''}`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_set_mode') {
+          const { agent, mode } = msg.params?.arguments || {};
+          if (!agent || !mode) return replyError(msg.id, 'agent and mode required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/mode`, { mode })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `🎛️ Agent "${agent}" mode set to: ${data.mode || mode}`);
             })
             .catch(() => replyError(msg.id, 'Hub server not running'));
 

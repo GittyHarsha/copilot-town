@@ -342,7 +342,7 @@ async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: bo
 // If target agent is stopped/idle with no pane, auto-wakes it first
 // If target is headless or ?sdk=true, uses SDK for two-way messaging
 router.post('/relay', async (req, res) => {
-  const { from, to, message, sdk: useSdk } = req.body;
+  const { from, to, message, sdk: useSdk, attachments } = req.body;
   if (!from || !to || !message) {
     return res.status(400).json({ error: 'from, to, and message required' });
   }
@@ -351,8 +351,6 @@ router.post('/relay', async (req, res) => {
   let receiver = await getAgentAsync(to);
   if (!receiver) return res.status(404).json({ error: `Agent "${to}" not found` });
 
-  // SDK two-way relay: send message and capture response
-  // Used for headless agents or when explicitly requested
   const receiverIsHeadless = (receiver as any).type === 'headless';
   if ((receiverIsHeadless || useSdk) && receiver.sessionId) {
     try {
@@ -361,11 +359,12 @@ router.post('/relay', async (req, res) => {
 
       let result: any;
       if (receiverIsHeadless) {
-        // Use in-memory headless session — returns rich data (thinking, tokens, tool calls)
         const { sendToHeadless } = await import('../services/headless.js');
-        result = await sendToHeadless(receiver.name, envelope, { timeoutMs: 120_000 });
+        result = await sendToHeadless(receiver.name, envelope, {
+          timeoutMs: 120_000,
+          attachments: attachments || undefined,
+        });
       } else {
-        // Resume existing session via SDK
         result = await sendToSession(receiver.sessionId, envelope, { timeoutMs: 120_000 });
       }
 
@@ -586,6 +585,60 @@ router.post('/:id/demote', async (req, res) => {
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to demote agent' });
+  }
+});
+
+// ── Model Switching ──────────────────────────────────────────────
+
+router.post('/:id/model', async (req, res) => {
+  const { model, reasoningEffort } = req.body;
+  if (!model) return res.status(400).json({ error: 'model required' });
+
+  try {
+    const { setHeadlessModel } = await import('../services/headless.js');
+    const result = await setHeadlessModel(req.params.id, model, { reasoningEffort });
+    res.json({ success: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Agent Mode Control ───────────────────────────────────────────
+
+router.post('/:id/mode', async (req, res) => {
+  const { mode } = req.body;
+  if (!mode || !['interactive', 'plan', 'autopilot'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be interactive, plan, or autopilot' });
+  }
+
+  try {
+    const { setHeadlessMode } = await import('../services/headless.js');
+    const result = await setHeadlessMode(req.params.id, mode);
+    res.json({ success: true, ...result });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/:id/mode', async (req, res) => {
+  try {
+    const { getHeadlessMode } = await import('../services/headless.js');
+    const result = await getHeadlessMode(req.params.id);
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Tool Activity Log ────────────────────────────────────────────
+
+router.get('/:id/tools/activity', async (req, res) => {
+  try {
+    const { getToolActivity } = await import('../services/headless.js');
+    const activity = getToolActivity(req.params.id);
+    res.json({ agent: req.params.id, activity });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -854,19 +907,18 @@ router.post('/broadcast', (req, res) => {
 
 // ── Spawn (create new agent — pane or headless) ─────────────────
 router.post('/spawn', async (req, res) => {
-  const { name, template, model, flags, session: sessionName, headless, systemPrompt } = req.body;
+  const { name, template, model, flags, session: sessionName, headless, systemPrompt, role, reasoningEffort } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
 
   // Headless spawn — SDK session with no terminal pane
   if (headless) {
     try {
       const { createHeadlessAgent } = await import('../services/headless.js');
-      const agent = await createHeadlessAgent(name, { model, systemPrompt });
+      const agent = await createHeadlessAgent(name, { model, systemPrompt, role, reasoningEffort });
 
       // If a system prompt was provided, send it as the first message
       if (systemPrompt) {
         const { sendToHeadless } = await import('../services/headless.js');
-        // Fire-and-forget — don't block spawn on response
         sendToHeadless(name, systemPrompt).catch(() => {});
       }
 
@@ -876,6 +928,7 @@ router.post('/spawn', async (req, res) => {
         type: 'headless',
         sessionId: agent.sessionId,
         model: agent.model,
+        reasoningEffort: agent.reasoningEffort,
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message || 'Failed to create headless agent' });

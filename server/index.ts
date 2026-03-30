@@ -330,8 +330,8 @@ wssTerminal.on('connection', (ws, req) => {
 
 // ── Headless Agent Streaming WebSocket ────────────────────────────
 // ws://localhost:3848/ws/headless?agent=<name>
-// Client sends: { prompt: "..." }
-// Server streams: { type: 'thinking_delta'|'message_delta'|'response'|'error', data: ... }
+// Client sends: { prompt: "...", attachments?: [...] }
+// Server streams: { type: 'turn_start'|'message_delta'|'reasoning'|'usage'|'response'|'error', ... }
 
 const wssHeadless = new WebSocketServer({ noServer: true });
 
@@ -347,6 +347,13 @@ wssHeadless.on('connection', async (ws, req) => {
 
   console.log(`Headless WS connected to agent "${agentName}"`);
 
+  // Register as a stream listener for live token-by-token output
+  const { addStreamListener, removeStreamListener, getHeadlessAgent } = await import('./services/headless.js');
+  const streamHandler = (event: any) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+  };
+  addStreamListener(agentName, streamHandler);
+
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
@@ -355,60 +362,39 @@ wssHeadless.on('connection', async (ws, req) => {
         return;
       }
 
-      // Get headless agent
-      const { getHeadlessAgent } = await import('./services/headless.js');
       const agent = getHeadlessAgent(agentName);
       if (!agent) {
         ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
         return;
       }
 
-      // Set up event listeners for live streaming
-      // SDK events: assistant.turn_start, assistant.reasoning, assistant.usage, assistant.message, assistant.turn_end
-      const send = (payload: any) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-      };
-
-      const sess = agent.session as any;
-
-      sess.on('assistant.turn_start', () => send({ type: 'turn_start' }));
-      sess.on('assistant.reasoning', (e: any) => {
-        // Reasoning event fires but content is encrypted (reasoningOpaque)
-        send({ type: 'reasoning', hasReasoning: true });
-      });
-      sess.on('assistant.usage', (e: any) => {
-        send({
-          type: 'usage',
-          model: e?.data?.model,
-          inputTokens: e?.data?.inputTokens,
-          outputTokens: e?.data?.outputTokens,
-          cost: e?.data?.cost,
-          duration: e?.data?.duration,
-        });
-      });
-      sess.on('assistant.turn_end', () => send({ type: 'turn_end' }));
-
-      // Send message and wait for full response (includes decrypted reasoningText)
       agent.status = 'running';
       agent.lastMessageAt = new Date().toISOString();
       agent.messageCount++;
 
       try {
-        const result = await agent.session.sendAndWait({ prompt: msg.prompt });
+        const sendOpts: any = { prompt: msg.prompt };
+        if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
+
+        const result = await agent.session.sendAndWait(sendOpts);
         const data = (result as any)?.data || {};
         agent.status = 'idle';
 
-        send({
-          type: 'response',
-          content: data.content || '',
-          thinking: data.reasoningText || undefined,
-          messageId: data.messageId,
-          outputTokens: data.outputTokens,
-          toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
-        });
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'response',
+            content: data.content || '',
+            thinking: data.reasoningText || undefined,
+            messageId: data.messageId,
+            outputTokens: data.outputTokens,
+            toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
+          }));
+        }
       } catch (e: any) {
         agent.status = 'idle';
-        send({ type: 'error', message: e.message });
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
       }
     } catch (e: any) {
       if (ws.readyState === WebSocket.OPEN) {
@@ -417,7 +403,10 @@ wssHeadless.on('connection', async (ws, req) => {
     }
   });
 
-  ws.on('close', () => console.log(`Headless WS disconnected from "${agentName}"`));
+  ws.on('close', () => {
+    removeStreamListener(agentName, streamHandler);
+    console.log(`Headless WS disconnected from "${agentName}"`);
+  });
 });
 
 // Route upgrade requests to the correct WebSocket server
