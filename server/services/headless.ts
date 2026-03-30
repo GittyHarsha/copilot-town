@@ -255,22 +255,23 @@ export async function sendToHeadless(
   agent.lastMessageAt = new Date().toISOString();
   agent.messageCount++;
   agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
+  persistUserPrompts(name, agent.userPrompts);
 
-  try {
+  const doSend = async (a: HeadlessAgent): Promise<HeadlessResponse> => {
     const timeoutMs = options?.timeoutMs || 120_000;
     const sendOpts: any = { prompt: message };
     if (options?.attachments?.length) {
       sendOpts.attachments = options.attachments;
     }
     const result = await Promise.race([
-      agent.session.sendAndWait(sendOpts),
+      a.session.sendAndWait(sendOpts),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Headless agent timed out')), timeoutMs)
       ),
     ]);
 
     const data = (result as any)?.data || {};
-    agent.status = 'idle';
+    a.status = 'idle';
     return {
       response: data.content || '',
       messageId: data.messageId,
@@ -279,7 +280,28 @@ export async function sendToHeadless(
       toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
       interactionId: data.interactionId || undefined,
     };
-  } catch (e) {
+  };
+
+  try {
+    return await doSend(agent);
+  } catch (e: any) {
+    const msg = e?.message || '';
+    // Session expired/not found — recreate with a fresh session
+    if (msg.includes('Session not found') || msg.includes('session_expired') || msg.includes('invalid_session')) {
+      console.log(`Session for "${name}" expired, creating fresh session...`);
+      pushEvent('auto_revive', `Session expired for "${name}", creating fresh session`, 'warn', name);
+      try {
+        _headlessAgents.delete(name);
+        const fresh = await createHeadlessAgent(name, { model: agent.model, source: agent.source });
+        // Preserve history metadata
+        fresh.messageCount = agent.messageCount;
+        fresh.userPrompts = agent.userPrompts;
+        return await doSend(fresh);
+      } catch (retryErr) {
+        agent.status = 'idle';
+        throw retryErr;
+      }
+    }
     agent.status = 'idle';
     throw e;
   }
@@ -467,10 +489,9 @@ export async function attachHeadless(
     lastMessageAt: null,
     messageCount: 0,
     toolActivity: [],
-    userPrompts: [],
+    userPrompts: loadUserPrompts(name),
   };
-
-  // Resume the existing session via SDK with hooks
+  agent.messageCount = agent.userPrompts.length;
   const session = await client.resumeSession(sessionId, {
     streaming: true,
     onPermissionRequest: approveAll,
@@ -533,7 +554,17 @@ export async function getOrReviveHeadless(name: string): Promise<HeadlessAgent |
     if (sessionId) {
       console.log(`Auto-reviving headless agent "${name}" from session ${sessionId.slice(0, 8)}...`);
       pushEvent('auto_revive', `Auto-reviving headless agent "${name}"`, 'info', name);
-      return await attachHeadless(name, sessionId);
+      try {
+        return await attachHeadless(name, sessionId);
+      } catch (attachErr: any) {
+        const msg = attachErr?.message || '';
+        if (msg.includes('Session not found') || msg.includes('session_expired') || msg.includes('invalid_session')) {
+          console.log(`Session expired for "${name}", creating fresh session instead`);
+          pushEvent('auto_revive', `Session expired for "${name}", creating fresh`, 'warn', name);
+          return await createHeadlessAgent(name);
+        }
+        throw attachErr;
+      }
     }
   } catch (e) {
     console.error(`Failed to auto-revive headless agent "${name}":`, e);
@@ -677,6 +708,27 @@ function registerHeadlessInSessionFile(name: string, sessionId: string) {
     delete raw.agents[name].stoppedAt;
     writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
   } catch {}
+}
+
+/** Persist user prompts to agent-sessions.json so they survive server restarts */
+function persistUserPrompts(name: string, prompts: { prompt: string; timestamp: string }[]) {
+  try {
+    if (!existsSync(SESSION_MAP_FILE)) return;
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    if (raw.agents?.[name]) {
+      raw.agents[name].prompts = prompts;
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    }
+  } catch {}
+}
+
+/** Load persisted user prompts from agent-sessions.json */
+function loadUserPrompts(name: string): { prompt: string; timestamp: string }[] {
+  try {
+    if (!existsSync(SESSION_MAP_FILE)) return [];
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    return raw.agents?.[name]?.prompts || [];
+  } catch { return []; }
 }
 
 // ── Cleanup ──────────────────────────────────────────────────────
