@@ -95,6 +95,8 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
   // Selection & detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<'pane' | 'headless' | null>(null);
+  const [selectedAgentName, setSelectedAgentName] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<'chat' | 'plan'>('chat');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [sessionMeta, setSessionMeta] = useState<SessionEntry | null>(null);
@@ -137,7 +139,12 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     if (!initialAgent || convSessions.length === 0) return;
     const agent = agents.find(a => a.id === initialAgent || a.name === initialAgent);
     const sid = agent?.sessionId;
-    if (sid) { setSelectedId(sid); setDetailTab('chat'); }
+    if (sid) {
+      setSelectedId(sid);
+      setSelectedType(agent?.type === 'headless' ? 'headless' : 'pane');
+      setSelectedAgentName(agent?.name || null);
+      setDetailTab('chat');
+    }
   }, [initialAgent, agents, convSessions]);
 
   // Load detail when selection changes
@@ -146,20 +153,61 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     setDetailLoading(true);
 
     if (detailTab === 'chat') {
-      Promise.all([
-        api.getConversation(selectedId),
-        api.getConversationSummary(selectedId),
-      ])
-        .then(([t, s]) => { setTurns(t); setSessionMeta(s); })
-        .catch(() => { setTurns([]); setSessionMeta(null); })
-        .finally(() => setDetailLoading(false));
+      if (selectedType === 'headless' && selectedAgentName) {
+        // Headless agent — use /api/agents/:id/messages and normalize to Turn[]
+        api.getAgentMessages(selectedAgentName)
+          .then(data => {
+            const msgs = data?.messages || [];
+            const normalized: Turn[] = [];
+            let turnIdx = 0;
+            let pendingUser: string | null = null;
+            let pendingTs = '';
+            for (const m of msgs) {
+              if (m.type === 'user.message') {
+                if (pendingUser !== null) {
+                  normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
+                }
+                pendingUser = m.prompt || m.content || m.text || '';
+                pendingTs = m.timestamp || '';
+              } else if (m.type === 'assistant.message') {
+                const resp = m.content || m.text || '';
+                const thinking = m.reasoningText || m.thinking || '';
+                const prefix = thinking ? `> 💭 **thinking**\n>\n> ${thinking.replace(/\n/g, '\n> ')}\n\n---\n\n` : '';
+                normalized.push({
+                  turn_index: turnIdx++,
+                  user_message: pendingUser || '',
+                  assistant_response: prefix + resp,
+                  timestamp: pendingTs || m.timestamp || '',
+                });
+                pendingUser = null;
+                pendingTs = '';
+              }
+            }
+            if (pendingUser !== null) {
+              normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
+            }
+            setTurns(normalized);
+            setSessionMeta({ id: selectedId, summary: selectedAgentName + ' (headless)', branch: '', created_at: '', updated_at: '' });
+          })
+          .catch(() => { setTurns([]); setSessionMeta(null); })
+          .finally(() => setDetailLoading(false));
+      } else {
+        // Pane agent — use existing conversation endpoint
+        Promise.all([
+          api.getConversation(selectedId),
+          api.getConversationSummary(selectedId),
+        ])
+          .then(([t, s]) => { setTurns(t); setSessionMeta(s); })
+          .catch(() => { setTurns([]); setSessionMeta(null); })
+          .finally(() => setDetailLoading(false));
+      }
     } else {
       api.getSessionPlan(selectedId)
         .then(({ plan }) => setPlanContent(plan))
         .catch(() => setPlanContent('(No plan found)'))
         .finally(() => setDetailLoading(false));
     }
-  }, [selectedId, detailTab]);
+  }, [selectedId, detailTab, selectedType, selectedAgentName]);
 
   // Scroll to bottom on new turns
   useEffect(() => {
@@ -176,7 +224,34 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     text && text.length > max ? text.slice(0, max) + '…' : text;
 
   // Build unified session list — merge CopilotSession metadata with conversation entries
-  const displaySessions = filter === 'unregistered' ? orphaned : sessions;
+  // Also include headless agents that aren't in the pane session list
+  const headlessAgents = agents.filter(a => a.type === 'headless');
+  const headlessSessionIds = new Set(headlessAgents.map(a => a.sessionId));
+
+  // Tag existing SDK sessions that belong to headless agents
+  const taggedSessions = sessions.map(s => 
+    headlessSessionIds.has(s.id) ? { ...s, type: 'headless' as const } : s
+  );
+
+  const headlessAsSessions: CopilotSession[] = headlessAgents
+    .filter(a => !sessions.some(s => s.id === a.sessionId))
+    .map(a => ({
+      id: a.sessionId,
+      summary: a.summary || a.description || a.name,
+      branch: '',
+      created_at: '',
+      updated_at: '',
+      lastModified: '',
+      agentName: a.name,
+      cwd: '',
+      checkpoints: [],
+      hasPlan: false,
+      isOrphaned: false,
+      type: 'headless' as const,
+    }));
+
+  const allSessions = [...taggedSessions, ...headlessAsSessions];
+  const displaySessions = filter === 'unregistered' ? orphaned : allSessions;
 
   // Lookup: session id → CopilotSession (for registration info)
   const sessionLookup = new Map<string, CopilotSession>();
@@ -200,7 +275,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
         {/* Filter tabs */}
         <div className="flex gap-4 mb-3 border-b border-border pb-2">
           <button className={`text-[10px] pb-0.5 transition-colors ${filter === 'all' ? 'text-fg border-b border-blue' : 'text-fg-2 hover:text-fg-1'}`}
-            onClick={() => setFilter('all')}>All ({sessions.length})</button>
+            onClick={() => setFilter('all')}>All ({allSessions.length})</button>
           <button className={`text-[10px] pb-0.5 transition-colors ${filter === 'unregistered' ? 'text-fg border-b border-blue' : 'text-fg-2 hover:text-fg-1'}`}
             onClick={() => setFilter('unregistered')}>Unregistered ({orphaned.length})</button>
         </div>
@@ -218,12 +293,22 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                 <div key={s.id}
                   className={`bg-bg-1 border rounded-lg p-2.5 cursor-pointer transition-colors ${
                     selectedId === s.id ? 'border-blue/50 bg-blue/5' : 'border-border hover:border-border-1'}`}
-                  onClick={() => { setSelectedId(s.id); setDetailTab('chat'); }}>
+                  onClick={() => {
+                    setSelectedId(s.id);
+                    // Detect headless
+                    const matchAgent = agents.find(a => a.sessionId === s.id);
+                    setSelectedType(matchAgent?.type === 'headless' || s.type === 'headless' ? 'headless' : 'pane');
+                    setSelectedAgentName(matchAgent?.name || s.agentName || null);
+                    setDetailTab('chat');
+                  }}>
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5 min-w-0">
                       {s.agentName
                         ? <span className="text-[10px] bg-blue/10 text-blue px-1.5 py-0.5 rounded font-medium truncate">{s.agentName}</span>
                         : <span className="text-[10px] text-fg-2/40 px-1 py-0.5 rounded border border-dashed border-border">anon</span>}
+                      {s.type === 'headless' && (
+                        <span className="text-[9px] text-cyan/70 bg-cyan/5 px-1 py-0.5 rounded">⚡ headless</span>
+                      )}
                       {s.checkpoints.length > 0 && (
                         <span className="text-[9px] text-fg-2/50 flex-shrink-0">{s.checkpoints.length} ckpt</span>
                       )}
@@ -269,6 +354,9 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
               <div className="min-w-0 flex-1 mr-3">
                 <h3 className="text-xs font-medium truncate">
                   {sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || selectedId.slice(0, 24)}
+                  {selectedType === 'headless' && (
+                    <span className="text-[9px] text-cyan/70 bg-cyan/5 px-1.5 py-0.5 rounded ml-2">⚡ headless</span>
+                  )}
                 </h3>
                 <div className="flex items-center gap-3 mt-0.5">
                   {sessionMeta?.branch && (

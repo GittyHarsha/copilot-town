@@ -58,6 +58,7 @@ export interface CopilotSession {
   agentName?: string;
   isOrphaned: boolean;
   checkpoints: { number: number; title: string; filename: string }[];
+  type?: 'pane' | 'headless';
 }
 
 export interface Town {

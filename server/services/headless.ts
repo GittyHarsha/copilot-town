@@ -22,6 +22,8 @@ export interface HeadlessAgent {
   reasoningEffort?: string;
   agentMode?: string;
   toolActivity: ToolActivityEntry[];
+  /** User prompts indexed by message count (SDK doesn't persist these) */
+  userPrompts: { prompt: string; timestamp: string }[];
 }
 
 export interface ToolActivityEntry {
@@ -146,6 +148,7 @@ export async function createHeadlessAgent(
     messageCount: 0,
     reasoningEffort: options?.reasoningEffort,
     toolActivity: [],
+    userPrompts: [],
   };
 
   const sessionConfig: any = {
@@ -245,6 +248,7 @@ export async function sendToHeadless(
   agent.status = 'running';
   agent.lastMessageAt = new Date().toISOString();
   agent.messageCount++;
+  agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
 
   try {
     const timeoutMs = options?.timeoutMs || 120_000;
@@ -283,11 +287,15 @@ export async function getHeadlessMessages(name: string): Promise<any[]> {
   if (!agent) throw new Error(`Headless agent "${name}" not found`);
 
   const raw = await agent.session.getMessages();
+  // SDK user.message events lack prompt text — inject from our stored prompts
+  let promptIdx = 0;
   return raw.map((m: any) => {
     const base = { type: m.type, id: m.id, timestamp: m.timestamp, parentId: m.parentId };
     switch (m.type) {
-      case 'user.message':
-        return { ...base, prompt: m.data?.prompt };
+      case 'user.message': {
+        const stored = agent.userPrompts[promptIdx++];
+        return { ...base, prompt: m.data?.prompt || stored?.prompt || '' };
+      }
       case 'assistant.message':
         return {
           ...base,
@@ -449,6 +457,7 @@ export async function attachHeadless(
     lastMessageAt: null,
     messageCount: 0,
     toolActivity: [],
+    userPrompts: [],
   };
 
   // Resume the existing session via SDK with hooks
