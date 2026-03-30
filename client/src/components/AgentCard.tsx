@@ -233,13 +233,14 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
               </>
             ) : isStopped ? (
               <>
-                {agent.sessionId && !agent.sessionId.startsWith('pane-') && (
+                {/* Headless agents: Chat auto-revives the session */}
+                {isHeadless && agent.sessionId && (
+                  <button className="btn btn-primary"
+                    onClick={(e) => { e.stopPropagation(); setShowChat(true); }}>💬 Chat</button>
+                )}
+                {agent.sessionId && !agent.sessionId.startsWith('pane-') && !isHeadless && (
                   <button className="btn btn-success"
                     onClick={(e) => { e.stopPropagation(); handleResume(); }}>▶ Resume</button>
-                )}
-                {agent.template && (
-                  <button className="btn"
-                    onClick={(e) => { e.stopPropagation(); setShowLaunchConfig(agent.sessionId && !agent.sessionId.startsWith('pane-') ? 'resume' : 'start'); }}>⚙ Config</button>
                 )}
                 {agent.sessionId && !agent.sessionId.startsWith('pane-') && onViewHistory && (
                   <button className="btn"
