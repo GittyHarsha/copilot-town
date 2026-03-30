@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { LaunchConfigPanel } from './LaunchConfigPanel';
 import { useTerminalPanel } from './TerminalPanel';
 import ChatPanel from './ChatPanel';
+import HeadlessChatPanel from './HeadlessChatPanel';
 import AgentEditPanel from './AgentEditPanel';
 
 interface Props {
@@ -269,7 +270,9 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
       )}
 
       {showChat && createPortal(
-        <ChatPanel agentName={agent.id} onClose={() => setShowChat(false)} />,
+        isHeadless
+          ? <HeadlessChatPanel agentName={agent.name} onClose={() => setShowChat(false)} />
+          : <ChatPanel agentName={agent.id} onClose={() => setShowChat(false)} />,
         document.body
       )}
 
