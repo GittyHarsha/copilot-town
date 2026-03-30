@@ -257,13 +257,21 @@ router.get('/:id/output', (req, res) => {
 
 // Get agent's conversation history via SDK
 router.get('/:id/messages', async (req, res) => {
-  const agent = getAgent(req.params.id);
+  const agent = await getAgentAsync(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   if (!agent.sessionId) return res.status(400).json({ error: 'Agent has no session ID' });
 
   try {
+    // Headless agents: structured messages with thinking, tool calls, tokens
+    if (agent.type === 'headless') {
+      const { getHeadlessMessages } = await import('../services/headless.js');
+      const messages = await getHeadlessMessages(agent.name);
+      return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+    }
+
+    // Pane agents: raw SDK session messages
     const messages = await getSessionMessages(agent.sessionId);
-    res.json({ sessionId: agent.sessionId, count: messages.length, messages });
+    res.json({ sessionId: agent.sessionId, type: 'pane', count: messages.length, messages });
   } catch (e: any) {
     res.status(500).json({ error: `Failed to get messages: ${e.message}` });
   }
@@ -351,9 +359,9 @@ router.post('/relay', async (req, res) => {
       pushEvent('relay', `SDK relay from ${sender?.name || from} → ${receiver.name}`, 'info', receiver.name);
       const envelope = `[Message from ${sender?.name || from}]\n${message}`;
 
-      let result: { response: string; messageId?: string };
+      let result: any;
       if (receiverIsHeadless) {
-        // Use in-memory headless session
+        // Use in-memory headless session — returns rich data (thinking, tokens, tool calls)
         const { sendToHeadless } = await import('../services/headless.js');
         result = await sendToHeadless(receiver.name, envelope, { timeoutMs: 120_000 });
       } else {
@@ -369,6 +377,9 @@ router.post('/relay', async (req, res) => {
         method: 'sdk',
         response: result.response,
         messageId: result.messageId,
+        thinking: result.thinking,
+        outputTokens: result.outputTokens,
+        toolRequests: result.toolRequests,
       });
     } catch (e: any) {
       console.error(`SDK relay failed for ${receiver.name}:`, e.message);

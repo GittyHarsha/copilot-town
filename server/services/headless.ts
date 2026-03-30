@@ -72,14 +72,25 @@ export async function createHeadlessAgent(
   return agent;
 }
 
+/** Rich response from a headless agent interaction */
+export interface HeadlessResponse {
+  response: string;
+  messageId?: string;
+  thinking?: string;
+  outputTokens?: number;
+  toolRequests?: any[];
+  interactionId?: string;
+}
+
 /**
- * Send a message to a headless agent and get its response.
+ * Send a message to a headless agent and get its full response.
+ * Returns content, thinking/reasoning, token count, and tool requests.
  */
 export async function sendToHeadless(
   name: string,
   message: string,
   options?: { timeoutMs?: number }
-): Promise<{ response: string; messageId?: string }> {
+): Promise<HeadlessResponse> {
   const agent = _headlessAgents.get(name);
   if (!agent) throw new Error(`Headless agent "${name}" not found`);
 
@@ -96,14 +107,52 @@ export async function sendToHeadless(
       ),
     ]);
 
-    const response = (result as any)?.data?.content || '';
-    const messageId = (result as any)?.data?.messageId || (result as any)?.id || '';
+    const data = (result as any)?.data || {};
     agent.status = 'idle';
-    return { response, messageId };
+    return {
+      response: data.content || '',
+      messageId: data.messageId,
+      thinking: data.reasoningText || undefined,
+      outputTokens: data.outputTokens || undefined,
+      toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
+      interactionId: data.interactionId || undefined,
+    };
   } catch (e) {
     agent.status = 'idle';
     throw e;
   }
+}
+
+/**
+ * Get structured conversation history for a headless agent.
+ */
+export async function getHeadlessMessages(name: string): Promise<any[]> {
+  const agent = _headlessAgents.get(name);
+  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+
+  const raw = await agent.session.getMessages();
+  // Parse into structured format
+  return raw.map((m: any) => {
+    const base = { type: m.type, id: m.id, timestamp: m.timestamp, parentId: m.parentId };
+    switch (m.type) {
+      case 'user.message':
+        return { ...base, prompt: m.data?.prompt };
+      case 'assistant.message':
+        return {
+          ...base,
+          content: m.data?.content,
+          thinking: m.data?.reasoningText || undefined,
+          outputTokens: m.data?.outputTokens,
+          toolRequests: m.data?.toolRequests?.length ? m.data.toolRequests : undefined,
+        };
+      case 'tool.call':
+        return { ...base, toolName: m.data?.name, args: m.data?.arguments };
+      case 'tool.result':
+        return { ...base, toolName: m.data?.name, result: m.data?.result };
+      default:
+        return base;
+    }
+  });
 }
 
 /**

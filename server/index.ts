@@ -328,6 +328,98 @@ wssTerminal.on('connection', (ws, req) => {
   ws.on('error', () => clearInterval(pollInterval));
 });
 
+// ── Headless Agent Streaming WebSocket ────────────────────────────
+// ws://localhost:3848/ws/headless?agent=<name>
+// Client sends: { prompt: "..." }
+// Server streams: { type: 'thinking_delta'|'message_delta'|'response'|'error', data: ... }
+
+const wssHeadless = new WebSocketServer({ noServer: true });
+
+wssHeadless.on('connection', async (ws, req) => {
+  const url = new URL(req.url || '', `http://localhost:${PORT}`);
+  const agentName = url.searchParams.get('agent');
+
+  if (!agentName) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Missing ?agent= param' }));
+    ws.close();
+    return;
+  }
+
+  console.log(`Headless WS connected to agent "${agentName}"`);
+
+  ws.on('message', async (raw) => {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (!msg.prompt) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Missing prompt field' }));
+        return;
+      }
+
+      // Get headless agent
+      const { getHeadlessAgent } = await import('./services/headless.js');
+      const agent = getHeadlessAgent(agentName);
+      if (!agent) {
+        ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
+        return;
+      }
+
+      // Set up event listeners for live streaming
+      // SDK events: assistant.turn_start, assistant.reasoning, assistant.usage, assistant.message, assistant.turn_end
+      const send = (payload: any) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+      };
+
+      const sess = agent.session as any;
+
+      sess.on('assistant.turn_start', () => send({ type: 'turn_start' }));
+      sess.on('assistant.reasoning', (e: any) => {
+        // Reasoning event fires but content is encrypted (reasoningOpaque)
+        send({ type: 'reasoning', hasReasoning: true });
+      });
+      sess.on('assistant.usage', (e: any) => {
+        send({
+          type: 'usage',
+          model: e?.data?.model,
+          inputTokens: e?.data?.inputTokens,
+          outputTokens: e?.data?.outputTokens,
+          cost: e?.data?.cost,
+          duration: e?.data?.duration,
+        });
+      });
+      sess.on('assistant.turn_end', () => send({ type: 'turn_end' }));
+
+      // Send message and wait for full response (includes decrypted reasoningText)
+      agent.status = 'running';
+      agent.lastMessageAt = new Date().toISOString();
+      agent.messageCount++;
+
+      try {
+        const result = await agent.session.sendAndWait({ prompt: msg.prompt });
+        const data = (result as any)?.data || {};
+        agent.status = 'idle';
+
+        send({
+          type: 'response',
+          content: data.content || '',
+          thinking: data.reasoningText || undefined,
+          messageId: data.messageId,
+          outputTokens: data.outputTokens,
+          toolRequests: data.toolRequests?.length ? data.toolRequests : undefined,
+        });
+      } catch (e: any) {
+        agent.status = 'idle';
+        send({ type: 'error', message: e.message });
+      }
+    } catch (e: any) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'error', message: `Parse error: ${e.message}` }));
+      }
+    }
+  });
+
+  ws.on('close', () => console.log(`Headless WS disconnected from "${agentName}"`));
+});
+
 // Route upgrade requests to the correct WebSocket server
 server.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url || '', `http://localhost:${PORT}`).pathname;
@@ -340,6 +432,10 @@ server.on('upgrade', (req, socket, head) => {
     wssTerminal.handleUpgrade(req, socket, head, (ws) => {
       wssTerminal.emit('connection', ws, req);
     });
+  } else if (pathname === '/ws/headless') {
+    wssHeadless.handleUpgrade(req, socket, head, (ws) => {
+      wssHeadless.emit('connection', ws, req);
+    });
   } else {
     socket.destroy();
   }
@@ -347,8 +443,9 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(PORT, () => {
   console.log(`\n🏘️ Copilot Town API running on http://localhost:${PORT}`);
-  console.log(`   Status WS:   ws://localhost:${PORT}/ws/status`);
+  console.log(`   Status WS:    ws://localhost:${PORT}/ws/status`);
   console.log(`   Terminal WS:  ws://localhost:${PORT}/ws/terminal?target=<pane>`);
+  console.log(`   Headless WS:  ws://localhost:${PORT}/ws/headless?agent=<name>`);
   console.log(`   Frontend:     http://localhost:${PORT}\n`);
 
   if (isMuxAvailable()) {

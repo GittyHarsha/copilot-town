@@ -394,7 +394,10 @@ rl.on('line', (line) => {
             .then(result => {
               if (result.error) return replyError(msg.id, result.error);
               if (result.method === 'sdk' && result.response) {
-                reply(msg.id, `Relayed to ${result.to} (via SDK). Response:\n\n${result.response}`);
+                let text = `Relayed to ${result.to} (via SDK).\n\nResponse:\n${result.response}`;
+                if (result.thinking) text += `\n\n<thinking>\n${result.thinking}\n</thinking>`;
+                if (result.outputTokens) text += `\n\n[${result.outputTokens} tokens]`;
+                reply(msg.id, text);
               } else {
                 const wokeMsg = result.woke ? ' (auto-woke agent first)' : '';
                 reply(msg.id, `Relayed message from ${result.from} to ${result.to}${wokeMsg}`);
