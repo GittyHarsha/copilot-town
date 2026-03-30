@@ -1,421 +1,602 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { api, type AgentData } from '../lib/api';
 import { useAgentStatus } from '../hooks/useAgentStatus';
 
-/* ── Dynamic color/ring from agent name ───────────── */
-function hashHex(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const h = Math.abs(hash) % 360;
-  const s = 0.7, l = 0.6;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color).toString(16).padStart(2, '0');
-  };
-  return `#${f(0)}${f(8)}${f(4)}`;
-}
-
-function agentRing(agent: AgentData): number {
-  if (agent.status === 'running') return 0;
-  if (agent.status === 'idle') return 1;
-  return 2;
-}
-
-function agentLabel(agent: AgentData): string {
-  const name = agent.template?.name;
-  return name ? name.slice(0, 8) : 'session';
-}
-
-function agentColor(agent: AgentData): string {
-  return hashHex(agent.name);
-}
-
-/* ── Types ────────────────────────────────────────── */
+/* ── Types ─────────────────────────────────────────── */
 interface Relay { from: string; to: string; message: string; timestamp: string }
-interface NodePos { name: string; x: number; y: number; agent: AgentData; color: string; ring: number }
+interface CardRect { cx: number; cy: number; w: number; h: number }
 
+/* ── Helpers ────────────────────────────────────────── */
+function sc(status: string) {
+  if (status === 'running') return '#22c55e';
+  if (status === 'idle') return '#eab308';
+  return '#71717a';
+}
+
+function scBg(status: string) {
+  if (status === 'running') return 'rgba(34,197,94,0.07)';
+  if (status === 'idle') return 'rgba(234,179,8,0.07)';
+  return 'rgba(113,113,122,0.05)';
+}
+
+function scBorder(status: string) {
+  if (status === 'running') return 'rgba(34,197,94,0.3)';
+  if (status === 'idle') return 'rgba(234,179,8,0.3)';
+  return 'rgba(113,113,122,0.15)';
+}
+
+function modelShort(m?: string): string {
+  if (!m) return '';
+  return m.replace(/^claude-/, '').replace(/^gpt-/, 'gpt-');
+}
+
+function truncStr(s: string | undefined, n: number): string {
+  if (!s) return '';
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+
+function relTime(iso?: string): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'now';
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+  return `${Math.floor(ms / 86_400_000)}d`;
+}
+
+/* ── Component ──────────────────────────────────────── */
 export default function TownView() {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const { status: wsStatus } = useAgentStatus();
   const [relays, setRelays] = useState<Relay[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 600 });
+  const [chatMsg, setChatMsg] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const cardElems = useRef(new Map<string, HTMLDivElement>());
+  const [cardRects, setCardRects] = useState(new Map<string, CardRect>());
+  const [tick, setTick] = useState(0);
 
-  // Fetch full agent data when WS status updates (avoids redundant REST polling)
+  /* ── Data fetching ── */
+  useEffect(() => {
+    api.getAgents().then(setAgents).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (!wsStatus) return;
     api.getAgents().then(setAgents).catch(() => {});
   }, [wsStatus]);
 
-  // Relays: fetch once on mount, then infrequently
   useEffect(() => {
     api.getRelays(50).then(setRelays).catch(() => {});
-    const iv = setInterval(() => api.getRelays(50).then(setRelays).catch(() => {}), 30000);
+    const iv = setInterval(() => api.getRelays(50).then(setRelays).catch(() => {}), 30_000);
     return () => clearInterval(iv);
   }, []);
 
-  // Resize
+  // Clear selection if agent disappears
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
-    ro.observe(el);
-    setSize({ w: el.clientWidth, h: el.clientHeight });
-    return () => ro.disconnect();
-  }, []);
+    if (selected && !agents.some(a => a.name === selected)) setSelected(null);
+  }, [agents, selected]);
 
-  // Layout: concentric rings
-  const nodes = useMemo<NodePos[]>(() => {
-    const cx = size.w / 2;
-    const cy = size.h / 2;
-    const maxR = Math.min(size.w, size.h) * 0.4;
-    const rings: Map<number, AgentData[]> = new Map();
-    agents.forEach(a => {
-      const r = agentRing(a);
-      if (!rings.has(r)) rings.set(r, []);
-      rings.get(r)!.push(a);
-    });
-    const result: NodePos[] = [];
-    rings.forEach((members, ring) => {
-      const radius = ring === 0 ? 0 : maxR * (ring / 3) * 0.9;
-      members.forEach((a, i) => {
-        const angle = (2 * Math.PI * i) / members.length - Math.PI / 2;
-        // For ring 0, offset slightly so they don't overlap
-        const r0 = ring === 0 ? 35 * (i - (members.length - 1) / 2) : radius;
-        const offsetAngle = ring === 0 ? -Math.PI / 2 : angle;
-        result.push({
-          name: a.name,
-          x: ring === 0 ? cx + r0 : cx + radius * Math.cos(angle),
-          y: ring === 0 ? cy : cy + radius * Math.sin(angle),
-          agent: a,
-          color: agentColor(a),
-          ring,
+  /* ── Measure card positions for SVG relay lines ── */
+  useEffect(() => {
+    const measure = () => {
+      const cont = contentRef.current;
+      if (!cont) return;
+      const cr = cont.getBoundingClientRect();
+      const m = new Map<string, CardRect>();
+      cardElems.current.forEach((el, name) => {
+        const r = el.getBoundingClientRect();
+        m.set(name, {
+          cx: r.left - cr.left + r.width / 2,
+          cy: r.top - cr.top + r.height / 2,
+          w: r.width,
+          h: r.height,
         });
       });
-    });
-    return result;
-  }, [agents, size]);
+      setCardRects(m);
+    };
+    const t = requestAnimationFrame(() => setTimeout(measure, 30));
+    const ro = new ResizeObserver(() => requestAnimationFrame(() => setTimeout(measure, 30)));
+    if (contentRef.current) ro.observe(contentRef.current);
+    const scEl = scrollRef.current;
+    const onScroll = () => setTick(t => t + 1); // trigger SVG re-pos on scroll
+    scEl?.addEventListener('scroll', onScroll, { passive: true });
+    return () => { cancelAnimationFrame(t); ro.disconnect(); scEl?.removeEventListener('scroll', onScroll); };
+  }, [agents, selected, tick]);
 
-  // Relay edges (unique pairs with count)
+  /* ── Derived data ── */
+  const sorted = useMemo(() => {
+    const ord: Record<string, number> = { running: 0, idle: 1, stopped: 2 };
+    return [...agents].sort((a, b) => {
+      const d = (ord[a.status] ?? 3) - (ord[b.status] ?? 3);
+      return d !== 0 ? d : a.name.localeCompare(b.name);
+    });
+  }, [agents]);
+
   const edges = useMemo(() => {
-    const map = new Map<string, { from: string; to: string; count: number }>();
+    const m = new Map<string, { from: string; to: string; count: number; last: string }>();
     for (const r of relays) {
-      const key = `${r.from}→${r.to}`;
-      const e = map.get(key);
-      if (e) e.count++;
-      else map.set(key, { from: r.from, to: r.to, count: 1 });
+      const key = [r.from, r.to].sort().join('\0');
+      const e = m.get(key);
+      if (e) { e.count++; e.last = r.message; }
+      else m.set(key, { from: r.from, to: r.to, count: 1, last: r.message });
     }
-    return Array.from(map.values());
+    return Array.from(m.values());
   }, [relays]);
 
-  const nodeMap = useMemo(() => {
-    const m = new Map<string, NodePos>();
-    nodes.forEach(n => m.set(n.name, n));
-    return m;
-  }, [nodes]);
+  const connectedNames = useMemo(() => {
+    const s = new Set<string>();
+    edges.forEach(e => { s.add(e.from); s.add(e.to); });
+    return s;
+  }, [edges]);
 
-  const selAgent = selected ? nodeMap.get(selected) : null;
+  const selAgent = agents.find(a => a.name === selected);
+  const selEdges = useMemo(() => {
+    if (!selected) return [];
+    return edges.filter(e => e.from === selected || e.to === selected);
+  }, [selected, edges]);
 
-  const activeCount = agents.filter(a => a.status === 'running' || a.status === 'idle').length;
+  const counts = useMemo(() => ({
+    total: agents.length,
+    running: agents.filter(a => a.status === 'running').length,
+    idle: agents.filter(a => a.status === 'idle').length,
+    stopped: agents.filter(a => a.status === 'stopped').length,
+  }), [agents]);
+
+  /* ── Actions ── */
+  const handleStop = useCallback(async (name: string) => {
+    try { await api.stopAgent(name); } catch { /* */ }
+  }, []);
+
+  const handleChat = useCallback(async () => {
+    if (!selected || !chatMsg.trim()) return;
+    setSending(true);
+    try { await api.sendMessage(selected, chatMsg.trim()); setChatMsg(''); }
+    catch { /* */ } finally { setSending(false); }
+  }, [selected, chatMsg]);
+
+  const setRef = useCallback((name: string) => (el: HTMLDivElement | null) => {
+    if (el) cardElems.current.set(name, el);
+    else cardElems.current.delete(name);
+  }, []);
+
+  const contentH = contentRef.current?.scrollHeight ?? 600;
+  const contentW = contentRef.current?.scrollWidth ?? 800;
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 80px)' }}>
-      {/* Stats bar */}
-      <div className="flex items-center justify-between px-2 py-2 shrink-0">
-        <div className="flex items-center gap-3">
-          <h2 className="text-sm font-bold tracking-tight">🏘️ Copilot Town</h2>
-          <div className="flex items-center gap-1.5 text-[10px] text-fg-2">
-            <span>{agents.length} agents</span>
-            <span className="text-fg-2/30">·</span>
-            <span className="text-green-400">{activeCount} alive</span>
-            <span className="text-fg-2/30">·</span>
-            <span>{relays.length} relays</span>
+    <div style={{ height: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)' }}>
+
+      {/* ═══ Header stats bar ═══ */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '10px 16px', borderBottom: '1px solid var(--color-border)',
+        background: 'var(--color-bg-1)', flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, margin: 0, letterSpacing: '-0.01em' }}>
+            🏘️ Copilot Town
+          </h2>
+          <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--color-fg-2)' }}>
+            <span>{counts.total} agent{counts.total !== 1 ? 's' : ''}</span>
+            {counts.running > 0 && <span style={{ color: '#22c55e' }}>● {counts.running} running</span>}
+            {counts.idle > 0 && <span style={{ color: '#eab308' }}>● {counts.idle} idle</span>}
+            {counts.stopped > 0 && <span style={{ color: '#71717a' }}>○ {counts.stopped} stopped</span>}
           </div>
         </div>
-        <div className="flex items-center gap-3 text-[9px] text-fg-2/60">
-          {[['🟢','running'],['🟡','idle'],['🔴','stopped']].map(([icon, label]) => (
-            <span key={label} className="flex items-center gap-1">{icon} {label}</span>
-          ))}
+        <div style={{ fontSize: '11px', color: 'var(--color-fg-2)' }}>
+          {relays.length > 0 && <span>🔗 {relays.length} relay{relays.length !== 1 ? 's' : ''}</span>}
         </div>
       </div>
 
-      {/* Main visualization */}
-      <div ref={containerRef} className="flex-1 min-h-0 relative overflow-hidden rounded-xl border border-white/5"
-        style={{ background: 'radial-gradient(ellipse at center, #0d1117 0%, #010409 100%)' }}
-        onClick={() => setSelected(null)}>
+      {/* ═══ Main content area ═══ */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
-        {/* Animated grid background */}
-        <div className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: `
-              linear-gradient(rgba(255,255,255,.3) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(255,255,255,.3) 1px, transparent 1px)`,
-            backgroundSize: '40px 40px',
-          }} />
+        {/* ── Scrollable grid + SVG overlay ── */}
+        <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', position: 'relative' }}
+          onClick={() => setSelected(null)}>
 
-        {/* Concentric ring guides */}
-        {[1, 2, 3].map(ring => {
-          const cx = size.w / 2;
-          const cy = size.h / 2;
-          const maxR = Math.min(size.w, size.h) * 0.4;
-          const r = maxR * (ring / 3) * 0.9;
-          return (
-            <div key={ring} className="absolute rounded-full border border-white/[0.03]"
-              style={{
-                left: cx - r, top: cy - r,
-                width: r * 2, height: r * 2,
-              }} />
-          );
-        })}
+          <div ref={contentRef} style={{ position: 'relative', padding: '20px', minHeight: '100%' }}>
 
-        {/* Connection lines (SVG overlay) */}
-        <svg className="absolute inset-0 pointer-events-none" width={size.w} height={size.h}>
-          <defs>
-            {edges.map((e, i) => {
-              const from = nodeMap.get(e.from);
-              const to = nodeMap.get(e.to);
-              if (!from || !to) return null;
-              return (
-                <linearGradient key={i} id={`edge-grad-${i}`}
-                  x1={from.x} y1={from.y} x2={to.x} y2={to.y} gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stopColor={from.color} stopOpacity="0.4" />
-                  <stop offset="100%" stopColor={to.color} stopOpacity="0.4" />
-                </linearGradient>
-              );
-            })}
-          </defs>
-          {edges.map((e, i) => {
-            const from = nodeMap.get(e.from);
-            const to = nodeMap.get(e.to);
-            if (!from || !to) return null;
-            const isHighlight = selected === e.from || selected === e.to;
-            // Curve the line
-            const mx = (from.x + to.x) / 2;
-            const my = (from.y + to.y) / 2;
-            const dx = to.x - from.x;
-            const dy = to.y - from.y;
-            const cx = mx - dy * 0.12;
-            const cy = my + dx * 0.12;
-            return (
-              <g key={i}>
-                <path
-                  d={`M${from.x},${from.y} Q${cx},${cy} ${to.x},${to.y}`}
-                  fill="none"
-                  stroke={isHighlight ? `url(#edge-grad-${i})` : 'rgba(255,255,255,0.04)'}
-                  strokeWidth={isHighlight ? 1.5 : 0.5}
-                  strokeDasharray={isHighlight ? 'none' : '4 4'}
-                />
-                {/* Animated particle along path */}
-                {isHighlight && (
-                  <circle r="2.5" fill={from.color} opacity="0.8">
-                    <animateMotion
-                      dur={`${2 + Math.random()}s`}
-                      repeatCount="indefinite"
-                      path={`M${from.x},${from.y} Q${cx},${cy} ${to.x},${to.y}`}
-                    />
-                  </circle>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* Agent nodes */}
-        {nodes.map(n => {
-          const isActive = n.agent.status === 'running' || n.agent.status === 'idle';
-          const isRunning = n.agent.status === 'running';
-          const isSel = selected === n.name;
-          const isHov = hovered === n.name;
-          const sz = isSel ? 52 : isHov ? 48 : isActive ? 44 : 36;
-
-          return (
-            <div key={n.name}
-              className="absolute flex flex-col items-center cursor-pointer transition-all duration-300 ease-out group"
-              style={{
-                left: n.x - sz / 2,
-                top: n.y - sz / 2,
-                width: sz,
-                zIndex: isSel ? 30 : isHov ? 20 : 10,
-              }}
-              onClick={e => { e.stopPropagation(); setSelected(s => s === n.name ? null : n.name); }}
-              onMouseEnter={() => setHovered(n.name)}
-              onMouseLeave={() => setHovered(null)}>
-
-              {/* Outer pulse ring for running agents */}
-              {isRunning && (
-                <div className="absolute rounded-full animate-ping"
-                  style={{
-                    width: sz + 16, height: sz + 16,
-                    left: -8, top: -8,
-                    border: `1px solid ${n.color}`,
-                    opacity: 0.15,
-                    animationDuration: '2s',
-                  }} />
-              )}
-
-              {/* Glow halo */}
-              {isActive && (
-                <div className="absolute rounded-full transition-all duration-500"
-                  style={{
-                    width: sz + 24, height: sz + 24,
-                    left: -12, top: -12,
-                    background: `radial-gradient(circle, ${n.color}15 0%, transparent 70%)`,
-                    transform: isSel ? 'scale(1.3)' : 'scale(1)',
-                  }} />
-              )}
-
-              {/* Node body */}
-              <div className="relative rounded-full flex items-center justify-center transition-all duration-300"
-                style={{
-                  width: sz, height: sz,
-                  background: isActive
-                    ? `radial-gradient(circle at 35% 35%, ${n.color}20, ${n.color}08)`
-                    : 'rgba(255,255,255,0.02)',
-                  border: `${isSel ? 2 : 1}px solid ${isActive ? n.color + (isSel ? '80' : '40') : 'rgba(255,255,255,0.06)'}`,
-                  boxShadow: isActive
-                    ? `0 0 ${isSel ? 20 : 10}px ${n.color}20, inset 0 0 ${isSel ? 15 : 8}px ${n.color}10`
-                    : 'none',
-                }}>
-
-                {/* Status dot */}
-                <div className="rounded-full transition-all duration-300"
-                  style={{
-                    width: isActive ? 8 : 5,
-                    height: isActive ? 8 : 5,
-                    background: isRunning ? '#22c55e' : n.agent.status === 'idle' ? '#eab308'
-                      : n.agent.status === 'stopped' ? '#ef4444' : '#333',
-                    boxShadow: isRunning ? '0 0 8px #22c55e60' : n.agent.status === 'idle' ? '0 0 6px #eab30840' : 'none',
-                  }} />
-              </div>
-
-              {/* Name label */}
-              <span className="mt-1.5 text-center leading-tight transition-all duration-200 whitespace-nowrap"
-                style={{
-                  fontSize: isSel ? 10 : 8,
-                  fontWeight: isSel || isHov ? 600 : 400,
-                  color: isActive ? '#e2e8f0' : '#475569',
-                  textShadow: isActive ? `0 0 12px ${n.color}40` : 'none',
-                }}>
-                {n.name.replace(/-/g, ' ')}
-              </span>
-
-              {/* Domain badge */}
-              <span className="text-[7px] font-medium tracking-wider uppercase transition-opacity duration-200"
-                style={{
-                  color: n.color + '80',
-                  opacity: isHov || isSel ? 1 : 0.5,
-                }}>
-                {agentLabel(n.agent)}
-              </span>
-            </div>
-          );
-        })}
-
-        {/* Floating ambient particles */}
-        {Array.from({ length: 15 }, (_, i) => {
-          const speed = 20 + (i * 7) % 30;
-          const delay = (i * 3) % 20;
-          const startX = (i * 137) % 100;
-          const startY = (i * 89) % 100;
-          return (
-            <div key={`p-${i}`}
-              className="absolute rounded-full pointer-events-none"
-              style={{
-                width: 2,
-                height: 2,
-                background: `rgba(${100 + (i * 30) % 155}, ${100 + (i * 50) % 155}, 255, ${0.1 + (i % 5) * 0.04})`,
-                left: `${startX}%`,
-                top: `${startY}%`,
-                animation: `float-particle-${i % 3} ${speed}s ${delay}s linear infinite`,
-              }} />
-          );
-        })}
-      </div>
-
-      {/* Selected agent detail panel */}
-      {selAgent && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[90%] max-w-md animate-fade-in"
-          onClick={e => e.stopPropagation()}>
-          <div className="rounded-xl border backdrop-blur-xl px-5 py-4"
-            style={{
-              background: `linear-gradient(135deg, rgba(0,0,0,0.85), rgba(0,0,0,0.92))`,
-              borderColor: selAgent.color + '30',
-              boxShadow: `0 0 30px ${selAgent.color}10, 0 20px 60px rgba(0,0,0,0.5)`,
+            {/* SVG relay lines between cards */}
+            <svg style={{
+              position: 'absolute', top: 0, left: 0,
+              width: contentW, height: contentH,
+              pointerEvents: 'none', zIndex: 0,
             }}>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-3 h-3 rounded-full"
-                style={{ background: selAgent.color, boxShadow: `0 0 10px ${selAgent.color}60` }} />
-              <span className="text-sm font-bold">{selAgent.name}</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full ml-auto font-medium"
-                style={{
-                  color: selAgent.agent.status === 'running' ? '#22c55e' : selAgent.agent.status === 'idle' ? '#eab308' : '#888',
-                  background: selAgent.agent.status === 'running' ? '#22c55e12' : selAgent.agent.status === 'idle' ? '#eab30812' : '#88888808',
-                  border: `1px solid ${selAgent.agent.status === 'running' ? '#22c55e20' : selAgent.agent.status === 'idle' ? '#eab30820' : '#88888815'}`,
-                }}>
-                {selAgent.agent.status}
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-relaxed">{selAgent.agent.template?.description || 'Copilot session'}</p>
-            {selAgent.agent.pane && (
-              <p className="text-[9px] text-slate-600 mt-1 font-mono">📍 pane {selAgent.agent.pane.target}</p>
-            )}
+              <defs>
+                <filter id="glow-line">
+                  <feGaussianBlur stdDeviation="2" result="blur" />
+                  <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+              </defs>
+              {edges.map((edge, i) => {
+                const a = cardRects.get(edge.from);
+                const b = cardRects.get(edge.to);
+                if (!a || !b) return null;
+                const hi = selected === edge.from || selected === edge.to;
+                const dx = b.cx - a.cx;
+                const dy = b.cy - a.cy;
+                const mx = (a.cx + b.cx) / 2 - dy * 0.08;
+                const my = (a.cy + b.cy) / 2 + dx * 0.08;
+                return (
+                  <g key={i}>
+                    <path
+                      d={`M${a.cx},${a.cy} Q${mx},${my} ${b.cx},${b.cy}`}
+                      fill="none"
+                      stroke={hi ? '#3b82f6' : '#3f3f46'}
+                      strokeWidth={hi ? 2 : 1}
+                      strokeOpacity={hi ? 0.6 : 0.2}
+                      strokeDasharray={hi ? undefined : '6 4'}
+                      filter={hi ? 'url(#glow-line)' : undefined}
+                    />
+                    {hi && (
+                      <circle r="3" fill="#3b82f6" opacity="0.9">
+                        <animateMotion
+                          dur="2.5s" repeatCount="indefinite"
+                          path={`M${a.cx},${a.cy} Q${mx},${my} ${b.cx},${b.cy}`}
+                        />
+                      </circle>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
 
-            {/* Relay connections */}
-            {edges.filter(e => e.from === selected || e.to === selected).length > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/5">
-                <p className="text-[8px] text-slate-500 uppercase tracking-widest mb-1.5">Connections</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {[...new Set(edges.filter(e => e.from === selected || e.to === selected)
-                    .flatMap(e => [e.from, e.to])
-                    .filter(n => n !== selected))].map(peer => {
-                    const peerNode = nodeMap.get(peer);
-                    return (
-                      <span key={peer} className="text-[9px] px-2 py-0.5 rounded-full cursor-pointer hover:opacity-100 transition-opacity"
-                        style={{
-                          color: peerNode?.color || '#888',
-                          background: (peerNode?.color || '#888') + '10',
-                          border: `1px solid ${(peerNode?.color || '#888')}20`,
-                          opacity: 0.7,
-                        }}
-                        onClick={() => setSelected(peer)}>
-                        {peer}
-                      </span>
-                    );
-                  })}
+            {/* Empty state */}
+            {agents.length === 0 ? (
+              <div style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'center', height: 'calc(100vh - 160px)',
+                color: 'var(--color-fg-2)', gap: '12px',
+              }}>
+                <span style={{ fontSize: '56px' }}>🏘️</span>
+                <span style={{ fontSize: '16px', fontWeight: 600 }}>No agents in town</span>
+                <span style={{ fontSize: '13px' }}>Spawn agents to see them here</span>
+              </div>
+            ) : (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))',
+                gap: '12px',
+                position: 'relative', zIndex: 1,
+              }}>
+                {sorted.map(agent => {
+                  const isSel = selected === agent.name;
+                  const color = sc(agent.status);
+                  const isActive = agent.status === 'running' || agent.status === 'idle';
+                  const hasConn = connectedNames.has(agent.name);
+                  const isRunning = agent.status === 'running';
+                  const isRelayHi = selected
+                    ? edges.some(e => (e.from === selected && e.to === agent.name) || (e.to === selected && e.from === agent.name))
+                    : false;
+
+                  return (
+                    <div
+                      key={agent.name}
+                      ref={setRef(agent.name)}
+                      className="card-surface"
+                      onClick={e => { e.stopPropagation(); setSelected(s => s === agent.name ? null : agent.name); }}
+                      style={{
+                        cursor: 'pointer',
+                        padding: '14px 16px',
+                        borderLeft: `3px solid ${color}`,
+                        position: 'relative',
+                        overflow: 'hidden',
+                        transition: 'all 150ms ease',
+                        ...(isSel ? {
+                          borderColor: color,
+                          background: scBg(agent.status),
+                          boxShadow: `0 0 0 1px ${scBorder(agent.status)}, 0 4px 16px rgba(0,0,0,0.3)`,
+                        } : isRelayHi ? {
+                          borderColor: '#3b82f640',
+                          boxShadow: '0 0 0 1px rgba(59,130,246,0.2)',
+                        } : {}),
+                      }}
+                    >
+                      {/* Running left-edge glow */}
+                      {isRunning && (
+                        <div style={{
+                          position: 'absolute', top: 0, left: 0, bottom: 0, width: '3px',
+                          background: color, boxShadow: `0 0 12px ${color}80`,
+                        }} />
+                      )}
+
+                      {/* Row 1: Name + Status badge */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <span style={{
+                          fontSize: '13px', fontWeight: 600, color: 'var(--color-fg)',
+                          flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {agent.name}
+                        </span>
+                        <span className="badge" style={{
+                          color, background: scBg(agent.status),
+                          border: `1px solid ${scBorder(agent.status)}`,
+                          fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em',
+                        }}>
+                          {isActive ? '●' : '○'} {agent.status}
+                        </span>
+                      </div>
+
+                      {/* Row 2: Type + Model + Flags */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                        <span className="badge" style={{
+                          background: 'var(--color-bg-3)', color: 'var(--color-fg-1)', fontSize: '9px',
+                        }}>
+                          {agent.type === 'headless' ? '⚡' : '📺'} {agent.type ?? 'pane'}
+                        </span>
+                        {agent.model && (
+                          <span className="badge" style={{
+                            background: '#3b82f608', color: '#60a5fa',
+                            border: '1px solid #3b82f620', fontSize: '9px',
+                          }}>
+                            {modelShort(agent.model)}
+                          </span>
+                        )}
+                        {agent.flags?.includes('--yolo') && (
+                          <span className="badge" style={{
+                            background: '#f59e0b08', color: '#f59e0b',
+                            border: '1px solid #f59e0b20', fontSize: '9px',
+                          }}>
+                            🔥 yolo
+                          </span>
+                        )}
+                        {hasConn && (
+                          <span style={{ fontSize: '10px', color: 'var(--color-fg-2)', marginLeft: 'auto' }}>🔗</span>
+                        )}
+                      </div>
+
+                      {/* Row 3: Task or description */}
+                      {(agent.task || agent.description) && (
+                        <div style={{
+                          fontSize: '11px', color: 'var(--color-fg-2)', lineHeight: '1.45',
+                          overflow: 'hidden', display: '-webkit-box',
+                          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        }}>
+                          {agent.task || agent.description}
+                        </div>
+                      )}
+
+                      {/* Row 4: Template + time */}
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px',
+                        fontSize: '10px', color: 'var(--color-fg-2)',
+                      }}>
+                        {agent.template?.name && (
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            📋 {agent.template.name}
+                          </span>
+                        )}
+                        {agent.pane?.target && (
+                          <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+                            🖥 {agent.pane.target}
+                          </span>
+                        )}
+                        {agent.summary && !agent.task && (
+                          <span style={{
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            flex: 1, opacity: 0.7,
+                          }}>
+                            💬 {truncStr(agent.summary, 40)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ═══ Detail side panel ═══ */}
+        {selAgent && (
+          <div
+            className="animate-slide-in-right"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '340px', flexShrink: 0,
+              borderLeft: '1px solid var(--color-border)',
+              background: 'var(--color-bg-1)',
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Panel header */}
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid var(--color-border)',
+              display: 'flex', alignItems: 'flex-start', gap: '12px',
+            }}>
+              <div style={{
+                width: 12, height: 12, borderRadius: '50%', marginTop: '3px', flexShrink: 0,
+                background: sc(selAgent.status),
+                boxShadow: selAgent.status === 'running' ? `0 0 10px ${sc(selAgent.status)}60` : undefined,
+              }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-fg)', wordBreak: 'break-word' }}>
+                  {selAgent.name}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--color-fg-2)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span>{selAgent.type === 'headless' ? '⚡ headless' : '📺 pane'}</span>
+                  {selAgent.model && <><span style={{ opacity: 0.4 }}>·</span><span style={{ color: '#60a5fa' }}>{modelShort(selAgent.model)}</span></>}
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      )}
+              <button className="btn" onClick={() => setSelected(null)}
+                style={{ padding: '3px 8px', fontSize: '12px', lineHeight: 1 }}>✕</button>
+            </div>
 
-      {/* CSS keyframes for floating particles */}
-      <style>{`
-        @keyframes float-particle-0 {
-          0% { transform: translate(0, 0); opacity: 0; }
-          10% { opacity: 0.3; }
-          90% { opacity: 0.3; }
-          100% { transform: translate(200px, -300px); opacity: 0; }
-        }
-        @keyframes float-particle-1 {
-          0% { transform: translate(0, 0); opacity: 0; }
-          10% { opacity: 0.2; }
-          90% { opacity: 0.2; }
-          100% { transform: translate(-150px, -250px); opacity: 0; }
-        }
-        @keyframes float-particle-2 {
-          0% { transform: translate(0, 0); opacity: 0; }
-          10% { opacity: 0.25; }
-          90% { opacity: 0.25; }
-          100% { transform: translate(100px, -350px); opacity: 0; }
-        }
-      `}</style>
+            {/* Panel scrollable body */}
+            <div style={{ flex: 1, overflow: 'auto', padding: '16px 20px' }}>
+
+              {/* Status section */}
+              <Section label="Status">
+                <span className="badge" style={{
+                  color: sc(selAgent.status), background: scBg(selAgent.status),
+                  border: `1px solid ${scBorder(selAgent.status)}`,
+                }}>
+                  {selAgent.status === 'stopped' ? '○' : '●'} {selAgent.status}
+                </span>
+              </Section>
+
+              {/* Task */}
+              {selAgent.task && (
+                <Section label="Current Task">
+                  <p style={{ fontSize: '12px', color: 'var(--color-fg-1)', lineHeight: '1.5', margin: 0 }}>
+                    {selAgent.task}
+                  </p>
+                </Section>
+              )}
+
+              {/* Description */}
+              {selAgent.description && (
+                <Section label="Description">
+                  <p style={{ fontSize: '12px', color: 'var(--color-fg-1)', lineHeight: '1.5', margin: 0 }}>
+                    {selAgent.description}
+                  </p>
+                </Section>
+              )}
+
+              {/* Summary */}
+              {selAgent.summary && (
+                <Section label="Last Summary">
+                  <p style={{ fontSize: '12px', color: 'var(--color-fg-2)', lineHeight: '1.5', margin: 0, fontStyle: 'italic' }}>
+                    {truncStr(selAgent.summary, 280)}
+                  </p>
+                </Section>
+              )}
+
+              {/* Details grid */}
+              <Section label="Details">
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', fontSize: '11px' }}>
+                  {selAgent.model && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Model</span>
+                    <span style={{ color: '#60a5fa', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>{selAgent.model}</span></>
+                  )}
+                  {selAgent.pane && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Pane</span>
+                    <span style={{ color: 'var(--color-fg-1)', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>{selAgent.pane.target}</span></>
+                  )}
+                  {selAgent.template?.name && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Template</span>
+                    <span style={{ color: 'var(--color-fg-1)', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>{selAgent.template.name}</span></>
+                  )}
+                  {selAgent.sessionId && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Session</span>
+                    <span style={{ color: 'var(--color-fg-1)', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>{selAgent.sessionId.slice(0, 12)}…</span></>
+                  )}
+                  {selAgent.flags && selAgent.flags.length > 0 && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Flags</span>
+                    <span style={{ color: '#f59e0b', fontFamily: "'JetBrains Mono', monospace", fontSize: '10px' }}>{selAgent.flags.join(' ')}</span></>
+                  )}
+                  {selAgent.reasoningEffort && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Reasoning</span>
+                    <span style={{ color: 'var(--color-fg-1)', fontSize: '10px' }}>{selAgent.reasoningEffort}</span></>
+                  )}
+                  {selAgent.agentMode && (
+                    <><span style={{ color: 'var(--color-fg-2)' }}>Mode</span>
+                    <span style={{ color: 'var(--color-fg-1)', fontSize: '10px' }}>{selAgent.agentMode}</span></>
+                  )}
+                </div>
+              </Section>
+
+              {/* Connections */}
+              {selEdges.length > 0 && (
+                <Section label={`Connections (${selEdges.length})`}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {selEdges.map((edge, i) => {
+                      const peer = edge.from === selected ? edge.to : edge.from;
+                      const dir = edge.from === selected ? '→' : '←';
+                      return (
+                        <div key={i} className="card-surface" style={{ padding: '8px 10px', cursor: 'pointer' }}
+                          onClick={() => setSelected(peer)}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                            <span style={{ color: 'var(--color-fg-2)' }}>{dir}</span>
+                            <span style={{ color: 'var(--color-fg)', fontWeight: 600 }}>{peer}</span>
+                            <span className="badge" style={{
+                              marginLeft: 'auto', background: 'var(--color-bg-3)',
+                              color: 'var(--color-fg-2)', fontSize: '9px',
+                            }}>
+                              {edge.count}×
+                            </span>
+                          </div>
+                          <div style={{
+                            fontSize: '10px', color: 'var(--color-fg-2)', marginTop: '4px',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {truncStr(edge.last, 80)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Section>
+              )}
+            </div>
+
+            {/* Panel actions footer */}
+            <div style={{
+              padding: '12px 20px', borderTop: '1px solid var(--color-border)',
+              display: 'flex', flexDirection: 'column', gap: '8px', flexShrink: 0,
+            }}>
+              {/* Chat input (for active agents) */}
+              {selAgent.status !== 'stopped' && (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="text" placeholder="Send a message…"
+                    value={chatMsg} onChange={e => setChatMsg(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleChat()}
+                    disabled={sending}
+                    style={{
+                      flex: 1, fontSize: '11px', padding: '6px 10px',
+                      background: 'var(--color-bg-2)', border: '1px solid var(--color-border)',
+                      borderRadius: '6px', color: 'var(--color-fg)', outline: 'none',
+                    }}
+                  />
+                  <button className="btn btn-primary" onClick={handleChat}
+                    disabled={sending || !chatMsg.trim()}>
+                    {sending ? <span className="spinner" style={{ width: 12, height: 12, borderWidth: '1.5px' }} /> : 'Send'}
+                  </button>
+                </div>
+              )}
+              {/* Action buttons */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {selAgent.status !== 'stopped' && (
+                  <button className="btn btn-danger" onClick={() => handleStop(selAgent.name)}>
+                    ■ Stop
+                  </button>
+                )}
+                {selAgent.pane && (
+                  <button className="btn" onClick={() => api.selectPane(selAgent.pane!.target)}>
+                    📺 Focus Pane
+                  </button>
+                )}
+                {selAgent.type === 'headless' && selAgent.status !== 'stopped' && (
+                  <button className="btn btn-success" onClick={() => api.promoteAgent(selAgent.name)}>
+                    📺 Promote
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Tiny section helper (keeps panel organized) ── */
+function Section({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{
+        fontSize: '10px', color: 'var(--color-fg-2)', textTransform: 'uppercase',
+        letterSpacing: '0.08em', marginBottom: '6px', fontWeight: 600,
+      }}>
+        {label}
+      </div>
+      {children}
     </div>
   );
 }

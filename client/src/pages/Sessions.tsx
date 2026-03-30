@@ -105,6 +105,107 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [turnSearch, setTurnSearch] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Chat input
+  const [chatInput, setChatInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const streamBuf = useRef('');
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Connect WebSocket for headless agent chat
+  useEffect(() => {
+    if (selectedType !== 'headless' || !selectedAgentName) {
+      wsRef.current?.close();
+      wsRef.current = null;
+      return;
+    }
+    const ws = new WebSocket(`ws://${window.location.host}/ws/headless?agent=${encodeURIComponent(selectedAgentName)}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
+          streamBuf.current += msg.content || msg.deltaContent || '';
+          setTurns(prev => {
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            return [...prev.slice(0, -1), { ...last, assistant_response: streamBuf.current }];
+          });
+        } else if (msg.type === 'response') {
+          const final = msg.content || streamBuf.current;
+          setTurns(prev => {
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            return [...prev.slice(0, -1), { ...last, assistant_response: final }];
+          });
+          streamBuf.current = '';
+          setSending(false);
+        } else if (msg.type === 'error') {
+          setTurns(prev => {
+            const last = prev[prev.length - 1];
+            if (!last) return prev;
+            return [...prev.slice(0, -1), { ...last, assistant_response: `⚠️ Error: ${msg.message}` }];
+          });
+          streamBuf.current = '';
+          setSending(false);
+        }
+      } catch {}
+    };
+
+    ws.onclose = () => { wsRef.current = null; setSending(false); };
+    return () => { ws.close(); wsRef.current = null; };
+  }, [selectedType, selectedAgentName]);
+
+  // Send message handler
+  const handleSendChat = useCallback(async () => {
+    const text = chatInput.trim();
+    if (!text || sending || !selectedAgentName) return;
+
+    const newTurn: Turn = {
+      turn_index: turns.length,
+      user_message: text,
+      assistant_response: '',
+      timestamp: new Date().toISOString(),
+    };
+    setTurns(prev => [...prev, newTurn]);
+    setChatInput('');
+    setSending(true);
+
+    if (selectedType === 'headless') {
+      // Send via WebSocket
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        streamBuf.current = '';
+        wsRef.current.send(JSON.stringify({ prompt: text }));
+      } else {
+        setTurns(prev => {
+          const last = prev[prev.length - 1];
+          if (!last) return prev;
+          return [...prev.slice(0, -1), { ...last, assistant_response: '⚠️ WebSocket not connected' }];
+        });
+        setSending(false);
+      }
+    } else {
+      // Send via relay (pane agent)
+      try {
+        await api.sendMessage(selectedAgentName, text, 'you');
+        // Pane agents don't stream back — update message to show it was sent
+        setTurns(prev => {
+          const last = prev[prev.length - 1];
+          if (!last) return prev;
+          return [...prev.slice(0, -1), { ...last, assistant_response: '*(message relayed via psmux — check agent pane for response)*' }];
+        });
+      } catch (err: any) {
+        setTurns(prev => {
+          const last = prev[prev.length - 1];
+          if (!last) return prev;
+          return [...prev.slice(0, -1), { ...last, assistant_response: `⚠️ Relay failed: ${err.message}` }];
+        });
+      }
+      setSending(false);
+    }
+  }, [chatInput, sending, selectedAgentName, selectedType, turns.length]);
+
   // Load all sessions
   const loadSessions = useCallback(() => {
     Promise.all([api.getSessions(50), api.getOrphanedSessions()])
@@ -350,7 +451,11 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="min-w-0 flex-1 mr-3">
                 <h3 className="text-sm font-medium truncate">
-                  {sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || selectedId.slice(0, 24)}
+                  {(() => {
+                    const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
+                    const cleaned = (raw && raw.length > 3 && !/^[\-|─\s]+$/.test(raw) && raw !== 'Start Conversation') ? raw : '';
+                    return cleaned || selectedAgentName || selectedId.slice(0, 24);
+                  })()}
                   {selectedType === 'headless' && (
                     <span className="badge text-cyan-400/70 bg-cyan-400/8 ml-2">⚡ headless</span>
                   )}
@@ -390,49 +495,96 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                 ))}
               </div>
             ) : detailTab === 'chat' ? (
-              /* Chat view */
-              <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
-                {filteredTurns.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-xs text-fg-2">
-                    {turnSearch ? 'No matching messages' : 'No conversation history'}
-                  </div>
-                ) : (
-                  filteredTurns.map(turn => (
-                    <div key={turn.turn_index} className="space-y-3">
-                      {turn.user_message && (
-                        <div className="flex justify-end">
-                          <div className="max-w-[75%]">
-                            <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-4 py-2.5">
-                              <pre className="text-xs text-fg whitespace-pre-wrap break-words font-sans leading-relaxed">
-                                {truncateUser(turn.user_message)}
-                              </pre>
-                            </div>
-                            <p className="text-[10px] text-fg-2/30 mt-1 text-right tabular-nums">
-                              #{turn.turn_index} · {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : ''}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      {turn.assistant_response && (
-                        <div className="flex justify-start">
-                          <div className="max-w-[85%]">
-                            <div className="bg-bg-2/60 border border-border rounded-xl px-4 py-2.5">
-                              <div className="text-xs text-fg-1 leading-relaxed prose-sm">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {turn.assistant_response}
-                                </ReactMarkdown>
-                              </div>
-                            </div>
-                            <p className="text-[10px] text-fg-2/30 mt-1 tabular-nums">
-                              assistant · #{turn.turn_index}
-                            </p>
-                          </div>
-                        </div>
-                      )}
+              /* Chat view — messages + input */
+              <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
+                  {filteredTurns.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-xs text-fg-2">
+                      {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
                     </div>
-                  ))
+                  ) : (
+                    filteredTurns.map(turn => (
+                      <div key={turn.turn_index} className="space-y-3">
+                        {turn.user_message && (
+                          <div className="flex justify-end">
+                            <div className="max-w-[75%]">
+                              <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-4 py-2.5">
+                                <pre className="text-xs text-fg whitespace-pre-wrap break-words font-sans leading-relaxed">
+                                  {truncateUser(turn.user_message)}
+                                </pre>
+                              </div>
+                              <p className="text-[10px] text-fg-2/30 mt-1 text-right tabular-nums">
+                                #{turn.turn_index} · {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : ''}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        {turn.assistant_response && (
+                          <div className="flex justify-start">
+                            <div className="max-w-[85%]">
+                              <div className="bg-bg-2/60 border border-border rounded-xl px-4 py-2.5">
+                                <div className="text-xs text-fg-1 leading-relaxed prose-sm">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {turn.assistant_response}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                              <p className="text-[10px] text-fg-2/30 mt-1 tabular-nums">
+                                assistant · #{turn.turn_index}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                  {sending && (
+                    <div className="flex justify-start">
+                      <div className="bg-bg-2/60 border border-border rounded-xl px-4 py-2.5 flex items-center gap-2">
+                        <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+                        <span className="text-xs text-fg-2">Thinking…</span>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Chat input bar */}
+                {selectedAgentName && (
+                  <div className="flex-shrink-0 border-t border-border px-4 py-3">
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        ref={chatInputRef}
+                        className="flex-1 bg-bg border border-border rounded-lg px-3 py-2.5 text-xs text-fg resize-none focus:outline-none focus:border-blue-500/40 min-h-[40px] max-h-[120px] transition-colors placeholder-fg-2/40"
+                        placeholder={sending ? 'Waiting for response…' : `Message ${selectedAgentName}…`}
+                        rows={1}
+                        value={chatInput}
+                        onChange={e => setChatInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); }
+                        }}
+                        disabled={sending}
+                        onInput={e => {
+                          const t = e.currentTarget;
+                          t.style.height = 'auto';
+                          t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+                        }}
+                      />
+                      <button
+                        className="btn btn-primary flex-shrink-0"
+                        onClick={handleSendChat}
+                        disabled={sending || !chatInput.trim()}>
+                        {sending ? '⏳' : 'Send'}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[10px] text-fg-2/30">Enter to send · Shift+Enter for newline</span>
+                      <span className="text-[10px] text-fg-2/30">
+                        {selectedType === 'headless' ? '⚡ SDK headless' : '📺 psmux relay'}
+                      </span>
+                    </div>
+                  </div>
                 )}
-                <div ref={chatEndRef} />
               </div>
             ) : (
               /* Plan view */
