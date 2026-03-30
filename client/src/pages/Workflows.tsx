@@ -648,6 +648,8 @@ prompt: "..."            # agent prompt
 prompt_file: stage.md    # load from data/stages/
 type: step | gate        # gate = human approval
 timeout: 120             # seconds
+session: shared-name     # share agent across steps
+target: existing-agent   # run on a pre-existing agent
 agent:
   model: claude-sonnet-4
   systemPrompt: "..."

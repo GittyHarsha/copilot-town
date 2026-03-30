@@ -29,6 +29,12 @@ export interface StepDef {
   prompt: string;
   prompt_file?: string;     // reference a .md file in data/stages/ instead of inline prompt
   timeout?: number;
+  // Session sharing: steps with the same `session` value share one agent (preserving conversation context).
+  // If omitted, each step gets its own fresh agent.
+  session?: string;
+  // Target: run this step on an existing named agent instead of creating a new one.
+  // The agent won't be destroyed after the run. Mutually exclusive with `session`.
+  target?: string;
   // Conditionals: expression evaluated before step runs — skip if false
   if?: string;
   // Output parsing: 'json' auto-extracts JSON from output → accessible as ${{ steps.X.outputs.key }}
@@ -381,7 +387,9 @@ export async function executeWorkflow(
 
   const runId = `run-${++runCounter}-${Date.now().toString(36)}`;
   const stepResults: Record<string, StepResult> = {};
-  const runAgents: string[] = []; // track all agents for cleanup
+  const runAgents: string[] = []; // track workflow-created agents for cleanup
+  const sharedSessions: Map<string, string> = new Map(); // session group name → agent name
+  const targetedAgents: Set<string> = new Set(); // agents we borrowed — don't destroy
 
   const run: WorkflowRun = {
     runId,
@@ -479,21 +487,52 @@ export async function executeWorkflow(
             const model = stepDef.agent?.model || 'claude-sonnet-4';
             const timeout = (stepDef.timeout || 120) * 1000;
 
-            // Create agent (fresh on each retry)
-            const retryAgentName = retryAttempt > 1 ? `${agentName}-r${retryAttempt}` : agentName;
-            if (retryAttempt > 1) {
-              try { await destroyHeadlessAgent(agentName); } catch {}
-              stepResult.agentName = retryAgentName;
+            let activeAgentName: string;
+            const isTargeted = !!stepDef.target;
+            const isShared = !!stepDef.session;
+
+            if (isTargeted) {
+              // ── Target mode: use an existing named agent (don't create or destroy) ──
+              activeAgentName = stepDef.target!;
+              stepResult.agentName = activeAgentName;
+              targetedAgents.add(activeAgentName);
+            } else if (isShared) {
+              // ── Shared session: reuse agent if session group already has one ──
+              const existingAgent = sharedSessions.get(stepDef.session!);
+              if (existingAgent) {
+                activeAgentName = existingAgent;
+                stepResult.agentName = activeAgentName;
+              } else {
+                // First step in this session group — create the agent
+                const sharedAgentName = `wf-${runId}-s-${stepDef.session}`;
+                await createHeadlessAgent(sharedAgentName, {
+                  model,
+                  systemPrompt: stepDef.agent?.systemPrompt ||
+                    'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+                });
+                runAgents.push(sharedAgentName);
+                sharedSessions.set(stepDef.session!, sharedAgentName);
+                activeAgentName = sharedAgentName;
+                stepResult.agentName = activeAgentName;
+              }
+            } else {
+              // ── Default: fresh agent per step (with retry support) ──
+              const retryAgentName = retryAttempt > 1 ? `${agentName}-r${retryAttempt}` : agentName;
+              if (retryAttempt > 1) {
+                try { await destroyHeadlessAgent(agentName); } catch {}
+                stepResult.agentName = retryAgentName;
+              }
+              await createHeadlessAgent(retryAgentName, {
+                model,
+                systemPrompt: stepDef.agent?.systemPrompt ||
+                  'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+              });
+              runAgents.push(retryAgentName);
+              activeAgentName = retryAgentName;
             }
-            await createHeadlessAgent(retryAgentName, {
-              model,
-              systemPrompt: stepDef.agent?.systemPrompt ||
-                'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
-            });
-            runAgents.push(retryAgentName);
 
             // Send initial prompt
-            let result = await sendToHeadless(retryAgentName, prompt, { timeoutMs: timeout });
+            let result = await sendToHeadless(activeAgentName, prompt, { timeoutMs: timeout });
             let output = result.response || '';
             let totalTokens = result.outputTokens || 0;
 
@@ -528,7 +567,7 @@ export async function executeWorkflow(
 
                 const revisionPrompt =
                   `Review feedback (attempt ${attempt}/${maxIter}):\n${review.feedback}\n\nPlease revise your previous output to address this feedback.`;
-                result = await sendToHeadless(retryAgentName, revisionPrompt, { timeoutMs: timeout });
+                result = await sendToHeadless(activeAgentName, revisionPrompt, { timeoutMs: timeout });
                 output = result.response || '';
                 totalTokens += result.outputTokens || 0;
 
@@ -625,8 +664,9 @@ export async function executeWorkflow(
     run.finishedAt = new Date().toISOString();
     run.steps.forEach(s => { if (s.status === 'pending') s.status = 'skipped'; });
   } finally {
-    // Clean up ALL agents at end of run
+    // Clean up workflow-created agents (skip targeted external agents)
     for (const name of runAgents) {
+      if (targetedAgents.has(name)) continue;
       try { await destroyHeadlessAgent(name); } catch {}
     }
   }
