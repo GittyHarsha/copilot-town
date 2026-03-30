@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir } from 'fs/promises';
+import { readdir, readFile, writeFile, mkdir, unlink } from 'fs/promises';
 import { join, basename } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { createHeadlessAgent, sendToHeadless, destroyHeadlessAgent } from './headless.js';
@@ -152,6 +152,12 @@ export async function saveWorkflow(id: string, yamlContent: string): Promise<Wor
   await writeFile(join(WORKFLOWS_DIR, `${id}.yaml`), yamlContent, 'utf-8');
   workflows.set(id, def);
   return def;
+}
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  const filePath = join(WORKFLOWS_DIR, `${id}.yaml`);
+  await unlink(filePath);
+  workflows.delete(id);
 }
 
 // ─── Variable Interpolation ─────────────────────────────────────────
@@ -314,6 +320,10 @@ export async function getStageFile(name: string): Promise<string> {
 export async function saveStageFile(name: string, content: string): Promise<void> {
   await mkdir(STAGES_DIR, { recursive: true });
   await writeFile(join(STAGES_DIR, name), content, 'utf-8');
+}
+
+export async function deleteStageFile(name: string): Promise<void> {
+  await unlink(join(STAGES_DIR, name));
 }
 
 // ─── DAG Execution ──────────────────────────────────────────────────

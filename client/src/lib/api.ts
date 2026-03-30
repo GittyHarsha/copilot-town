@@ -305,6 +305,7 @@ export const api = {
   getWorkflow: (id: string) => fetchJson<any>(`/workflows/${encodeURIComponent(id)}`),
   reloadWorkflows: () => postJson<any>('/workflows/reload'),
   createWorkflow: (id: string, yaml: string) => postJson<any>('/workflows', { id, yaml }),
+  deleteWorkflow: (id: string) => deleteJson<any>(`/workflows/${encodeURIComponent(id)}`),
   runWorkflow: (id: string, inputs: Record<string, string>) =>
     postJson<any>(`/workflows/${encodeURIComponent(id)}/run`, { inputs }),
   getWorkflowRuns: () => fetchJson<any[]>('/workflows/runs/list'),
@@ -317,4 +318,5 @@ export const api = {
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),
   getStageFile: (name: string) => fetchJson<{ name: string; content: string }>(`/workflows/stages/${encodeURIComponent(name)}`),
   saveStageFile: (name: string, content: string) => postJson<any>('/workflows/stages', { name, content }),
+  deleteStageFile: (name: string) => deleteJson<any>(`/workflows/stages/${encodeURIComponent(name)}`),
 };

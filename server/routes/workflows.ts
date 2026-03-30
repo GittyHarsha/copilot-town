@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import {
-  loadWorkflows, getWorkflows, getWorkflow, saveWorkflow,
+  loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate,
-  getStageFiles, getStageFile, saveStageFile,
+  getStageFiles, getStageFile, saveStageFile, deleteStageFile,
 } from '../services/workflows.js';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
@@ -54,6 +54,16 @@ router.post('/', async (req, res) => {
     res.json(def);
   } catch (e: any) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Delete a workflow
+router.delete('/:id', async (req, res) => {
+  try {
+    await deleteWorkflow(req.params.id);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(404).json({ error: e.message });
   }
 });
 
@@ -144,6 +154,16 @@ router.post('/stages', async (req, res) => {
     res.json({ ok: true, name: fileName });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// Delete a stage file
+router.delete('/stages/:name', async (req, res) => {
+  try {
+    await deleteStageFile(req.params.name);
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(404).json({ error: e.message });
   }
 });
 

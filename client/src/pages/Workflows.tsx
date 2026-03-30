@@ -225,6 +225,30 @@ export default function Workflows() {
     } finally { setEditorSaving(false); }
   };
 
+  const handleDeleteWorkflow = async (e: React.MouseEvent, wfId: string) => {
+    e.stopPropagation();
+    if (!confirm(`Delete workflow "${wfId}"? This will remove the YAML file from disk.`)) return;
+    try {
+      await api.deleteWorkflow(wfId);
+      if (selectedWf?.id === wfId) { setSelectedWf(null); setView('list'); }
+      await load();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  };
+
+  const handleDeleteStage = async (e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    if (!confirm(`Delete stage file "${name}"?`)) return;
+    try {
+      await api.deleteStageFile(name);
+      if (editingStageName === name) { setEditingStageName(null); setView('list'); }
+      await load();
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    }
+  };
+
   // Determine if editor is showing a stage file
   const isStageEditor = view === 'editor' && editingStageName !== null;
 
@@ -266,7 +290,7 @@ export default function Workflows() {
             <button
               key={wf.id}
               onClick={() => { selectWorkflow(wf); setView('list'); setSelectedRun(null); setEditingStageName(null); }}
-              className={`w-full text-left px-4 py-3 border-b border-border hover:bg-bg-2/50 transition-colors ${
+              className={`group w-full text-left px-4 py-3 border-b border-border hover:bg-bg-2/50 transition-colors ${
                 selectedWf?.id === wf.id && view === 'list' ? 'bg-bg-2/70 border-l-2 border-l-emerald-500' : ''
               }`}
             >
@@ -276,6 +300,12 @@ export default function Workflows() {
                   <div className="text-sm font-medium truncate">{wf.name}</div>
                   <div className="text-xs text-fg-2 truncate">{wf.description || `${wf.steps.length} steps`}</div>
                 </div>
+                <span
+                  role="button"
+                  onClick={(e) => handleDeleteWorkflow(e, wf.id)}
+                  className="opacity-0 group-hover:opacity-100 text-fg-2 hover:text-red-400 text-xs px-1 transition-opacity"
+                  title="Delete workflow"
+                >✕</span>
               </div>
             </button>
           ))}
@@ -329,13 +359,19 @@ export default function Workflows() {
             <button
               key={sf}
               onClick={() => openStageFile(sf)}
-              className={`w-full text-left px-4 py-2 border-b border-border hover:bg-bg-2/50 transition-colors ${
+              className={`group w-full text-left px-4 py-2 border-b border-border hover:bg-bg-2/50 transition-colors ${
                 editingStageName === sf && view === 'editor' ? 'bg-bg-2/70 border-l-2 border-l-amber-500' : ''
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm">📄</span>
-                <span className="text-sm truncate">{sf}</span>
+                <span className="text-sm truncate flex-1">{sf}</span>
+                <span
+                  role="button"
+                  onClick={(e) => handleDeleteStage(e, sf)}
+                  className="opacity-0 group-hover:opacity-100 text-fg-2 hover:text-red-400 text-xs px-1 transition-opacity"
+                  title="Delete stage file"
+                >✕</span>
               </div>
             </button>
           ))}
