@@ -14,13 +14,25 @@ const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
 const SESSION_STATE_DIR = join(HOME, '.copilot', 'session-state');
 
 // ── Session status detection ─────────────────────────────────────
-// Status is determined by:
-//   1. Pane scanning (Phase 1): session found in an active pane → "running"
-//   2. SDK session list: session exists in copilot-sdk → real session
-//   3. stoppedAt flag: explicitly stopped by user → "stopped"
-//   4. Otherwise: session exists but not in any pane → "idle"
+// Status is determined by (in priority order):
+//   1. Pane scanning (Phase 1): copilot found in active pane → "running" / "idle"
+//   2. Pane exists but copilot exited (back to shell) → "stopped"
+//   3. Process liveness: panePid stored but process dead → "stopped"
+//   4. SDK modifiedTime: activity after stoppedAt → "idle"
+//   5. stoppedAt flag set → "stopped"
+//   6. Otherwise: session exists but not in any pane → "idle"
 // Lock files are NOT used — the shared CLI daemon PID creates lock
 // files for every session it touches, making them unreliable.
+
+/** Check if a process is alive by sending signal 0. Works on Windows & Unix. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type AgentStatus = 'running' | 'idle' | 'stopped';
 
@@ -193,6 +205,13 @@ export function cleanSessionFile(force = false): void {
         delete agents[name];
         if (raw.metadata?.[name]) delete raw.metadata[name];
         changed = true;
+        continue;
+      }
+      // Auto-fix missing stoppedAt: if panePid is stored and process is dead,
+      // set stoppedAt so future status checks correctly show 'stopped'
+      if (!data.stoppedAt && data.panePid && !isProcessAlive(data.panePid)) {
+        data.stoppedAt = new Date().toISOString();
+        changed = true;
       }
     }
 
@@ -324,7 +343,7 @@ export function invalidateAgentCache() {
 
 function scanPanesSync(panes: PsmuxPane[]): Map<string, PaneScanResult> {
   const now = Date.now();
-  if (now - _paneCacheTime < 15000 && _paneCache.size > 0) {
+  if (now - _paneCacheTime < 5000 && _paneCache.size > 0) {
     return _paneCache;
   }
 
@@ -353,7 +372,7 @@ function scanPanesSync(panes: PsmuxPane[]): Map<string, PaneScanResult> {
 /** Parallel async version — captures all panes concurrently */
 async function scanPanesAsync(panes: PsmuxPane[]): Promise<Map<string, PaneScanResult>> {
   const now = Date.now();
-  if (now - _paneCacheTime < 15000 && _paneCache.size > 0) {
+  if (now - _paneCacheTime < 5000 && _paneCache.size > 0) {
     return _paneCache;
   }
 
@@ -476,7 +495,7 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   }
 
   // Phase 2: Known sessions from agent-sessions.json not in any pane
-  // Try PID matching first, then fall back to lock file status
+  // Check PID liveness and pane existence for accurate status
   for (const [sessionId, entry] of sessionMap) {
     if (seenSessionIds.has(sessionId)) continue;
 
@@ -491,12 +510,27 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
         // Found pane by PID — check if copilot is running in it
         const info = paneData.get(matchedPane.target);
         if (info) {
+          // Copilot detected in pane → use detected status
           agents.push({ id: sessionId, name, template, status: info.state, pane: matchedPane, sessionId });
+          seenSessionIds.add(sessionId);
+          seenPanes.add(matchedPane.target);
+          continue;
+        } else {
+          // Pane exists but copilot NOT detected → copilot exited back to shell
+          agents.push({ id: sessionId, name, template, status: 'stopped', pane: matchedPane, sessionId, type: entry.type });
           seenSessionIds.add(sessionId);
           seenPanes.add(matchedPane.target);
           continue;
         }
       }
+    }
+
+    // No pane found — check if the process is even alive
+    if (entry.panePid && !isProcessAlive(entry.panePid)) {
+      // Process is dead → agent is stopped (regardless of stoppedAt)
+      agents.push({ id: sessionId, name, template, status: 'stopped', sessionId, type: entry.type });
+      seenSessionIds.add(sessionId);
+      continue;
     }
 
     // Validate: does this session exist in the SDK's session list?
@@ -517,9 +551,19 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
       const stoppedTime = new Date(entry.stoppedAt).getTime();
       const sdkModified = sdkSession?.modifiedTime ? new Date(sdkSession.modifiedTime).getTime() : 0;
       status = sdkModified > stoppedTime ? 'idle' : 'stopped';
-    } else {
-      // Session exists but not in any pane → idle (can be resumed)
+    } else if (entry.panePid) {
+      // Process is alive (passed the check above) but pane not found
+      // Could be a different psmux session — mark idle, not stopped
       status = 'idle';
+    } else {
+      // No panePid at all (e.g. very old entry) — check SDK recency
+      // If SDK shows recent activity (last 5 min), mark idle; otherwise stopped
+      if (sdkSession?.modifiedTime) {
+        const age = Date.now() - new Date(sdkSession.modifiedTime).getTime();
+        status = age < 5 * 60 * 1000 ? 'idle' : 'stopped';
+      } else {
+        status = 'stopped'; // No evidence of activity → stopped
+      }
     }
 
     agents.push({ id: sessionId, name, template, status, sessionId, type: entry.type });
