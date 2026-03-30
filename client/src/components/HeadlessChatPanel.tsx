@@ -175,65 +175,63 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40"
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-[500px] max-w-[90vw] bg-bg-1 border-l border-border flex flex-col shadow-2xl">
+      <div className="w-[520px] max-w-[90vw] bg-bg-1 border-l border-border flex flex-col shadow-2xl animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold">💬 Chat — {agentName}</span>
-            <span className={`text-[8px] px-1.5 py-0.5 rounded font-mono ${
-              connected ? 'bg-green/10 text-green' : 'bg-red/10 text-red'
-            }`}>{connected ? '● live' : '● disconnected'}</span>
+            <span className="text-sm font-semibold">⚡ {agentName}</span>
+            <span className={`badge ${
+              connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+            }`}>{connected ? '● live' : '● offline'}</span>
           </div>
-          <button onClick={onClose} className="text-fg-2 hover:text-fg text-xs px-1">✕</button>
+          <button onClick={onClose} className="text-fg-2 hover:text-fg text-sm px-2 py-1 rounded-md hover:bg-bg-2 transition-colors">✕</button>
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
           {messages.length === 0 && (
-            <div className="text-center text-fg-2 text-[11px] mt-8">
+            <div className="text-center text-fg-2 text-xs mt-12">
+              <span className="text-3xl block mb-3 opacity-20">⚡</span>
               <p>No messages yet.</p>
-              <p className="mt-1 text-[10px]">Send a message or relay from another agent.</p>
+              <p className="mt-1 text-fg-2/50">Send a message or relay from another agent.</p>
             </div>
           )}
           {messages.map(m => (
             <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
+              <div className={`max-w-[85%] rounded-xl px-4 py-2.5 text-xs leading-relaxed ${
                 m.role === 'user'
-                  ? 'bg-blue/10 text-fg border border-blue/20'
+                  ? 'bg-blue-500/8 text-fg border border-blue-500/15'
                   : m.role === 'system'
-                  ? 'bg-red/10 text-red border border-red/20'
-                  : 'bg-bg-2 text-fg border border-border'
+                  ? 'bg-red-500/8 text-red-400 border border-red-500/15'
+                  : 'bg-bg-2/60 text-fg border border-border'
               }`}>
-                {/* Sender label */}
                 {m.from && m.from !== 'you' && (
-                  <div className="text-[9px] text-fg-2 mb-1 font-mono">from: {m.from}</div>
+                  <div className="text-[10px] text-fg-2/60 mb-1 font-mono">from: {m.from}</div>
                 )}
 
-                {/* Thinking toggle */}
                 {m.thinking && (
                   <button
-                    className="text-[9px] text-purple/70 hover:text-purple mb-1 flex items-center gap-1"
+                    className="text-[10px] text-violet-400/70 hover:text-violet-400 mb-1 flex items-center gap-1 transition-colors"
                     onClick={() => toggleThinking(m.id)}>
                     {showThinking[m.id] ? '▾' : '▸'} thinking
-                    {m.tokens && <span className="text-fg-2 ml-1">({m.tokens} tokens)</span>}
+                    {m.tokens && <span className="text-fg-2/50 ml-1">({m.tokens} tok)</span>}
                   </button>
                 )}
                 {showThinking[m.id] && m.thinking && (
-                  <div className="text-[10px] text-fg-2 bg-bg rounded p-2 mb-2 border border-border whitespace-pre-wrap font-mono leading-relaxed max-h-[200px] overflow-y-auto">
+                  <div className="text-[11px] text-fg-2/70 bg-bg/60 rounded-lg p-2.5 mb-2 border border-border whitespace-pre-wrap font-mono leading-relaxed max-h-[200px] overflow-y-auto">
                     {m.thinking}
                   </div>
                 )}
 
                 {/* Message content */}
                 <div className="whitespace-pre-wrap break-words">
-                  {m.text || (m.streaming && <span className="text-fg-2 italic">thinking…</span>)}
+                  {m.text || (m.streaming && <span className="text-fg-2/50 italic">thinking…</span>)}
                 </div>
 
-                {/* Streaming indicator */}
                 {m.streaming && m.text && (
-                  <span className="inline-block w-1.5 h-3 bg-green/70 ml-0.5 animate-pulse rounded-sm" />
+                  <span className="inline-block w-1.5 h-3 bg-emerald-500/60 ml-0.5 animate-pulse rounded-sm" />
                 )}
               </div>
             </div>
@@ -245,7 +243,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           <div className="flex items-end gap-2">
             <textarea
               ref={inputRef}
-              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-[11px] text-fg resize-none focus:outline-none focus:border-border-1 min-h-[36px] max-h-[120px]"
+              className="flex-1 bg-bg border border-border rounded-lg px-3 py-2.5 text-xs text-fg resize-none focus:outline-none focus:border-blue-500/40 min-h-[40px] max-h-[120px] transition-colors"
               placeholder={sending ? 'Waiting for response…' : 'Message this agent…'}
               rows={1}
               value={input}
@@ -259,15 +257,15 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               }}
             />
             <button
-              className="px-3 py-2 rounded-lg text-[11px] font-medium bg-fg text-bg hover:opacity-90 disabled:opacity-40 flex-shrink-0"
+              className="btn btn-primary flex-shrink-0"
               onClick={sendMessage}
               disabled={sending || !connected || !input.trim()}>
               {sending ? '⏳' : 'Send'}
             </button>
           </div>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-[9px] text-fg-2">Enter to send · Shift+Enter for newline</span>
-            <span className="text-[9px] text-fg-2">⚡ headless via SDK</span>
+          <div className="flex items-center justify-between mt-1.5">
+            <span className="text-[10px] text-fg-2/30">Enter to send · Shift+Enter for newline</span>
+            <span className="text-[10px] text-fg-2/30">⚡ headless via SDK</span>
           </div>
         </div>
       </div>

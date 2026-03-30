@@ -95,18 +95,17 @@ export default function ChatPanel({ agentName, onClose }: Props) {
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-50 bg-black/30" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 z-50 h-full w-[400px] max-w-[90vw] bg-bg border-l border-border flex flex-col animate-slide-in-right">
+      <div className="fixed top-0 right-0 z-50 h-full w-[420px] max-w-[90vw] bg-bg border-l border-border flex flex-col animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between px-3 h-10 border-b border-border bg-bg-1 flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-1 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[10px] text-fg-2">💬</span>
-            <span className="text-xs font-medium truncate">{agentName}</span>
+            <span className="text-sm font-semibold truncate">💬 {agentName}</span>
           </div>
           <button
-            className="text-fg-2 hover:text-fg text-xs px-1.5 py-0.5 rounded hover:bg-bg-2"
+            className="text-fg-2 hover:text-fg text-sm px-2 py-1 rounded-md hover:bg-bg-2 transition-colors"
             onClick={onClose}
           >
             ✕
@@ -114,21 +113,24 @@ export default function ChatPanel({ agentName, onClose }: Props) {
         </div>
 
         {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-full">
-              <p className="text-[11px] text-fg-2/50">Send a message to {agentName}</p>
+              <div className="text-center">
+                <span className="text-3xl block mb-3 opacity-20">💬</span>
+                <p className="text-xs text-fg-2/50">Send a message to {agentName}</p>
+              </div>
             </div>
           )}
           {messages.map(msg => (
             <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 ${
+              <div className={`max-w-[85%] rounded-xl px-4 py-2.5 ${
                 msg.role === 'user'
-                  ? 'bg-blue/15 text-fg border border-blue/20'
+                  ? 'bg-blue-500/8 text-fg border border-blue-500/15'
                   : 'bg-bg-1 text-fg-1 border border-border'
               }`}>
-                <pre className="text-[11px] leading-relaxed whitespace-pre-wrap break-words font-mono">{msg.text}</pre>
-                <span className="text-[9px] text-fg-2/40 mt-0.5 block">
+                <pre className="text-xs leading-relaxed whitespace-pre-wrap break-words font-mono">{msg.text}</pre>
+                <span className="text-[10px] text-fg-2/30 mt-1 block">
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
@@ -137,11 +139,11 @@ export default function ChatPanel({ agentName, onClose }: Props) {
         </div>
 
         {/* Input */}
-        <div className="flex-shrink-0 border-t border-border bg-bg-1 p-2">
-          <div className="flex gap-1.5">
+        <div className="flex-shrink-0 border-t border-border bg-bg-1 p-3">
+          <div className="flex gap-2">
             <input
               ref={inputRef}
-              className="flex-1 bg-bg text-xs border border-border rounded px-2.5 py-2 text-fg placeholder-fg-2/40 focus:border-blue/40 outline-none"
+              className="flex-1 bg-bg text-xs border border-border rounded-lg px-3 py-2.5 text-fg placeholder-fg-2/40 focus:border-blue-500/40 outline-none transition-colors"
               placeholder={`Message ${agentName}…`}
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -149,14 +151,14 @@ export default function ChatPanel({ agentName, onClose }: Props) {
               disabled={sending}
             />
             <button
-              className="text-xs px-3 py-2 rounded bg-fg text-bg hover:opacity-90 disabled:opacity-30 font-medium flex-shrink-0"
+              className="btn btn-primary flex-shrink-0"
               onClick={handleSend}
               disabled={sending || !input.trim()}
             >
               {sending ? '…' : '↗'}
             </button>
           </div>
-          <p className="text-[9px] text-fg-2/30 mt-1 px-0.5">Uses psmux 3-step protocol · Esc to close</p>
+          <p className="text-[10px] text-fg-2/30 mt-1.5 px-0.5">psmux relay · Esc to close</p>
         </div>
       </div>
     </>

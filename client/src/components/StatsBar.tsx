@@ -28,33 +28,32 @@ export default function StatsBar({ agents }: Props) {
   const idle = agents.filter(a => a.status === 'idle').length;
   const stopped = agents.filter(a => a.status === 'stopped').length;
 
+  const stats = [
+    { label: 'active', value: running, color: 'bg-emerald-500', textColor: 'text-emerald-400' },
+    { label: 'idle', value: idle, color: 'bg-amber-400', textColor: 'text-amber-400' },
+    { label: 'stopped', value: stopped, color: 'bg-zinc-500', textColor: 'text-zinc-500' },
+  ];
+
   return (
-    <div className="flex items-center gap-4 h-8 px-3 bg-bg-1 border-b border-border rounded-lg mb-2">
-      {/* Agent counts */}
-      <div className="flex items-center gap-3 text-[11px]">
-        <span className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-green" />
-          <span className="text-fg-1">{running} active</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-yellow" />
-          <span className="text-fg-1">{idle} idle</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-red/50" />
-          <span className="text-fg-1">{stopped} stopped</span>
-        </span>
+    <div className="flex items-center gap-6 py-3 mb-1">
+      {/* Agent status counts */}
+      <div className="flex items-center gap-5">
+        {stats.map(s => (
+          <div key={s.label} className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${s.color} ${s.label === 'active' ? 'dot-live' : ''}`} />
+            <span className={`text-lg font-semibold tabular-nums ${s.textColor}`}>{s.value}</span>
+            <span className="text-xs text-fg-2">{s.label}</span>
+          </div>
+        ))}
       </div>
 
-      <span className="text-border-1">·</span>
+      <span className="w-px h-5 bg-border" />
 
-      {/* Relay count */}
-      <span className="text-[11px] text-fg-2">{relayCount} relay{relayCount !== 1 ? 's' : ''} today</span>
-
-      <span className="text-border-1">·</span>
-
-      {/* Session count */}
-      <span className="text-[11px] text-fg-2">{sessionCount} session{sessionCount !== 1 ? 's' : ''}</span>
+      {/* Activity */}
+      <div className="flex items-center gap-4 text-xs text-fg-2">
+        <span>{relayCount} relay{relayCount !== 1 ? 's' : ''} today</span>
+        <span>{sessionCount} pane{sessionCount !== 1 ? 's' : ''}</span>
+      </div>
     </div>
   );
 }

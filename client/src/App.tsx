@@ -154,20 +154,20 @@ function AppInner() {
         <CommandPalette commands={commands} onExecute={handlePaletteExecute} onClose={() => setPaletteOpen(false)} />
       )}
 
-      {/* Header — 40px */}
-      <header className="border-b border-border sticky top-0 z-50 bg-bg/95 backdrop-blur-sm">
-        <div className="max-w-[1400px] mx-auto px-3 md:px-5 h-10 flex items-center justify-between">
-          <div className="flex items-center gap-3 md:gap-6">
+      {/* Header — 48px */}
+      <header className="border-b border-border sticky top-0 z-50 bg-bg/90 backdrop-blur-md">
+        <div className="max-w-[1400px] mx-auto px-3 md:px-5 h-12 flex items-center justify-between">
+          <div className="flex items-center gap-4 md:gap-6">
             <div className="flex items-center gap-2">
-              <span className="text-sm" aria-hidden>🏘️</span>
-              <span className="text-xs font-semibold tracking-tight hidden sm:inline">Copilot Town</span>
+              <span className="text-base" aria-hidden>🏘️</span>
+              <span className="text-sm font-bold tracking-tight hidden sm:inline">Copilot Town</span>
             </div>
             <nav className="flex items-center gap-0.5">
               {NAV.map(item => (
                 <button
                   key={item.id}
-                  className={`relative px-1.5 md:px-2.5 py-1 text-[11px] transition-colors rounded ${
-                    page === item.id ? 'text-fg' : 'text-fg-2 hover:text-fg-1'
+                  className={`relative px-2.5 md:px-3 py-1.5 text-xs transition-colors rounded-md ${
+                    page === item.id ? 'text-fg font-medium bg-bg-2' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-1'
                   }`}
                   onClick={() => setPage(item.id)}
                   title={item.label}
@@ -175,15 +175,15 @@ function AppInner() {
                   <span className="md:hidden">{item.icon}</span>
                   <span className="hidden md:inline">{item.label}</span>
                   {page === item.id && (
-                    <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-blue rounded-full" />
+                    <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-blue-500 rounded-full" />
                   )}
                 </button>
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green dot-live' : 'bg-red'}`}
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 dot-live' : 'bg-red-500'}`}
               title={connected ? 'Connected' : 'Disconnected'} />
           </div>
         </div>

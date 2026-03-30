@@ -126,12 +126,12 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
 
       {/* Group toggle */}
       <div className="flex items-center gap-2">
-        <div className="flex items-center bg-bg-2 border border-border rounded overflow-hidden">
+        <div className="flex items-center bg-bg-1 border border-border rounded-lg overflow-hidden">
           {modes.map(m => (
             <button
               key={m}
-              className={`text-[10px] px-2.5 py-1 transition-colors ${
-                groupMode === m ? 'bg-bg-3 text-fg' : 'text-fg-2 hover:text-fg-1'
+              className={`text-xs px-3 py-1.5 transition-colors ${
+                groupMode === m ? 'bg-bg-3 text-fg font-medium' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-2'
               }`}
               onClick={() => setGroupMode(m)}
             >
@@ -139,10 +139,7 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
             </button>
           ))}
         </div>
-        <button
-          className="text-[10px] px-2.5 py-1 bg-bg-2 border border-border rounded text-fg-2 hover:text-fg transition-colors"
-          onClick={() => setCreateOpen(true)}
-        >+ New</button>
+        <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>+ New</button>
         {pins.size > 0 && (
           <span className="text-[10px] text-fg-2">⭐ {pins.size} pinned</span>
         )}

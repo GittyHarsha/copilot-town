@@ -57,19 +57,19 @@ export default function RelayPanel({ agents }: Props) {
   };
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden">
+    <div className="card-surface overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 h-9 bg-bg-1 border-b border-border">
-        <span className="text-[10px]">↗</span>
-        <span className="text-[11px] font-medium">Relay Messages</span>
-        <span className="text-[10px] text-fg-2 ml-auto">{relays.length} relays</span>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+        <span className="text-sm">↗</span>
+        <span className="text-sm font-medium">Relay Messages</span>
+        <span className="text-xs text-fg-2/50 ml-auto">{relays.length} relays</span>
       </div>
 
       {/* Composer */}
-      <div className="px-3 py-2.5 bg-bg-1/50 border-b border-border space-y-2">
+      <div className="px-4 py-3 bg-bg-1/30 border-b border-border space-y-2.5">
         <div className="flex items-center gap-2">
           <select
-            className="flex-1 bg-bg text-xs border border-border rounded px-2 py-1.5 text-fg outline-none focus:border-blue/40"
+            className="flex-1 bg-bg text-xs border border-border rounded-md px-2.5 py-2 text-fg outline-none focus:border-blue-500/40 transition-colors"
             value={from}
             onChange={e => setFrom(e.target.value)}
           >
@@ -78,9 +78,9 @@ export default function RelayPanel({ agents }: Props) {
               <option key={a.id} value={a.name}>{a.name}</option>
             ))}
           </select>
-          <span className="text-fg-2 text-[10px]">→</span>
+          <span className="text-fg-2/50 text-xs">→</span>
           <select
-            className="flex-1 bg-bg text-xs border border-border rounded px-2 py-1.5 text-fg outline-none focus:border-blue/40"
+            className="flex-1 bg-bg text-xs border border-border rounded-md px-2.5 py-2 text-fg outline-none focus:border-blue-500/40 transition-colors"
             value={to}
             onChange={e => setTo(e.target.value)}
           >
@@ -90,9 +90,9 @@ export default function RelayPanel({ agents }: Props) {
             ))}
           </select>
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex gap-2">
           <textarea
-            className="flex-1 bg-bg text-xs border border-border rounded px-2.5 py-1.5 text-fg placeholder-fg-2/40 focus:border-blue/40 outline-none resize-none"
+            className="flex-1 bg-bg text-xs border border-border rounded-lg px-3 py-2 text-fg placeholder-fg-2/40 focus:border-blue-500/40 outline-none resize-none transition-colors"
             placeholder="Relay message…"
             rows={2}
             value={message}
@@ -100,31 +100,31 @@ export default function RelayPanel({ agents }: Props) {
             onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleSend(); } }}
           />
           <button
-            className="self-end text-xs px-3 py-1.5 rounded bg-fg text-bg hover:opacity-90 disabled:opacity-30 font-medium flex-shrink-0"
+            className="self-end btn btn-primary flex-shrink-0"
             onClick={handleSend}
             disabled={sending || !from || !to || !message.trim()}
           >
             {sending ? '…' : 'Send'}
           </button>
         </div>
-        {error && <p className="text-[10px] text-red">⚠ {error}</p>}
-        <p className="text-[9px] text-fg-2/30">⌘↵ to send</p>
+        {error && <p className="text-xs text-red-400">⚠ {error}</p>}
+        <p className="text-[10px] text-fg-2/30">⌘↵ to send</p>
       </div>
 
       {/* History */}
-      <div className="max-h-[280px] overflow-y-auto">
+      <div className="max-h-[300px] overflow-y-auto">
         {relays.length === 0 ? (
-          <div className="py-6 text-center text-[11px] text-fg-2/40">No relays yet</div>
+          <div className="py-8 text-center text-xs text-fg-2/30">No relays yet</div>
         ) : (
           relays.map((r, i) => (
-            <div key={`${r.timestamp}-${i}`} className="flex items-start gap-2 px-3 py-2 border-b border-border last:border-0 hover:bg-bg-1/30">
+            <div key={`${r.timestamp}-${i}`} className="flex items-start gap-2.5 px-4 py-2.5 border-b border-border/50 last:border-0 hover:bg-bg-1/20 transition-colors">
               <div className="flex-shrink-0 mt-0.5">
-                <span className="text-[10px] font-mono text-green">{r.from}</span>
-                <span className="text-[10px] text-fg-2 mx-1">→</span>
-                <span className="text-[10px] font-mono text-blue">{r.to}</span>
+                <span className="text-xs font-mono text-emerald-400/80">{r.from}</span>
+                <span className="text-xs text-fg-2/40 mx-1">→</span>
+                <span className="text-xs font-mono text-blue-400/80">{r.to}</span>
               </div>
-              <p className="flex-1 text-[11px] text-fg-1 truncate min-w-0">{r.message}</p>
-              <span className="text-[9px] text-fg-2/40 flex-shrink-0 whitespace-nowrap">{formatTime(r.timestamp)}</span>
+              <p className="flex-1 text-xs text-fg-1 truncate min-w-0">{r.message}</p>
+              <span className="text-[10px] text-fg-2/30 flex-shrink-0 whitespace-nowrap">{formatTime(r.timestamp)}</span>
             </div>
           ))
         )}
