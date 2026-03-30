@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow,
-  executeWorkflow, getRuns, getRun, cancelRun,
+  executeWorkflow, getRuns, getRun, cancelRun, resolveGate,
 } from '../services/workflows.js';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
@@ -95,6 +95,14 @@ router.get('/runs/:runId', (req, res) => {
 router.delete('/runs/:runId', async (req, res) => {
   const ok = await cancelRun(req.params.runId);
   if (!ok) return res.status(404).json({ error: 'Run not found or not running' });
+  res.json({ ok: true });
+});
+
+// Approve/reject a gate step
+router.post('/runs/:runId/steps/:stepId/gate', (req, res) => {
+  const { approved, feedback } = req.body;
+  const ok = resolveGate(req.params.runId, req.params.stepId, !!approved, feedback);
+  if (!ok) return res.status(404).json({ error: 'No pending gate found' });
   res.json({ ok: true });
 });
 

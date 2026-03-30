@@ -309,4 +309,6 @@ export const api = {
   getWorkflowRuns: () => fetchJson<any[]>('/workflows/runs/list'),
   getWorkflowRun: (runId: string) => fetchJson<any>(`/workflows/runs/${encodeURIComponent(runId)}`),
   cancelWorkflowRun: (runId: string) => deleteJson<any>(`/workflows/runs/${encodeURIComponent(runId)}`),
+  resolveWorkflowGate: (runId: string, stepId: string, approved: boolean, feedback?: string) =>
+    postJson<any>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/gate`, { approved, feedback }),
 };

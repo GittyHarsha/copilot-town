@@ -8,9 +8,14 @@ interface WorkflowDef {
   steps: { id: string; name?: string; needs?: string[]; prompt: string; agent?: { model?: string } }[];
   yaml?: string;
 }
+interface Iteration {
+  attempt: number; output: string; tokens?: number;
+  review?: { pass: boolean; feedback: string };
+}
 interface StepResult {
   id: string; name?: string; status: string; output: string;
   error?: string; startedAt?: string; finishedAt?: string; tokens?: number; agentName?: string;
+  iteration?: number; iterations?: Iteration[];
 }
 interface WorkflowRun {
   runId: string; workflowId: string; workflowName: string;
@@ -22,9 +27,11 @@ interface WorkflowRun {
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-zinc-600', running: 'bg-blue-500 animate-pulse', complete: 'bg-emerald-500',
   failed: 'bg-red-500', skipped: 'bg-zinc-500', cancelled: 'bg-amber-500',
+  reviewing: 'bg-purple-500 animate-pulse', waiting: 'bg-amber-500 animate-pulse',
 };
 const STATUS_ICONS: Record<string, string> = {
   pending: '○', running: '◉', complete: '✓', failed: '✗', skipped: '—', cancelled: '⊘',
+  reviewing: '🔍', waiting: '⏸',
 };
 function elapsed(start: string, end?: string): string {
   const ms = (end ? new Date(end).getTime() : Date.now()) - new Date(start).getTime();
@@ -357,7 +364,7 @@ function RunMonitor({
             {run.finishedAt && ` · ${elapsed(run.startedAt, run.finishedAt)}`}
           </div>
         </div>
-        {run.status === 'running' && (
+        {(run.status === 'running' || run.status === 'waiting') && (
           <button
             onClick={onCancel}
             className="px-4 py-2 bg-red-600/20 text-red-400 border border-red-600/30 rounded-lg text-sm hover:bg-red-600/30 transition-colors"
@@ -415,9 +422,17 @@ function RunMonitor({
             >
               <span className="text-lg font-mono">{STATUS_ICONS[step.status] || '○'}</span>
               <div className="flex-1 min-w-0 text-left">
-                <div className="text-sm font-medium">
-                  <span className="text-zinc-500 mr-2">#{i + 1}</span>
+                <div className="text-sm font-medium flex items-center gap-2">
+                  <span className="text-zinc-500 mr-1">#{i + 1}</span>
                   {step.name || step.id}
+                  {(step.iteration || 0) > 1 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      attempt {step.iteration}/{(step.iterations?.length || step.iteration || 1)}
+                    </span>
+                  )}
+                  {step.status === 'reviewing' && (
+                    <span className="text-[10px] text-purple-400 animate-pulse">reviewing...</span>
+                  )}
                 </div>
                 {step.startedAt && (
                   <div className="text-xs text-zinc-500">
@@ -427,22 +442,81 @@ function RunMonitor({
                   </div>
                 )}
               </div>
-              <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status]} text-white`}>
+              <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status] || 'bg-zinc-600'} text-white`}>
                 {step.status}
               </span>
               <span className="text-zinc-500 text-sm">{expandedStep === step.id ? '▾' : '▸'}</span>
             </button>
 
-            {/* Step output */}
+            {/* Step detail */}
             {expandedStep === step.id && (
               <div className="border-t border-zinc-800 px-4 py-3">
-                {step.output ? (
+                {/* Gate approval UI */}
+                {step.status === 'waiting' && (
+                  <GateApproval runId={run.runId} stepId={step.id} message={step.output} />
+                )}
+
+                {/* Iteration history (if multiple attempts) */}
+                {(step.iterations?.length || 0) > 1 && (
+                  <div className="mb-3">
+                    <div className="text-xs font-medium text-zinc-500 mb-2 uppercase tracking-wider">
+                      Iterations ({step.iterations!.length})
+                    </div>
+                    <div className="space-y-2">
+                      {step.iterations!.map((iter, idx) => (
+                        <div key={idx} className={`rounded-lg border p-3 text-sm ${
+                          idx === step.iterations!.length - 1
+                            ? 'border-zinc-700 bg-zinc-800/50'
+                            : 'border-zinc-800/50 bg-zinc-900/50'
+                        }`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-medium text-zinc-400">Attempt {iter.attempt}</span>
+                            <div className="flex items-center gap-2">
+                              {iter.tokens && <span className="text-[10px] text-zinc-600">{iter.tokens} tok</span>}
+                              {iter.review && (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                  iter.review.pass
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : 'bg-red-500/20 text-red-300'
+                                }`}>
+                                  {iter.review.pass ? '✓ passed' : '✗ needs revision'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {iter.review?.feedback && (
+                            <div className={`text-xs mt-1 px-2 py-1 rounded ${
+                              iter.review.pass ? 'bg-emerald-500/10 text-emerald-300/80' : 'bg-red-500/10 text-red-300/80'
+                            }`}>
+                              💬 {iter.review.feedback}
+                            </div>
+                          )}
+                          {idx < step.iterations!.length - 1 && (
+                            <details className="mt-1">
+                              <summary className="text-[10px] text-zinc-600 cursor-pointer hover:text-zinc-400">
+                                Show output ({iter.output.length} chars)
+                              </summary>
+                              <pre className="text-xs text-zinc-500 whitespace-pre-wrap font-mono mt-1 max-h-32 overflow-y-auto">
+                                {iter.output}
+                              </pre>
+                            </details>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Current/final output */}
+                {step.output && step.status !== 'waiting' ? (
                   <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
                     {step.output}
                   </pre>
                 ) : step.status === 'running' ? (
                   <div className="text-sm text-zinc-500 animate-pulse">Processing...</div>
-                ) : (
+                ) : step.status === 'reviewing' ? (
+                  <div className="text-sm text-purple-400 animate-pulse">🔍 Reviewing output against criteria...</div>
+                ) : step.status !== 'waiting' && (
                   <div className="text-sm text-zinc-600">No output</div>
                 )}
               </div>
@@ -458,6 +532,60 @@ function RunMonitor({
           <div className="text-sm text-red-300 mt-1">{run.error}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Gate Approval Component ───────────────────────────────────── */
+function GateApproval({ runId, stepId, message }: { runId: string; stepId: string; message: string }) {
+  const [feedback, setFeedback] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleGate = async (approved: boolean) => {
+    setSubmitting(true);
+    try {
+      await api.resolveWorkflowGate(runId, stepId, approved, feedback || undefined);
+    } catch (e: any) {
+      alert(`Gate resolution failed: ${e.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-3">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-amber-400 text-lg">⏸</span>
+        <span className="text-sm font-medium text-amber-300">Waiting for approval</span>
+      </div>
+      {message && (
+        <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-mono mb-3 max-h-48 overflow-y-auto bg-zinc-900/50 rounded p-2">
+          {message}
+        </pre>
+      )}
+      <textarea
+        value={feedback}
+        onChange={e => setFeedback(e.target.value)}
+        placeholder="Optional feedback..."
+        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 resize-y mb-3"
+        rows={2}
+      />
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleGate(true)}
+          disabled={submitting}
+          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+        >
+          ✓ Approve
+        </button>
+        <button
+          onClick={() => handleGate(false)}
+          disabled={submitting}
+          className="px-4 py-1.5 bg-red-600/20 text-red-400 border border-red-600/30 hover:bg-red-600/30 text-sm rounded-lg transition-colors disabled:opacity-50"
+        >
+          ✗ Reject
+        </button>
+      </div>
     </div>
   );
 }
