@@ -311,7 +311,8 @@ rl.on('line', (line) => {
                     template: { type: 'string', description: 'Agent template to use (optional)' },
                     model: { type: 'string', description: 'Model to use (optional)' },
                     flags: { type: 'array', items: { type: 'string' }, description: 'CLI flags (optional)' },
-                    session: { type: 'string', description: 'psmux session name (default: town)' }
+                    session: { type: 'string', description: 'psmux session name (default: town)' },
+                    headless: { type: 'boolean', description: 'If true, create a headless agent (SDK session, no terminal pane). Default: false' }
                   },
                   required: ['name']
                 }
@@ -392,8 +393,12 @@ rl.on('line', (line) => {
           httpPost('/api/agents/relay', { from, to, message })
             .then(result => {
               if (result.error) return replyError(msg.id, result.error);
-              const wokeMsg = result.woke ? ' (auto-woke agent first)' : '';
-              reply(msg.id, `Relayed message from ${result.from} to ${result.to}${wokeMsg}`);
+              if (result.method === 'sdk' && result.response) {
+                reply(msg.id, `Relayed to ${result.to} (via SDK). Response:\n\n${result.response}`);
+              } else {
+                const wokeMsg = result.woke ? ' (auto-woke agent first)' : '';
+                reply(msg.id, `Relayed message from ${result.from} to ${result.to}${wokeMsg}`);
+              }
             })
             .catch(() => replyError(msg.id, 'Hub server not running'));
         } else if (tool === 'copilot_town_list_templates') {
@@ -526,12 +531,16 @@ rl.on('line', (line) => {
             .catch(() => replyError(msg.id, 'Hub server not running'));
 
         } else if (tool === 'copilot_town_spawn') {
-          const { name, template, model, flags, session } = msg.params?.arguments || {};
+          const { name, template, model, flags, session, headless } = msg.params?.arguments || {};
           if (!name) return replyError(msg.id, 'name required');
-          httpPost('/api/agents/spawn', { name, template, model, flags, session })
+          httpPost('/api/agents/spawn', { name, template, model, flags, session, headless: !!headless })
             .then(data => {
               if (data.error) return replyError(msg.id, data.error);
-              reply(msg.id, `✅ Spawned "${name}" in pane ${data.pane}\nCommand: ${data.command}`);
+              if (data.type === 'headless') {
+                reply(msg.id, `✅ Created headless agent "${name}" (model: ${data.model || 'default'})\nSession: ${data.sessionId || 'unknown'}`);
+              } else {
+                reply(msg.id, `✅ Spawned "${name}" in pane ${data.pane}\nCommand: ${data.command}`);
+              }
             })
             .catch(() => replyError(msg.id, 'Hub server not running'));
 

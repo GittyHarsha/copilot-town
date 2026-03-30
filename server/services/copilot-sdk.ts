@@ -1,11 +1,12 @@
-import { CopilotClient } from '@github/copilot-sdk';
+import { CopilotClient, approveAll } from '@github/copilot-sdk';
+import type { CopilotSession } from '@github/copilot-sdk';
 
 // Singleton CopilotClient — started lazily, kept alive for server lifetime
 let _client: CopilotClient | null = null;
 let _starting = false;
 let _startPromise: Promise<CopilotClient> | null = null;
 
-async function getClient(): Promise<CopilotClient> {
+export async function getClient(): Promise<CopilotClient> {
   if (_client) return _client;
   if (_startPromise) return _startPromise;
 
@@ -120,3 +121,103 @@ export async function listCopilotModels(): Promise<CopilotModel[]> {
     return _modelsCache;
   }
 }
+
+// ── Session Messaging ────────────────────────────────────────────
+
+export interface SessionMessage {
+  id: string;
+  type: string;          // 'user.message' | 'assistant.message' | 'tool.call' | etc.
+  timestamp: string;
+  parentId?: string;
+  data: any;
+}
+
+/**
+ * Send a message to an existing session and wait for the response.
+ * Uses resumeSession + sendAndWait — the session must already exist.
+ * Returns the assistant's response text, or throws on error.
+ */
+export async function sendToSession(
+  sessionId: string,
+  message: string,
+  options?: { timeoutMs?: number }
+): Promise<{ response: string; messageId?: string }> {
+  const client = await getClient();
+  const session = await client.resumeSession(sessionId, {
+    onPermissionRequest: approveAll,
+  });
+
+  try {
+    const timeoutMs = options?.timeoutMs || 120_000;
+    const result = await Promise.race([
+      session.sendAndWait({ prompt: message }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('sendToSession timed out')), timeoutMs)
+      ),
+    ]);
+
+    const response = (result as any)?.data?.content || '';
+    const messageId = (result as any)?.data?.messageId || (result as any)?.id || '';
+    return { response, messageId };
+  } finally {
+    try { await session.disconnect(); } catch {}
+  }
+}
+
+/**
+ * Get conversation history for a session.
+ * Returns structured messages (id, type, timestamp, data).
+ */
+export async function getSessionMessages(sessionId: string): Promise<SessionMessage[]> {
+  const client = await getClient();
+  const session = await client.resumeSession(sessionId, {
+    onPermissionRequest: approveAll,
+  });
+
+  try {
+    const raw = await session.getMessages();
+    if (!Array.isArray(raw)) return [];
+    return raw.map((m: any) => ({
+      id: m.id || '',
+      type: m.type || 'unknown',
+      timestamp: m.timestamp || '',
+      parentId: m.parentId,
+      data: m.data || {},
+    }));
+  } finally {
+    try { await session.disconnect(); } catch {}
+  }
+}
+
+/**
+ * Delete a session permanently.
+ */
+export async function deleteCopilotSession(sessionId: string): Promise<boolean> {
+  try {
+    const client = await getClient();
+    await client.deleteSession(sessionId);
+    // Invalidate session cache
+    _sessionsMap.delete(sessionId);
+    _sessionsCache = _sessionsCache.filter(s => s.sessionId !== sessionId);
+    return true;
+  } catch (e) {
+    console.error('copilot-sdk deleteSession error:', e);
+    return false;
+  }
+}
+
+/**
+ * Get auth status — who's logged in.
+ */
+export async function getAuthStatus(): Promise<{ login: string; isAuthenticated: boolean } | null> {
+  try {
+    const client = await getClient();
+    const status = await client.getAuthStatus();
+    return { login: status.login || '', isAuthenticated: status.isAuthenticated || false };
+  } catch {
+    return null;
+  }
+}
+
+// Re-export for headless agent use
+export type { CopilotSession };

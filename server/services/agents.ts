@@ -37,6 +37,7 @@ export interface Agent {
   name: string;            // display name
   template?: AgentTemplate;
   status: AgentStatus;
+  type?: 'pane' | 'headless';
   pane?: PsmuxPane;
   sessionId: string;       // same as id, but explicit
   // Enriched from @github/copilot-sdk
@@ -572,6 +573,32 @@ export async function refreshAgents(): Promise<Agent[]> {
       }
     }
 
+    // Merge headless agents into the list
+    try {
+      const { listHeadlessAgents, isHeadless: isHeadlessAgent } = await import('./headless.js');
+      const seenIds = new Set(_agentListCache.map(a => a.id));
+
+      // Mark existing agents that are headless
+      for (const agent of _agentListCache) {
+        if (isHeadlessAgent(agent.name)) {
+          agent.type = 'headless';
+        }
+      }
+
+      // Add headless agents not already in the list
+      for (const h of listHeadlessAgents()) {
+        if (!seenIds.has(h.sessionId)) {
+          _agentListCache.push({
+            id: h.sessionId,
+            name: h.name,
+            status: h.status,
+            type: 'headless',
+            sessionId: h.sessionId,
+          });
+        }
+      }
+    } catch {}
+
     _agentListCacheTime = Date.now();
     return _agentListCache;
   } finally {
@@ -581,9 +608,33 @@ export async function refreshAgents(): Promise<Agent[]> {
 
 export function getAgent(idOrName: string): Agent | undefined {
   const agents = getAllAgents();
-  return agents.find(a => a.id === idOrName)
+  const found = agents.find(a => a.id === idOrName)
     || agents.find(a => a.name === idOrName)
     || agents.find(a => a.id.startsWith(idOrName)); // partial session ID match
+  return found;
+}
+
+/** Async getAgent — also checks headless agents not yet in cache */
+export async function getAgentAsync(idOrName: string): Promise<Agent | undefined> {
+  // First try cache
+  const cached = getAgent(idOrName);
+  if (cached) return cached;
+
+  // Check headless agents directly
+  try {
+    const { getHeadlessAgent } = await import('./headless.js');
+    const h = getHeadlessAgent(idOrName);
+    if (h) {
+      return {
+        id: h.sessionId,
+        name: h.name,
+        status: h.status,
+        type: 'headless',
+        sessionId: h.sessionId,
+      };
+    }
+  } catch {}
+  return undefined;
 }
 
 export function getAgentMdContent(templateName: string): string | null {

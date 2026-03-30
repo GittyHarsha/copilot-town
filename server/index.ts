@@ -364,10 +364,12 @@ server.listen(PORT, () => {
 
 // Graceful shutdown — stop SDK client
 process.on('SIGINT', async () => {
+  try { const { destroyAllHeadless } = await import('./services/headless.js'); await destroyAllHeadless(); } catch {}
   await stopClient();
   process.exit(0);
 });
 process.on('SIGTERM', async () => {
+  try { const { destroyAllHeadless } = await import('./services/headless.js'); await destroyAllHeadless(); } catch {}
   await stopClient();
   process.exit(0);
 });

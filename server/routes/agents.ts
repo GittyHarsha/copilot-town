@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents } from '../services/agents.js';
+import { getAllAgents, getAgent, getAgentAsync, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents } from '../services/agents.js';
 import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
+import { sendToSession, getSessionMessages } from '../services/copilot-sdk.js';
 
 const router = Router();
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
@@ -219,7 +220,7 @@ router.get('/', async (_req, res) => {
       const metadata = raw.metadata || {};
       const enriched = agents.map(a => {
         const meta = metadata[a.name] || {};
-        return { ...a, ...meta, task: tasks[a.id] || null };
+        return { ...a, type: a.type || 'pane', ...meta, task: tasks[a.id] || null };
       });
       return res.json(enriched);
     }
@@ -252,6 +253,20 @@ router.get('/:id/output', (req, res) => {
   const lines = parseInt(req.query.lines as string) || 50;
   const output = capturePane(agent.pane.target, lines);
   res.json({ target: agent.pane.target, output });
+});
+
+// Get agent's conversation history via SDK
+router.get('/:id/messages', async (req, res) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  if (!agent.sessionId) return res.status(400).json({ error: 'Agent has no session ID' });
+
+  try {
+    const messages = await getSessionMessages(agent.sessionId);
+    res.json({ sessionId: agent.sessionId, count: messages.length, messages });
+  } catch (e: any) {
+    res.status(500).json({ error: `Failed to get messages: ${e.message}` });
+  }
 });
 
 // Send message to agent's pane
@@ -317,15 +332,51 @@ async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: bo
 
 // Agent-to-agent relay: auto-resolves panes, wraps return address
 // If target agent is stopped/idle with no pane, auto-wakes it first
+// If target is headless or ?sdk=true, uses SDK for two-way messaging
 router.post('/relay', async (req, res) => {
-  const { from, to, message } = req.body;
+  const { from, to, message, sdk: useSdk } = req.body;
   if (!from || !to || !message) {
     return res.status(400).json({ error: 'from, to, and message required' });
   }
 
   const sender = getAgent(from);
-  let receiver = getAgent(to);
+  let receiver = await getAgentAsync(to);
   if (!receiver) return res.status(404).json({ error: `Agent "${to}" not found` });
+
+  // SDK two-way relay: send message and capture response
+  // Used for headless agents or when explicitly requested
+  const receiverIsHeadless = (receiver as any).type === 'headless';
+  if ((receiverIsHeadless || useSdk) && receiver.sessionId) {
+    try {
+      pushEvent('relay', `SDK relay from ${sender?.name || from} → ${receiver.name}`, 'info', receiver.name);
+      const envelope = `[Message from ${sender?.name || from}]\n${message}`;
+
+      let result: { response: string; messageId?: string };
+      if (receiverIsHeadless) {
+        // Use in-memory headless session
+        const { sendToHeadless } = await import('../services/headless.js');
+        result = await sendToHeadless(receiver.name, envelope, { timeoutMs: 120_000 });
+      } else {
+        // Resume existing session via SDK
+        result = await sendToSession(receiver.sessionId, envelope, { timeoutMs: 120_000 });
+      }
+
+      recordRelay(sender?.name || from, receiver.name, message);
+      return res.json({
+        success: true,
+        from: sender?.name || from,
+        to: receiver.name,
+        method: 'sdk',
+        response: result.response,
+        messageId: result.messageId,
+      });
+    } catch (e: any) {
+      console.error(`SDK relay failed for ${receiver.name}:`, e.message);
+      if (receiverIsHeadless) {
+        return res.status(500).json({ error: `SDK relay failed: ${e.message}` });
+      }
+    }
+  }
 
   let woke = false;
   let wakeTarget: string | null = null;
@@ -361,6 +412,7 @@ router.post('/relay', async (req, res) => {
     from: sender?.name || from,
     to: receiver.name,
     target,
+    method: 'pane',
     woke,
     senderPane: sender?.pane?.target || 'unknown',
     senderSession: sender?.id || 'unknown',
@@ -397,9 +449,20 @@ function removePaneMapping(agentName: string) {
 }
 
 // Stop agent
-router.post('/:id/stop', (req, res) => {
-  const agent = getAgent(req.params.id);
+router.post('/:id/stop', async (req, res) => {
+  const agent = await getAgentAsync(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+  // Headless agent — destroy SDK session
+  if ((agent as any).type === 'headless') {
+    try {
+      const { destroyHeadlessAgent } = await import('../services/headless.js');
+      await destroyHeadlessAgent(agent.name);
+      return res.json({ success: true, method: 'headless_destroy' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Failed to destroy headless agent' });
+    }
+  }
 
   // No pane — just mark as stopped
   if (!agent.pane) {
@@ -684,12 +747,37 @@ router.post('/broadcast', (req, res) => {
   res.json({ ok: true, delivered, failed, total: agents.length });
 });
 
-// ── Spawn (create new agent in a new pane) ──────────────────────
+// ── Spawn (create new agent — pane or headless) ─────────────────
 router.post('/spawn', async (req, res) => {
-  const { name, template, model, flags, session: sessionName } = req.body;
+  const { name, template, model, flags, session: sessionName, headless, systemPrompt } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
 
-  // Provision a pane
+  // Headless spawn — SDK session with no terminal pane
+  if (headless) {
+    try {
+      const { createHeadlessAgent } = await import('../services/headless.js');
+      const agent = await createHeadlessAgent(name, { model, systemPrompt });
+
+      // If a system prompt was provided, send it as the first message
+      if (systemPrompt) {
+        const { sendToHeadless } = await import('../services/headless.js');
+        // Fire-and-forget — don't block spawn on response
+        sendToHeadless(name, systemPrompt).catch(() => {});
+      }
+
+      return res.json({
+        ok: true,
+        name,
+        type: 'headless',
+        sessionId: agent.sessionId,
+        model: agent.model,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message || 'Failed to create headless agent' });
+    }
+  }
+
+  // Pane-based spawn (existing behavior)
   const psmuxSession = sessionName || 'town';
   const config: Partial<ProvisionConfig> = { defaultSession: psmuxSession };
 
@@ -742,7 +830,7 @@ router.post('/spawn', async (req, res) => {
     } catch {}
 
     pushEvent('spawn', `Spawned ${name} in ${pane.target} with: ${cmd}`, 'info', name);
-    res.json({ ok: true, name, pane: pane.target, command: cmd });
+    res.json({ ok: true, name, type: 'pane', pane: pane.target, command: cmd });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to spawn agent' });
   }
