@@ -329,6 +329,29 @@ rl.on('line', (line) => {
                 }
               },
               {
+                name: 'copilot_town_promote',
+                description: 'Promote a headless agent to a terminal pane. Disconnects the SDK handle and opens the session in a new pane so you can see it running.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name to promote' },
+                    session: { type: 'string', description: 'psmux session name (default: town)' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
+                name: 'copilot_town_demote',
+                description: 'Demote a pane agent to headless mode. Stops the terminal process and takes over the session via SDK — the agent keeps its conversation but runs invisibly with full thinking/token visibility.',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    agent: { type: 'string', description: 'Agent name to demote' }
+                  },
+                  required: ['agent']
+                }
+              },
+              {
                 name: 'copilot_town_share_note',
                 description: 'Share a note with the team — a key-value pair that any agent can read. Use for sharing decisions, API interfaces, file locations, etc.',
                 inputSchema: {
@@ -554,6 +577,26 @@ rl.on('line', (line) => {
             .then(data => {
               if (data.error) return replyError(msg.id, data.error);
               reply(msg.id, `✅ Stopped agent "${agent}"`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_promote') {
+          const { agent, session } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/promote`, { session })
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `⬆️ Promoted "${agent}" to pane ${data.pane}\nSession ${data.sessionId} now visible in terminal.`);
+            })
+            .catch(() => replyError(msg.id, 'Hub server not running'));
+
+        } else if (tool === 'copilot_town_demote') {
+          const { agent } = msg.params?.arguments || {};
+          if (!agent) return replyError(msg.id, 'agent name required');
+          httpPost(`/api/agents/${encodeURIComponent(agent)}/demote`, {})
+            .then(data => {
+              if (data.error) return replyError(msg.id, data.error);
+              reply(msg.id, `⬇️ Demoted "${agent}" to headless mode\nSession ${data.sessionId} running via SDK (model: ${data.model}). Use relay to communicate.`);
             })
             .catch(() => replyError(msg.id, 'Hub server not running'));
 

@@ -179,6 +179,85 @@ export async function destroyHeadlessAgent(name: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Promote: detach SDK handle so the session can be resumed in a terminal pane.
+ * Returns the session ID for `copilot --resume=<id>`.
+ * The headless agent is removed from the in-memory map but the session stays alive.
+ */
+export async function detachHeadless(name: string): Promise<{ sessionId: string; model: string }> {
+  const agent = _headlessAgents.get(name);
+  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+
+  const { sessionId, model } = agent;
+
+  // Disconnect SDK handle — session persists server-side
+  try { await agent.session.disconnect(); } catch {}
+  _headlessAgents.delete(name);
+
+  // Update agent-sessions.json: remove headless type, keep the session registered
+  try {
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    if (raw.agents?.[name]) {
+      delete raw.agents[name].type;  // no longer headless
+    }
+    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+  } catch {}
+
+  pushEvent('mode_switch', `Agent "${name}" promoted: headless → pane`, 'info', name);
+  return { sessionId, model };
+}
+
+/**
+ * Demote: take over an existing copilot session into headless mode via SDK.
+ * The caller must ensure the terminal copilot process is stopped first.
+ */
+export async function attachHeadless(
+  name: string,
+  sessionId: string,
+  options?: { model?: string }
+): Promise<HeadlessAgent> {
+  if (_headlessAgents.has(name)) {
+    throw new Error(`Headless agent "${name}" already exists`);
+  }
+
+  const client = await getClient();
+  const model = options?.model || 'claude-sonnet-4';
+
+  // Resume the existing session via SDK
+  const session = await client.resumeSession(sessionId, {
+    onPermissionRequest: approveAll,
+  });
+
+  const agent: HeadlessAgent = {
+    name,
+    sessionId,
+    model,
+    session,
+    status: 'idle',
+    createdAt: new Date().toISOString(),
+    lastMessageAt: null,
+    messageCount: 0,
+  };
+
+  registerAgentTools(session, name);
+  _headlessAgents.set(name, agent);
+
+  // Update agent-sessions.json: mark as headless
+  try {
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    if (!raw.agents) raw.agents = {};
+    if (!raw.agents[name]) {
+      raw.agents[name] = { session: sessionId, displayName: name, startedAt: new Date().toISOString() };
+    }
+    raw.agents[name].type = 'headless';
+    delete raw.agents[name].stoppedAt;
+    writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+  } catch {}
+
+  pushEvent('mode_switch', `Agent "${name}" demoted: pane → headless`, 'info', name);
+  return agent;
+}
+
 // ── Queries ──────────────────────────────────────────────────────
 
 export function getHeadlessAgent(name: string): HeadlessAgent | undefined {

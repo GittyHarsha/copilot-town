@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import { getAllAgents, getAgent, getAgentAsync, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents } from '../services/agents.js';
-import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
+import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, killPane, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
 import { sendToSession, getSessionMessages } from '../services/copilot-sdk.js';
@@ -493,6 +493,100 @@ router.post('/:id/stop', async (req, res) => {
     pushEvent('agent_stopped', `Agent ${agent.name} stopped`, 'info', agent.name);
     res.json({ success: true, target, method: 'psmux' });
   }, 800);
+});
+
+// ── Mode Switching: Promote (headless→pane) and Demote (pane→headless) ────
+
+// Promote: headless → pane (disconnect SDK, resume in terminal)
+router.post('/:id/promote', async (req, res) => {
+  const agent = await getAgentAsync(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  if (agent.type !== 'headless') return res.status(400).json({ error: 'Agent is not headless — nothing to promote' });
+
+  try {
+    // Detach SDK handle
+    const { detachHeadless } = await import('../services/headless.js');
+    const { sessionId, model } = await detachHeadless(agent.name);
+
+    // Provision a pane and resume the session there
+    const psmuxSession = req.body.session || 'town';
+    const config: Partial<ProvisionConfig> = { defaultSession: psmuxSession };
+    const pane = provisionPane(config, isPaneFree);
+    if (!pane?.target) return res.status(500).json({ error: 'Failed to provision pane' });
+
+    await new Promise(r => setTimeout(r, 500));
+
+    const parts = ['copilot', `--resume=${sessionId}`];
+    if (model) parts.push(`--model=${model}`);
+    const flags = req.body.flags || [];
+    for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
+    const cmd = parts.join(' ');
+
+    sendKeys(pane.target, cmd, true);
+    updatePaneMapping(agent.name, pane.target);
+    clearStoppedAt(agent.name);
+
+    try {
+      const windowTarget = pane.target.replace(/\.\d+$/, '');
+      renameWindow(windowTarget, agent.name);
+    } catch {}
+
+    res.json({
+      success: true,
+      name: agent.name,
+      from: 'headless',
+      to: 'pane',
+      pane: pane.target,
+      sessionId,
+      command: cmd,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to promote agent' });
+  }
+});
+
+// Demote: pane → headless (stop terminal, resume via SDK)
+router.post('/:id/demote', async (req, res) => {
+  // Force refresh to discover recently-promoted pane agents
+  await refreshAgents();
+  const agent = await getAgentAsync(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  if (agent.type === 'headless') return res.status(400).json({ error: 'Agent is already headless' });
+  if (!agent.sessionId) return res.status(400).json({ error: 'Agent has no session ID' });
+
+  try {
+    // Kill the pane immediately — session is preserved server-side
+    if (agent.pane) {
+      const target = agent.pane.target;
+      removePaneMapping(agent.name);
+      try { killPane(target); } catch {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    // Get metadata for model
+    let model: string | undefined;
+    try {
+      if (existsSync(SESSION_MAP_FILE)) {
+        const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+        model = raw.metadata?.[agent.name]?.model;
+      }
+    } catch {}
+
+    // Resume session via SDK
+    const { attachHeadless } = await import('../services/headless.js');
+    const headless = await attachHeadless(agent.name, agent.sessionId!, { model });
+
+    res.json({
+      success: true,
+      name: agent.name,
+      from: 'pane',
+      to: 'headless',
+      sessionId: headless.sessionId,
+      model: headless.model,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to demote agent' });
+  }
 });
 
 // Resume agent by session ID — auto-provisions pane if no target given

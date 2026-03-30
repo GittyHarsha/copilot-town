@@ -11,7 +11,8 @@ export type EventType =
   | 'status_change'
   | 'task'
   | 'broadcast'
-  | 'spawn';
+  | 'spawn'
+  | 'mode_switch';
 
 export type Severity = 'info' | 'warn' | 'error';
 
