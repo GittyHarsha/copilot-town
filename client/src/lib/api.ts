@@ -298,4 +298,15 @@ export const api = {
     postJson(`/towns/${townId}/agents`, { agentName }),
   removeAgentFromTown: (townId: string, agentName: string) =>
     fetch(`${API_BASE}/towns/${townId}/agents/${agentName}`, { method: 'DELETE' }).then(r => r.json()),
+
+  // Workflows
+  getWorkflows: () => fetchJson<any[]>('/workflows'),
+  getWorkflow: (id: string) => fetchJson<any>(`/workflows/${encodeURIComponent(id)}`),
+  reloadWorkflows: () => postJson<any>('/workflows/reload'),
+  createWorkflow: (id: string, yaml: string) => postJson<any>('/workflows', { id, yaml }),
+  runWorkflow: (id: string, inputs: Record<string, string>) =>
+    postJson<any>(`/workflows/${encodeURIComponent(id)}/run`, { inputs }),
+  getWorkflowRuns: () => fetchJson<any[]>('/workflows/runs/list'),
+  getWorkflowRun: (runId: string) => fetchJson<any>(`/workflows/runs/${encodeURIComponent(runId)}`),
+  cancelWorkflowRun: (runId: string) => deleteJson<any>(`/workflows/runs/${encodeURIComponent(runId)}`),
 };

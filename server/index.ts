@@ -15,6 +15,7 @@ import eventRoutes from './routes/events.js';
 import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
 import notesRoutes from './routes/notes.js';
+import workflowRoutes from './routes/workflows.js';
 import { getAllAgents, refreshAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
 import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary, renameWindow } from './services/psmux.js';
 import { invalidateSessionCache } from './services/sessions.js';
@@ -22,6 +23,7 @@ import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
 import { getAllAgentTasks } from './routes/agents.js';
 import { listCopilotModels, listCopilotSessions, stopClient } from './services/copilot-sdk.js';
+import { loadWorkflows, addRunListener } from './services/workflows.js';
 
 const app = express();
 const PORT = 3848;
@@ -40,8 +42,9 @@ app.use('/api/events', eventRoutes);
 app.use('/api/status-history', statusHistoryRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/notes', notesRoutes);
+app.use('/api/workflows', workflowRoutes);
 
-app.get('/api/templates', (_req, res) => {
+app.get('/api/templates',(_req, res) => {
   res.json(loadAgentTemplates());
 });
 
@@ -446,6 +449,13 @@ server.listen(PORT, () => {
   }
   console.log('');
   startHealthMonitor();
+  loadWorkflows().then(defs => console.log(`   📋 ${defs.length} workflow(s) loaded`));
+
+  // Broadcast workflow run updates to WS clients
+  addRunListener((run) => {
+    const msg = JSON.stringify({ type: 'workflow_run', run });
+    wssStatus.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
+  });
 });
 
 // Graceful shutdown — stop SDK client
