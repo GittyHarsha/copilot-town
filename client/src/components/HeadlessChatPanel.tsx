@@ -7,17 +7,27 @@ interface ToolCall {
   timestamp: number;
 }
 
+interface UsageInfo {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
+  duration?: number;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'agent' | 'system';
   text: string;
   thinking?: string;
   tokens?: number;
+  usage?: UsageInfo;
   timestamp: number;
   from?: string;
   streaming?: boolean;
   tools?: ToolCall[];
   intent?: string;
+  action?: 'enqueue' | 'steer';
 }
 
 interface Props {
@@ -34,6 +44,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   const [connected, setConnected] = useState(false);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [liveIntent, setLiveIntent] = useState<string | null>(null);
+  const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -146,6 +157,28 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               m.id === sid ? { ...m, intent: msg.intent } : m
             ));
           }
+        } else if (msg.type === 'usage') {
+          const usage: UsageInfo = { model: msg.model, inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, cost: msg.cost, duration: msg.duration };
+          setLiveUsage(usage);
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, usage, tokens: msg.outputTokens } : m
+            ));
+          }
+        } else if (msg.type === 'subagent_start') {
+          toolsBuf.current = [...toolsBuf.current, { tool: `🤖 ${msg.name || 'subagent'}`, status: 'running', timestamp: Date.now() }];
+          if (sid) {
+            const tools = [...toolsBuf.current];
+            setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m));
+          }
+        } else if (msg.type === 'subagent_complete') {
+          toolsBuf.current = toolsBuf.current.map(t =>
+            t.tool === `🤖 ${msg.name}` && t.status === 'running' ? { ...t, status: 'done' as const } : t
+          );
+          if (sid) {
+            const tools = [...toolsBuf.current];
+            setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m));
+          }
         } else if (msg.type === 'response') {
           if (sid) {
             setMessages(prev => prev.map(m =>
@@ -164,7 +197,37 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           thinkBuf.current = '';
           toolsBuf.current = [];
           setLiveIntent(null);
+          setLiveUsage(null);
           setSending(false);
+        } else if (msg.type === 'aborted') {
+          if (sid) {
+            setMessages(prev => prev.map(m =>
+              m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m
+            ));
+          }
+          activeStreamId.current = null;
+          streamBuf.current = '';
+          thinkBuf.current = '';
+          toolsBuf.current = [];
+          setLiveIntent(null);
+          setLiveUsage(null);
+          setSending(false);
+          setMessages(prev => [...prev, {
+            id: `sys-${msgCounter.current++}`, role: 'system',
+            text: '⏹ Aborted', timestamp: Date.now(),
+          }]);
+        } else if (msg.type === 'enqueued') {
+          setMessages(prev => [...prev, {
+            id: `sys-${msgCounter.current++}`, role: 'system',
+            text: '📋 Prompt queued — will run when agent is idle', timestamp: Date.now(),
+          }]);
+        } else if (msg.type === 'steered') {
+          // Already added the user message, just note the steer
+        } else if (msg.type === 'compacted') {
+          setMessages(prev => [...prev, {
+            id: `sys-${msgCounter.current++}`, role: 'system',
+            text: '🗜️ Context compacted', timestamp: Date.now(),
+          }]);
         } else if (msg.type === 'error') {
           if (sid) {
             setMessages(prev => prev.map(m =>
@@ -189,30 +252,77 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     return () => { ws.close(); wsRef.current = null; };
   }, [agentName]);
 
-  const sendMessage = useCallback(() => {
+  const sendMessage = useCallback((action?: 'enqueue' | 'steer') => {
     const text = input.trim();
-    if (!text || sending || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
+    // User message bubble
     const userId = `u-${msgCounter.current++}`;
-    setMessages(prev => [...prev, { id: userId, role: 'user', text, from: 'you', timestamp: Date.now() }]);
+    const userMsg: ChatMessage = { id: userId, role: 'user', text, from: 'you', timestamp: Date.now() };
+    if (action) userMsg.action = action;
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+
+    if (action === 'enqueue') {
+      // Queue — don't create agent placeholder, response comes later via streaming
+      wsRef.current.send(JSON.stringify({ action: 'enqueue', prompt: text }));
+      return;
+    }
+
+    if (action === 'steer') {
+      // Steer — interrupt current, start new stream
+      // Reset current stream
+      activeStreamId.current = null;
+      streamBuf.current = '';
+      thinkBuf.current = '';
+      toolsBuf.current = [];
+
+      const agentId = `a-${msgCounter.current++}`;
+      setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+      activeStreamId.current = agentId;
+      wsRef.current.send(JSON.stringify({ action: 'steer', prompt: text }));
+      return;
+    }
+
+    // Normal send — create agent placeholder and wait
+    if (sending) return;
 
     const agentId = `a-${msgCounter.current++}`;
     setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-
     activeStreamId.current = agentId;
     streamBuf.current = '';
     thinkBuf.current = '';
     toolsBuf.current = [];
     setSending(true);
-    setInput('');
 
     wsRef.current.send(JSON.stringify({ prompt: text }));
   }, [input, sending]);
 
+  const abortAgent = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ action: 'abort' }));
+  }, []);
+
+  const compactAgent = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ action: 'compact' }));
+  }, []);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ctrl+Q — enqueue prompt while agent is busy
+    if (e.key === 'q' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (input.trim()) sendMessage('enqueue');
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      if (sending) {
+        // While busy: Enter = steer (interrupt with new prompt)
+        if (input.trim()) sendMessage('steer');
+      } else {
+        sendMessage();
+      }
     }
   };
 
@@ -242,7 +352,17 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               <span className="text-[10px] text-blue-400/70 truncate max-w-[300px]">📋 {liveIntent}</span>
             )}
           </div>
-          <button onClick={onClose} className="text-fg-2 hover:text-fg text-sm px-2 py-1.5 rounded-lg hover:bg-bg-2 transition-all duration-150">✕</button>
+          <div className="flex items-center gap-1.5">
+            {sending && (
+              <button onClick={abortAgent} className="text-[10px] px-2 py-1 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/15 transition-all" title="Abort (cancel current task)">
+                ⏹ Abort
+              </button>
+            )}
+            <button onClick={compactAgent} className="text-fg-2/40 hover:text-fg-2 text-[10px] px-2 py-1.5 rounded-lg hover:bg-bg-2 transition-all" title="Compact context">
+              🗜️
+            </button>
+            <button onClick={onClose} className="text-fg-2 hover:text-fg text-sm px-2 py-1.5 rounded-lg hover:bg-bg-2 transition-all duration-150">✕</button>
+          </div>
         </div>
 
         {/* Messages */}
@@ -260,9 +380,15 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                 m.role === 'user'
                   ? 'rounded-2xl rounded-br-md px-4 py-2.5 bg-blue-500/[0.08] text-fg border border-blue-500/[0.12]'
                   : m.role === 'system'
-                  ? 'rounded-xl px-4 py-2.5 bg-red-500/[0.06] text-red-400 border border-red-500/[0.1]'
+                  ? 'rounded-xl px-3.5 py-2 bg-fg-2/[0.04] text-fg-2/60 border border-border/30 text-center italic'
                   : 'space-y-0'
               }`}>
+                {/* Action badge for enqueue/steer */}
+                {m.role === 'user' && m.action && (
+                  <span className={`inline-block text-[9px] px-1.5 py-0.5 rounded-md mb-1 font-mono ${
+                    m.action === 'enqueue' ? 'bg-amber-500/10 text-amber-400/70 border border-amber-500/10' : 'bg-cyan-500/10 text-cyan-400/70 border border-cyan-500/10'
+                  }`}>{m.action === 'enqueue' ? '📋 queued' : '↯ steer'}</span>
+                )}
                 {/* Relay sender */}
                 {m.from && m.from !== 'you' && (
                   <div className="text-[10px] text-fg-2/50 mb-1 font-mono">↗ from {m.from}</div>
@@ -323,10 +449,13 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                       <div className="text-[10px] text-blue-400/50 mt-1 px-1 truncate">📋 {m.intent}</div>
                     )}
 
-                    {/* Footer: tokens */}
-                    {!m.streaming && m.tokens && (
-                      <div className="flex items-center gap-2 mt-1.5 px-1">
-                        <span className="text-[10px] text-fg-2/30 tabular-nums">{m.tokens.toLocaleString()} tokens</span>
+                    {/* Footer: usage/tokens */}
+                    {!m.streaming && (m.tokens || m.usage) && (
+                      <div className="flex items-center gap-2.5 mt-1.5 px-1">
+                        {m.tokens && <span className="text-[10px] text-fg-2/30 tabular-nums">{m.tokens.toLocaleString()} tokens</span>}
+                        {m.usage?.inputTokens && <span className="text-[10px] text-fg-2/20 tabular-nums">↓{m.usage.inputTokens.toLocaleString()}</span>}
+                        {m.usage?.duration && <span className="text-[10px] text-fg-2/20 tabular-nums">{(m.usage.duration / 1000).toFixed(1)}s</span>}
+                        {m.usage?.model && <span className="text-[10px] text-fg-2/20">{m.usage.model}</span>}
                       </div>
                     )}
                   </>
@@ -350,12 +479,12 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
             <textarea
               ref={inputRef}
               className="flex-1 bg-bg border border-border rounded-xl px-3.5 py-2.5 text-xs text-fg resize-none focus:outline-none focus:border-blue-500/30 min-h-[40px] max-h-[120px] transition-colors placeholder-fg-2/30"
-              placeholder={sending ? 'Waiting for response…' : 'Message this agent…'}
+              placeholder={sending ? 'Enter to steer · Ctrl+Q to queue…' : 'Message this agent…'}
               rows={1}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={sending || !connected}
+              disabled={!connected}
               onInput={e => {
                 const t = e.currentTarget;
                 t.style.height = 'auto';
@@ -364,13 +493,15 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
             />
             <button
               className="btn btn-primary flex-shrink-0 px-4"
-              onClick={sendMessage}
-              disabled={sending || !connected || !input.trim()}>
-              {sending ? '⏳' : '↑ Send'}
+              onClick={() => sending ? (input.trim() ? sendMessage('steer') : abortAgent()) : sendMessage()}
+              disabled={!connected || (!input.trim() && !sending)}>
+              {sending ? (input.trim() ? '↯ Steer' : '⏹ Stop') : '↑ Send'}
             </button>
           </div>
           <div className="flex items-center justify-between mt-1.5 px-0.5">
-            <span className="text-[10px] text-fg-2/25">Enter to send · Shift+Enter for newline</span>
+            <span className="text-[10px] text-fg-2/25">
+              {sending ? 'Enter = steer · Ctrl+Q = queue · Empty + click = abort' : 'Enter to send · Shift+Enter for newline · Ctrl+Q to queue'}
+            </span>
             <span className="text-[10px] text-fg-2/25">⚡ headless via SDK</span>
           </div>
         </div>

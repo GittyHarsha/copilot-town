@@ -230,8 +230,22 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
   sess.on('tool.execution_start', (e: any) => {
     emit({ type: 'tool_start', tool: e?.data?.toolName || e?.data?.name });
   });
+  sess.on('tool.execution_complete', (e: any) => {
+    emit({ type: 'tool_complete', tool: e?.data?.toolName || e?.data?.name });
+  });
   sess.on('assistant.intent', (e: any) => {
     emit({ type: 'intent', intent: e?.data?.intent || e?.data?.content });
+  });
+  // Subagent events
+  sess.on('subagent.started', (e: any) => {
+    emit({ type: 'subagent_start', name: e?.data?.name || e?.data?.agentName, description: e?.data?.description });
+  });
+  sess.on('subagent.completed', (e: any) => {
+    emit({ type: 'subagent_complete', name: e?.data?.name || e?.data?.agentName });
+  });
+  // Session mode changes
+  sess.on('session.mode_changed', (e: any) => {
+    emit({ type: 'mode_changed', mode: e?.data?.mode });
   });
 }
 
@@ -308,9 +322,73 @@ export async function sendToHeadless(
 }
 
 /**
- * Get structured conversation history for a headless agent.
+ * Enqueue a prompt — queued while agent is busy, sent when idle.
+ * Uses SDK's send() with no wait — the response comes via streaming events.
  */
-export async function getHeadlessMessages(name: string): Promise<any[]> {
+export async function enqueueToHeadless(name: string, message: string): Promise<string> {
+  let agent = _headlessAgents.get(name);
+  if (!agent) {
+    agent = await getOrReviveHeadless(name);
+    if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  }
+
+  agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
+  persistUserPrompts(name, agent.userPrompts);
+
+  const messageId = await agent.session.send({ prompt: message } as any);
+  agent.messageCount++;
+  pushEvent('enqueue', `Enqueued prompt to "${name}"`, 'info', name);
+  return messageId;
+}
+
+/**
+ * Steer — send an immediate message that interrupts the current response.
+ * The agent processes this right away, even if busy.
+ */
+export async function steerHeadless(name: string, message: string): Promise<string> {
+  let agent = _headlessAgents.get(name);
+  if (!agent) {
+    agent = await getOrReviveHeadless(name);
+    if (!agent) throw new Error(`Headless agent "${name}" not found`);
+  }
+
+  agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
+  persistUserPrompts(name, agent.userPrompts);
+
+  // send() without waiting — fires immediately and steers the conversation
+  const messageId = await agent.session.send({ prompt: message } as any);
+  agent.status = 'running';
+  agent.lastMessageAt = new Date().toISOString();
+  agent.messageCount++;
+  pushEvent('steer', `Steered "${name}" with new prompt`, 'info', name);
+  return messageId;
+}
+
+/**
+ * Abort — cancel whatever the agent is currently doing.
+ */
+export async function abortHeadless(name: string): Promise<void> {
+  const agent = _headlessAgents.get(name);
+  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+
+  await agent.session.abort();
+  agent.status = 'idle';
+  pushEvent('abort', `Aborted agent "${name}"`, 'warn', name);
+}
+
+/**
+ * Compact — trigger manual context compaction.
+ */
+export async function compactHeadless(name: string): Promise<void> {
+  const agent = _headlessAgents.get(name);
+  if (!agent) throw new Error(`Headless agent "${name}" not found`);
+
+  await (agent.session as any).rpc.compaction.compact();
+  pushEvent('compact', `Compacted context for "${name}"`, 'info', name);
+}
+
+/**
+ * Get structured conversation history for a headless agent.
   let agent = _headlessAgents.get(name);
   if (!agent) {
     // Try auto-revive from session file
@@ -711,7 +789,7 @@ function registerHeadlessInSessionFile(name: string, sessionId: string) {
 }
 
 /** Persist user prompts to agent-sessions.json so they survive server restarts */
-function persistUserPrompts(name: string, prompts: { prompt: string; timestamp: string }[]) {
+export function persistUserPrompts(name: string, prompts: { prompt: string; timestamp: string }[]) {
   try {
     if (!existsSync(SESSION_MAP_FILE)) return;
     const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));

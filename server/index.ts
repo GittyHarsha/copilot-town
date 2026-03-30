@@ -333,7 +333,7 @@ wssTerminal.on('connection', (ws, req) => {
 
 // ── Headless Agent Streaming WebSocket ────────────────────────────
 // ws://localhost:3848/ws/headless?agent=<name>
-// Client sends: { prompt: "...", attachments?: [...] }
+// Client sends: { prompt: "..." } | { action: 'enqueue'|'steer'|'abort'|'compact', prompt?: "..." }
 // Server streams: { type: 'turn_start'|'message_delta'|'reasoning'|'usage'|'response'|'error', ... }
 
 const wssHeadless = new WebSocketServer({ noServer: true });
@@ -351,7 +351,8 @@ wssHeadless.on('connection', async (ws, req) => {
   console.log(`Headless WS connected to agent "${agentName}"`);
 
   // Register as a stream listener for live token-by-token output
-  const { addStreamListener, removeStreamListener, getHeadlessAgent, getOrReviveHeadless } = await import('./services/headless.js');
+  const { addStreamListener, removeStreamListener, getHeadlessAgent, getOrReviveHeadless,
+          enqueueToHeadless, steerHeadless, abortHeadless, compactHeadless, persistUserPrompts } = await import('./services/headless.js');
   const streamHandler = (event: any) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   };
@@ -360,6 +361,30 @@ wssHeadless.on('connection', async (ws, req) => {
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
+      const action = msg.action || 'send';
+
+      // ── Abort ──
+      if (action === 'abort') {
+        try {
+          await abortHeadless(agentName);
+          ws.send(JSON.stringify({ type: 'aborted' }));
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
+        return;
+      }
+
+      // ── Compact ──
+      if (action === 'compact') {
+        try {
+          await compactHeadless(agentName);
+          ws.send(JSON.stringify({ type: 'compacted' }));
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
+        return;
+      }
+
       if (!msg.prompt) {
         ws.send(JSON.stringify({ type: 'error', message: 'Missing prompt field' }));
         return;
@@ -367,7 +392,6 @@ wssHeadless.on('connection', async (ws, req) => {
 
       let agent = getHeadlessAgent(agentName);
       if (!agent) {
-        // Try auto-revive from session file
         agent = await getOrReviveHeadless(agentName);
         if (!agent) {
           ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
@@ -375,9 +399,34 @@ wssHeadless.on('connection', async (ws, req) => {
         }
       }
 
+      // ── Enqueue — queue while busy ──
+      if (action === 'enqueue') {
+        try {
+          const messageId = await enqueueToHeadless(agentName, msg.prompt);
+          ws.send(JSON.stringify({ type: 'enqueued', messageId }));
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
+        return;
+      }
+
+      // ── Steer — interrupt with new prompt ──
+      if (action === 'steer') {
+        try {
+          const messageId = await steerHeadless(agentName, msg.prompt);
+          ws.send(JSON.stringify({ type: 'steered', messageId }));
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
+        return;
+      }
+
+      // ── Normal send — default ──
       agent.status = 'running';
       agent.lastMessageAt = new Date().toISOString();
       agent.messageCount++;
+      agent.userPrompts.push({ prompt: msg.prompt, timestamp: new Date().toISOString() });
+      persistUserPrompts(agentName, agent.userPrompts);
 
       try {
         const sendOpts: any = { prompt: msg.prompt };
