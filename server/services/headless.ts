@@ -117,11 +117,11 @@ export async function destroyHeadlessAgent(name: string): Promise<boolean> {
   try { await agent.session.destroy(); } catch {}
   _headlessAgents.delete(name);
 
-  // Mark stopped in agent-sessions.json
+  // Remove from agent-sessions.json (headless agents are ephemeral)
   try {
     const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
     if (raw.agents?.[name]) {
-      raw.agents[name].stoppedAt = new Date().toISOString();
+      delete raw.agents[name];
     }
     writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
   } catch {}
