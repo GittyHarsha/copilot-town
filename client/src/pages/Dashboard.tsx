@@ -148,7 +148,7 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
       <CreateSessionDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onLaunched={() => { setCreateOpen(false); onRefresh(); }}
+        onLaunched={() => { setCreateOpen(false); setTimeout(() => onRefresh(), 1500); onRefresh(); }}
       />
 
       {/* Agent list */}

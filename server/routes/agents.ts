@@ -932,6 +932,9 @@ router.post('/spawn', async (req, res) => {
       });
     } catch (e: any) {
       return res.status(500).json({ error: e.message || 'Failed to create headless agent' });
+    } finally {
+      // Invalidate cache so the new agent appears immediately on next fetch
+      refreshAgents().catch(() => {});
     }
   }
 
@@ -988,6 +991,8 @@ router.post('/spawn', async (req, res) => {
     } catch {}
 
     pushEvent('spawn', `Spawned ${name} in ${pane.target} with: ${cmd}`, 'info', name);
+    // Refresh agent cache so new agent appears immediately
+    refreshAgents().catch(() => {});
     res.json({ ok: true, name, type: 'pane', pane: pane.target, command: cmd });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to spawn agent' });
