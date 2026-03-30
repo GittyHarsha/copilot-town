@@ -573,8 +573,8 @@ export default function TownView() {
                   </button>
                 )}
                 {selAgent.type === 'headless' && selAgent.status !== 'stopped' && (
-                  <button className="btn btn-success" onClick={() => api.promoteAgent(selAgent.name)}>
-                    📺 Promote
+                  <button className="btn btn-success" onClick={() => api.moveToPaneAgent(selAgent.name)}>
+                    📺 Move to pane
                   </button>
                 )}
               </div>

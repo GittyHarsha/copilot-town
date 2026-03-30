@@ -404,7 +404,7 @@ export async function destroyHeadlessAgent(name: string): Promise<boolean> {
 }
 
 /**
- * Promote: detach SDK handle so the session can be resumed in a terminal pane.
+ * Move to pane: detach SDK handle so the session can be resumed in a terminal pane.
  * Returns the session ID for `copilot --resume=<id>`.
  * The headless agent is removed from the in-memory map but the session stays alive.
  */
@@ -427,12 +427,12 @@ export async function detachHeadless(name: string): Promise<{ sessionId: string;
     writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
   } catch {}
 
-  pushEvent('mode_switch', `Agent "${name}" promoted: headless → pane`, 'info', name);
+  pushEvent('mode_switch', `Agent "${name}" moved to pane`, 'info', name);
   return { sessionId, model };
 }
 
 /**
- * Demote: take over an existing copilot session into headless mode via SDK.
+ * Move to headless: take over an existing copilot session into headless mode via SDK.
  * The caller must ensure the terminal copilot process is stopped first.
  */
 export async function attachHeadless(
@@ -484,7 +484,7 @@ export async function attachHeadless(
     writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
   } catch {}
 
-  pushEvent('mode_switch', `Agent "${name}" demoted: pane → headless`, 'info', name);
+  pushEvent('mode_switch', `Agent "${name}" moved to headless`, 'info', name);
   return agent;
 }
 

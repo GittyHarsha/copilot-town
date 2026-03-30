@@ -421,7 +421,7 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
   // Only match panes to registered agents when there's strong evidence:
   //   - Extracted session ID matches a registered agent
   //   - Pane PID matches a stored panePid for a registered agent
-  // Unmatched copilot panes are NOT auto-promoted to agents.
+  // Unmatched copilot panes are NOT auto-registered as agents.
   for (const pane of allPanes) {
     const info = paneData.get(pane.target);
     if (!info) continue;

@@ -494,13 +494,13 @@ router.post('/:id/stop', async (req, res) => {
   }, 800);
 });
 
-// ── Mode Switching: Promote (headless→pane) and Demote (pane→headless) ────
+// ── Mode Switching: Move to Pane (headless→pane) and Move to Headless (pane→headless) ────
 
-// Promote: headless → pane (disconnect SDK, resume in terminal)
-router.post('/:id/promote', async (req, res) => {
+// Move to pane: headless → pane (disconnect SDK, resume in terminal)
+router.post('/:id/move-to-pane', async (req, res) => {
   const agent = await getAgentAsync(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
-  if (agent.type !== 'headless') return res.status(400).json({ error: 'Agent is not headless — nothing to promote' });
+  if (agent.type !== 'headless') return res.status(400).json({ error: 'Agent is not headless — already a pane agent' });
 
   try {
     // Detach SDK handle
@@ -540,13 +540,13 @@ router.post('/:id/promote', async (req, res) => {
       command: cmd,
     });
   } catch (e: any) {
-    res.status(500).json({ error: e.message || 'Failed to promote agent' });
+    res.status(500).json({ error: e.message || 'Failed to move agent to pane' });
   }
 });
 
-// Demote: pane → headless (stop terminal, resume via SDK)
-router.post('/:id/demote', async (req, res) => {
-  // Force refresh to discover recently-promoted pane agents
+// Move to headless: pane → headless (stop terminal, resume via SDK)
+router.post('/:id/move-to-headless', async (req, res) => {
+  // Force refresh to discover recently-moved pane agents
   await refreshAgents();
   const agent = await getAgentAsync(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
@@ -584,7 +584,7 @@ router.post('/:id/demote', async (req, res) => {
       model: headless.model,
     });
   } catch (e: any) {
-    res.status(500).json({ error: e.message || 'Failed to demote agent' });
+    res.status(500).json({ error: e.message || 'Failed to move agent to headless' });
   }
 });
 

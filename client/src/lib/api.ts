@@ -178,12 +178,12 @@ export const api = {
       `/agents/${encodeURIComponent(id)}/mode`, { mode }),
   getAgentMode: (id: string) =>
     fetchJson<{ mode: string }>(`/agents/${encodeURIComponent(id)}/mode`),
-  promoteAgent: (id: string) =>
+  moveToPaneAgent: (id: string) =>
     postJson<{ success: boolean; pane: string; sessionId: string }>(
-      `/agents/${encodeURIComponent(id)}/promote`),
-  demoteAgent: (id: string) =>
+      `/agents/${encodeURIComponent(id)}/move-to-pane`),
+  moveToHeadlessAgent: (id: string) =>
     postJson<{ success: boolean; sessionId: string; model: string }>(
-      `/agents/${encodeURIComponent(id)}/demote`),
+      `/agents/${encodeURIComponent(id)}/move-to-headless`),
   getToolActivity: (id: string) =>
     fetchJson<{ agent: string; activity: { timestamp: string; tool: string; result?: string }[] }>(
       `/agents/${encodeURIComponent(id)}/tools/activity`),

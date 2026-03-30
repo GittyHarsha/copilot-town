@@ -26,7 +26,7 @@ const GLOW: Record<string, string> = {
 
 function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'promoting' | 'demoting' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | null>(null);
   const [resumeError, setResumeError] = useState('');
   const [showLaunchConfig, setShowLaunchConfig] = useState<'resume' | 'start' | null>(null);
   const [showChat, setShowChat] = useState(false);
@@ -82,15 +82,15 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
     }
   };
 
-  const handlePromote = async () => {
-    setPendingAction('promoting');
-    try { await api.promoteAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+  const handleMoveToPane = async () => {
+    setPendingAction('movingToPane');
+    try { await api.moveToPaneAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
     catch { setPendingAction(null); }
   };
 
-  const handleDemote = async () => {
-    setPendingAction('demoting');
-    try { await api.demoteAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+  const handleMoveToHeadless = async () => {
+    setPendingAction('movingToHeadless');
+    try { await api.moveToHeadlessAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
     catch { setPendingAction(null); }
   };
 
@@ -192,7 +192,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
               <div className="flex items-center gap-2 text-xs text-fg-2">
                 <span className="spinner" />
                 <span>{pendingAction === 'stopping' ? 'Stopping…' : pendingAction === 'starting' ? 'Starting…'
-                  : pendingAction === 'promoting' ? 'Promoting…' : 'Demoting…'}</span>
+                  : pendingAction === 'movingToPane' ? 'Moving to pane…' : 'Moving to headless…'}</span>
               </div>
             ) : isAlive ? (
               <>
@@ -208,10 +208,10 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
                     <div className="absolute top-full left-0 mt-1 z-50 bg-bg-1 border border-border rounded-lg shadow-xl py-1 min-w-[160px] animate-slide-down">
                       {isHeadless ? (
                         <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
-                          onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handlePromote(); }}>⬆ Promote to pane</button>
+                          onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handleMoveToPane(); }}>📺 Move to pane</button>
                       ) : agent.pane && agent.sessionId ? (
                         <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
-                          onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handleDemote(); }}>⬇ Demote to headless</button>
+                          onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handleMoveToHeadless(); }}>⚡ Move to headless</button>
                       ) : null}
                       {isHeadless && (
                         <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
