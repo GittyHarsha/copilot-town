@@ -155,28 +155,25 @@ function AppInner() {
       )}
 
       {/* Header — 48px */}
-      <header className="border-b border-border sticky top-0 z-50 bg-bg/90 backdrop-blur-md">
-        <div className="max-w-[1400px] mx-auto px-3 md:px-5 h-12 flex items-center justify-between">
-          <div className="flex items-center gap-4 md:gap-6">
-            <div className="flex items-center gap-2">
+      <header className="border-b border-border sticky top-0 z-50 bg-bg/80 backdrop-blur-xl">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-6 h-12 flex items-center justify-between">
+          <div className="flex items-center gap-5 md:gap-7">
+            <div className="flex items-center gap-2.5">
               <span className="text-base" aria-hidden>🏘️</span>
               <span className="text-sm font-bold tracking-tight hidden sm:inline">Copilot Town</span>
             </div>
-            <nav className="flex items-center gap-0.5">
+            <nav className="flex items-center gap-0.5 bg-bg-1/50 rounded-xl p-0.5 border border-border/50">
               {NAV.map(item => (
                 <button
                   key={item.id}
-                  className={`relative px-2.5 md:px-3 py-1.5 text-xs transition-colors rounded-md ${
-                    page === item.id ? 'text-fg font-medium bg-bg-2' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-1'
+                  className={`relative px-3 md:px-3.5 py-1.5 text-[11px] font-medium transition-all duration-200 rounded-lg ${
+                    page === item.id ? 'text-fg bg-bg-3/80 shadow-sm' : 'text-fg-2 hover:text-fg-1'
                   }`}
                   onClick={() => setPage(item.id)}
                   title={item.label}
                 >
                   <span className="md:hidden">{item.icon}</span>
                   <span className="hidden md:inline">{item.label}</span>
-                  {page === item.id && (
-                    <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-blue-500 rounded-full" />
-                  )}
                 </button>
               ))}
             </nav>
@@ -189,7 +186,7 @@ function AppInner() {
         </div>
       </header>
 
-      <main className="max-w-[1400px] mx-auto px-3 md:px-5 py-4" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
+      <main className="max-w-[1400px] mx-auto px-4 md:px-6 py-5" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
         {page === 'dashboard' && (
           <Dashboard
             agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}

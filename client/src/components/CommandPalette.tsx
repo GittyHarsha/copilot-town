@@ -175,7 +175,7 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-start justify-center pt-[15vh] animate-fade-in"
+      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-start justify-center pt-[15vh] animate-fade-in"
       onClick={handleBackdropClick}
     >
       <div className="w-full max-w-[520px] mx-4">
@@ -185,7 +185,7 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
           <input
             ref={inputRef}
             type="text"
-            className="w-full bg-bg-1 border border-border-1 rounded-lg pl-9 pr-4 py-3 text-sm text-fg placeholder-fg-2/50 outline-none focus:border-blue/50"
+            className="w-full bg-bg-1 border border-border-1 rounded-xl pl-9 pr-4 py-3.5 text-sm text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 transition-colors"
             placeholder="Type a command…"
             value={query}
             onChange={e => setQuery(e.target.value)}

@@ -121,17 +121,18 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
   const modes: GroupMode[] = ['flat', 'by status', 'by source'];
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <StatsBar agents={agents} />
 
       {/* Group toggle */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center bg-bg-1 border border-border rounded-lg overflow-hidden">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center bg-bg-1 border border-border rounded-xl overflow-hidden"
+          style={{ boxShadow: 'var(--card-shadow)' }}>
           {modes.map(m => (
             <button
               key={m}
-              className={`text-xs px-3 py-1.5 transition-colors ${
-                groupMode === m ? 'bg-bg-3 text-fg font-medium' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-2'
+              className={`text-[11px] font-medium px-4 py-2 transition-all duration-150 ${
+                groupMode === m ? 'bg-bg-3 text-fg' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-2'
               }`}
               onClick={() => setGroupMode(m)}
             >
@@ -141,7 +142,7 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
         </div>
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>+ New</button>
         {pins.size > 0 && (
-          <span className="text-[10px] text-fg-2">⭐ {pins.size} pinned</span>
+          <span className="text-[10px] text-fg-2 font-medium">⭐ {pins.size} pinned</span>
         )}
       </div>
 
@@ -152,23 +153,23 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
       />
 
       {/* Agent list */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         {groups.map(group => (
           <div key={group.name || '__flat'}>
             {group.name && (
               <button
-                className="flex items-center gap-2 w-full text-left mb-1.5 group"
+                className="flex items-center gap-2 w-full text-left mb-2 group"
                 onClick={() => toggleCollapse(group.name)}
               >
-                <span className="text-[10px] text-fg-2/40 transition-transform"
+                <span className="text-[10px] text-fg-2/50 transition-transform duration-200"
                   style={{ transform: collapsed.has(group.name) ? undefined : 'rotate(90deg)' }}>▸</span>
-                <span className="text-[11px] font-medium text-fg-2">{group.name}</span>
-                <span className="text-[10px] text-fg-2/40">{group.agents.length}</span>
-                <span className="flex-1 border-b border-border/40" />
+                <span className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider">{group.name}</span>
+                <span className="text-[10px] text-fg-2/40 tabular-nums">{group.agents.length}</span>
+                <span className="flex-1 border-b border-border/30" />
               </button>
             )}
             {!collapsed.has(group.name) && (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {group.agents.map(agent => (
                   <AgentCard
                     key={agent.id}

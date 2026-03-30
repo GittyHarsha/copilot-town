@@ -99,13 +99,14 @@ export default function AgentEditPanel({ agent, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="bg-bg border border-border rounded-xl shadow-2xl w-[500px] max-h-[85vh] overflow-y-auto"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+      <div className="bg-bg border border-border/60 rounded-2xl w-[500px] max-h-[85vh] overflow-y-auto animate-slide-down"
+        style={{ boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
         onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold">Edit Agent</h2>
-          <button className="text-fg-2 hover:text-fg text-lg leading-none" onClick={onClose}>✕</button>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60">
+          <h2 className="text-sm font-semibold tracking-tight">Edit Agent</h2>
+          <button className="text-fg-2 hover:text-fg text-lg leading-none px-1 py-0.5 rounded-lg hover:bg-bg-2 transition-all duration-150" onClick={onClose}>✕</button>
         </div>
 
         <div className="px-5 py-4 space-y-4">

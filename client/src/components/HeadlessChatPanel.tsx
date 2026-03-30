@@ -175,18 +175,19 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/50 backdrop-blur-sm"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-[520px] max-w-[90vw] bg-bg-1 border-l border-border flex flex-col shadow-2xl animate-slide-in-right">
+      <div className="w-[520px] max-w-[90vw] bg-bg-1 border-l border-border/60 flex flex-col animate-slide-in-right"
+        style={{ boxShadow: '-8px 0 40px rgba(0,0,0,0.4)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold">⚡ {agentName}</span>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60 flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-semibold tracking-tight">⚡ {agentName}</span>
             <span className={`badge ${
-              connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+              connected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15' : 'bg-red-500/10 text-red-400 border border-red-500/15'
             }`}>{connected ? '● live' : '● offline'}</span>
           </div>
-          <button onClick={onClose} className="text-fg-2 hover:text-fg text-sm px-2 py-1 rounded-md hover:bg-bg-2 transition-colors">✕</button>
+          <button onClick={onClose} className="text-fg-2 hover:text-fg text-sm px-2 py-1.5 rounded-lg hover:bg-bg-2 transition-all duration-150">✕</button>
         </div>
 
         {/* Messages */}

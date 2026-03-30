@@ -117,19 +117,21 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
   const displayModel = agent.model || agent.template?.model;
 
   return (
-    <div className={`card-surface overflow-hidden ${GLOW[status] || ''}`}>
+    <div className={`card-surface overflow-hidden group/card ${GLOW[status] || ''} ${isStopped ? 'opacity-75 hover:opacity-100' : ''}`}>
       {/* Header row */}
       <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-bg-2/40 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.02] transition-all duration-200"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Status dot */}
-        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${DOT[status] || 'bg-fg-2/30'} ${status === 'running' ? 'dot-live' : ''}`} />
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 ring-2 ring-opacity-20 ${DOT[status] || 'bg-fg-2/30'} ${
+          status === 'running' ? 'dot-live ring-emerald-500/20' : status === 'idle' ? 'ring-amber-400/20' : 'ring-transparent'
+        }`} />
 
         {/* Pin */}
         {onTogglePin && (
           <button
-            className={`text-xs flex-shrink-0 transition-opacity ${pinned ? 'opacity-100' : 'opacity-0 group-hover/card:opacity-40 hover:!opacity-100'}`}
+            className={`text-xs flex-shrink-0 transition-all duration-200 ${pinned ? 'opacity-100 scale-100' : 'opacity-0 scale-90 group-hover/card:opacity-40 hover:!opacity-100 hover:!scale-110'}`}
             onClick={(e) => { e.stopPropagation(); onTogglePin(); }}
             title={pinned ? 'Unpin' : 'Pin'}
           >
@@ -138,31 +140,31 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
         )}
 
         {/* Name + badges */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-[13px] font-semibold truncate">{agent.name}</span>
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="text-[13px] font-semibold truncate tracking-tight">{agent.name}</span>
           {isHeadless && (
-            <span className="badge text-cyan-400/80 bg-cyan-400/8">⚡ headless</span>
+            <span className="badge text-cyan-400/80 bg-cyan-400/[0.08] border border-cyan-400/10">⚡ headless</span>
           )}
           {agent.template && (
-            <span className="badge text-violet-400/70 bg-violet-400/8">{agent.template.name}</span>
+            <span className="badge text-violet-400/70 bg-violet-400/[0.08] border border-violet-400/10">{agent.template.name}</span>
           )}
-          <span className="text-xs text-fg-2 truncate hidden lg:inline">{desc !== 'Copilot session' ? desc : ''}</span>
+          <span className="text-[11px] text-fg-2/70 truncate hidden lg:inline">{desc !== 'Copilot session' ? desc : ''}</span>
         </div>
 
         {/* Status label */}
-        <span className={`text-[11px] font-medium flex-shrink-0 ${
-          isAlive ? (status === 'running' ? 'text-emerald-400' : 'text-amber-400') : 'text-fg-2'
+        <span className={`text-[11px] font-medium flex-shrink-0 tracking-wide ${
+          isAlive ? (status === 'running' ? 'text-emerald-400' : 'text-amber-400') : 'text-fg-2/60'
         }`}>{status}</span>
-        <span className="text-fg-2/30 text-xs flex-shrink-0 transition-transform duration-200"
+        <span className="text-fg-2/30 text-[10px] flex-shrink-0 transition-transform duration-200"
           style={{ transform: expanded ? 'rotate(90deg)' : undefined }}>▸</span>
       </button>
 
       {/* Expanded panel */}
       <div
-        className="transition-[max-height,opacity] duration-200 ease-out overflow-hidden"
+        className="transition-[max-height,opacity] duration-250 ease-out overflow-hidden"
         style={{ maxHeight: expanded ? 400 : 0, opacity: expanded ? 1 : 0 }}
       >
-        <div className="px-4 py-3 border-t border-border space-y-3 animate-slide-down">
+        <div className="px-4 py-3.5 border-t border-border/60 space-y-3 animate-slide-down">
           {/* Description */}
           <p className="text-xs text-fg-2 leading-relaxed">{desc}</p>
 
@@ -180,7 +182,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
 
           {/* Task */}
           {agent.task && (
-            <div className="flex items-center gap-2 text-xs text-blue-400 bg-blue-400/5 rounded-md px-3 py-2 border border-blue-400/10">
+            <div className="flex items-center gap-2 text-xs text-blue-400/90 bg-blue-400/[0.05] rounded-lg px-3 py-2.5 border border-blue-400/[0.08]">
               <span>📋</span>
               <span className="truncate">{agent.task}</span>
             </div>
@@ -205,27 +207,34 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
                 <div className="relative" ref={moreRef}>
                   <button className="btn" onClick={(e) => { e.stopPropagation(); setShowMoreMenu(!showMoreMenu); }}>⋯</button>
                   {showMoreMenu && (
-                    <div className="absolute top-full left-0 mt-1 z-50 bg-bg-1 border border-border rounded-lg shadow-xl py-1 min-w-[160px] animate-slide-down">
+                    <div className="absolute top-full left-0 mt-1.5 z-50 bg-bg-1 border border-border-1 rounded-xl py-1.5 min-w-[170px] animate-slide-down"
+                      style={{ boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
                       {isHeadless ? (
-                        <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                          style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handleMoveToPane(); }}>📺 Move to pane</button>
                       ) : agent.pane && agent.sessionId ? (
-                        <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                          style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); handleMoveToHeadless(); }}>⚡ Move to headless</button>
                       ) : null}
                       {isHeadless && (
-                        <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                          style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setShowModelPicker(!showModelPicker); }}>🔄 Switch model</button>
                       )}
                       {agent.pane && (
-                        <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                          style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); openTerminal(agent.name, agent.pane!.target); }}>📺 View output</button>
                       )}
                       {agent.sessionId && !agent.sessionId.startsWith('pane-') && onViewHistory && (
-                        <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                          style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); onViewHistory(agent.id); }}>📜 History</button>
                       )}
-                      <button className="w-full text-left px-3 py-2 text-xs text-fg-1 hover:bg-bg-2 transition-colors"
+                      <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                        style={{ width: 'calc(100% - 4px)' }}
                         onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setShowEdit(true); }}>✏️ Edit</button>
                     </div>
                   )}
@@ -254,10 +263,10 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
 
           {/* Model picker (inline) */}
           {showModelPicker && isHeadless && (
-            <div className="flex items-center gap-2 p-3 bg-bg rounded-lg border border-border">
-              <input type="text" className="flex-1 bg-bg-1 border border-border rounded-md px-3 py-1.5 text-xs text-fg placeholder-fg-2/50"
+            <div className="flex items-center gap-2 p-3 bg-bg/60 rounded-xl border border-border/60 backdrop-blur-sm">
+              <input type="text" className="flex-1 bg-bg-1 border border-border rounded-lg px-3 py-2 text-xs text-fg placeholder-fg-2/40 focus:border-border-1 transition-colors"
                 placeholder="Model (e.g. claude-haiku-4.5)" value={modelInput} onChange={e => setModelInput(e.target.value)} />
-              <select className="bg-bg-1 border border-border rounded-md px-2 py-1.5 text-xs text-fg"
+              <select className="bg-bg-1 border border-border rounded-lg px-2 py-2 text-xs text-fg"
                 value={effortInput} onChange={e => setEffortInput(e.target.value)}>
                 <option value="">effort</option>
                 <option value="low">low</option>
@@ -271,10 +280,10 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
           {/* Mode switcher (headless only) */}
           {isHeadless && isAlive && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-fg-2 mr-1">Mode:</span>
+              <span className="text-[10px] text-fg-2/60 mr-1">Mode:</span>
               {['interactive', 'plan', 'autopilot'].map(m => (
-                <button key={m} className={`text-[10px] px-2.5 py-1 rounded-md border transition-colors ${
-                  agent.agentMode === m ? 'bg-violet-500/10 text-violet-400 border-violet-500/30 font-medium' : 'border-border text-fg-2 hover:text-fg-1 hover:border-border-1'
+                <button key={m} className={`text-[10px] px-3 py-1.5 rounded-lg border transition-all duration-150 ${
+                  agent.agentMode === m ? 'bg-violet-500/10 text-violet-400 border-violet-500/20 font-medium' : 'border-border text-fg-2 hover:text-fg-1 hover:border-border-1'
                 }`} onClick={(e) => { e.stopPropagation(); handleModeSwitch(m); }}>{m}</button>
               ))}
             </div>
@@ -282,7 +291,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
 
           {/* Resume error */}
           {resumeError && (
-            <div className="text-xs text-red-400 bg-red-400/5 rounded-md px-3 py-2 border border-red-400/10">
+            <div className="text-xs text-red-400 bg-red-400/[0.05] rounded-lg px-3 py-2.5 border border-red-400/[0.08]">
               ⚠ {resumeError}
             </div>
           )}

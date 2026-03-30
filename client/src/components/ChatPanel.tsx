@@ -95,17 +95,18 @@ export default function ChatPanel({ agentName, onClose }: Props) {
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed top-0 right-0 z-50 h-full w-[420px] max-w-[90vw] bg-bg border-l border-border flex flex-col animate-slide-in-right">
+      <div className="fixed top-0 right-0 z-50 h-full w-[420px] max-w-[90vw] bg-bg border-l border-border/60 flex flex-col animate-slide-in-right"
+        style={{ boxShadow: '-8px 0 40px rgba(0,0,0,0.4)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-bg-1 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60 bg-bg-1/50 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold truncate">💬 {agentName}</span>
+            <span className="text-sm font-semibold truncate tracking-tight">💬 {agentName}</span>
           </div>
           <button
-            className="text-fg-2 hover:text-fg text-sm px-2 py-1 rounded-md hover:bg-bg-2 transition-colors"
+            className="text-fg-2 hover:text-fg text-sm px-2 py-1.5 rounded-lg hover:bg-bg-2 transition-all duration-150"
             onClick={onClose}
           >
             ✕

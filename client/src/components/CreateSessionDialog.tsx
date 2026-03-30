@@ -128,13 +128,14 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
     }`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-bg-1 border border-border rounded-lg w-[460px] max-h-[85vh] overflow-auto shadow-xl">
+      <div className="bg-bg-1 border border-border/60 rounded-2xl w-[460px] max-h-[85vh] overflow-auto animate-slide-down"
+        style={{ boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-xs font-semibold">New Session</h2>
-          <button onClick={onClose} className="text-fg-2 hover:text-fg text-xs">✕</button>
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border/60">
+          <h2 className="text-xs font-semibold tracking-tight">New Session</h2>
+          <button onClick={onClose} className="text-fg-2 hover:text-fg text-xs px-1 py-0.5 rounded-lg hover:bg-bg-2 transition-all duration-150">✕</button>
         </div>
 
         <div className="p-4 space-y-3">
