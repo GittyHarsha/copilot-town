@@ -24,6 +24,9 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
   const [experimental, setExperimental] = useState(false);
   const [yolo, setYolo] = useState(false);
   const [customFlags, setCustomFlags] = useState('');
+  const [headless, setHeadless] = useState(false);
+  const [role, setRole] = useState('');
+  const [reasoningEffort, setReasoningEffort] = useState('');
 
   // Fetch templates, stopped agents, and dynamic models when dialog opens
   useEffect(() => {
@@ -46,11 +49,21 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
       setExperimental(false);
       setYolo(false);
       setCustomFlags('');
+      setHeadless(false);
+      setRole('');
+      setReasoningEffort('');
       setError('');
     }
   }, [open]);
 
   const command = useMemo(() => {
+    if (headless) {
+      const parts = ['[headless via SDK]'];
+      if (model) parts.push(`model=${model}`);
+      if (role) parts.push(`role="${role}"`);
+      if (reasoningEffort) parts.push(`effort=${reasoningEffort}`);
+      return parts.join(' ');
+    }
     const parts = ['copilot'];
     if (template) parts.push(`--agent=${template}`);
     if (model) parts.push(`--model=${model}`);
@@ -60,7 +73,7 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
     if (experimental) parts.push('--experimental');
     if (customFlags.trim()) parts.push(customFlags.trim());
     return parts.join(' ');
-  }, [template, model, resumeId, allowAll, experimental, yolo, customFlags]);
+  }, [template, model, resumeId, allowAll, experimental, yolo, customFlags, headless, role, reasoningEffort]);
 
   const handleLaunch = async () => {
     if (!resumeId && !displayName.trim()) {
@@ -89,6 +102,9 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
           template: template || undefined,
           model: model || undefined,
           flags: flags.length > 0 ? flags : undefined,
+          headless: headless || undefined,
+          role: role.trim() || undefined,
+          reasoningEffort: reasoningEffort || undefined,
         });
       }
       onLaunched();
@@ -131,6 +147,40 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
             <p className="text-[9px] text-fg-2 mt-0.5">Required — this is how other agents will address this session</p>
           </div>
 
+          {/* Headless Toggle */}
+          <div className="flex items-center gap-2">
+            <button type="button" className={toggleCls(headless)}
+              onClick={() => setHeadless(v => !v)}>
+              {headless ? '⚡ Headless (SDK)' : '📺 Pane (terminal)'}
+            </button>
+            <span className="text-[9px] text-fg-2">
+              {headless ? 'Runs server-side via Copilot SDK — no terminal needed' : 'Opens in a psmux/tmux terminal pane'}
+            </span>
+          </div>
+
+          {/* Headless-specific: Role & Effort */}
+          {headless && (
+            <div className="space-y-3 pl-3 border-l-2 border-cyan/20">
+              <div>
+                <label className={labelCls}>Role / System Prompt</label>
+                <input type="text" className={inputCls} value={role}
+                  onChange={e => setRole(e.target.value)}
+                  placeholder="e.g. You are a security auditor specializing in code review" />
+                <p className="text-[9px] text-fg-2 mt-0.5">Injected into the agent's system prompt as its identity</p>
+              </div>
+              <div>
+                <label className={labelCls}>Reasoning Effort</label>
+                <select className={inputCls} value={reasoningEffort} onChange={e => setReasoningEffort(e.target.value)}>
+                  <option value="">Default</option>
+                  <option value="low">Low — fast, concise</option>
+                  <option value="medium">Medium — balanced</option>
+                  <option value="high">High — thorough</option>
+                  <option value="xhigh">Extra High — maximum depth</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           {/* Template */}
           <div>
             <label className={labelCls}>Template</label>
@@ -151,39 +201,44 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
             </select>
           </div>
 
-          {/* Resume Session */}
-          <div>
-            <label className={labelCls}>Resume Session</label>
-            <select className={inputCls} value={resumeId} onChange={e => setResumeId(e.target.value)}>
-              <option value="">None (new session)</option>
-              {stoppedAgents.map(a => (
-                <option key={a.id} value={a.sessionId}>
-                  {a.name} — {a.sessionId.slice(0, 12)}…
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Pane-specific options (hidden when headless) */}
+          {!headless && (
+            <>
+              {/* Resume Session */}
+              <div>
+                <label className={labelCls}>Resume Session</label>
+                <select className={inputCls} value={resumeId} onChange={e => setResumeId(e.target.value)}>
+                  <option value="">None (new session)</option>
+                  {stoppedAgents.map(a => (
+                    <option key={a.id} value={a.sessionId}>
+                      {a.name} — {a.sessionId.slice(0, 12)}…
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Flags */}
-          <div>
-            <label className={labelCls}>Flags</label>
-            <div className="flex gap-1.5">
-              <button type="button" className={toggleCls(allowAll)}
-                onClick={() => setAllowAll(v => !v)}>--allow-all</button>
-              <button type="button" className={toggleCls(experimental)}
-                onClick={() => setExperimental(v => !v)}>--experimental</button>
-              <button type="button" className={toggleCls(yolo)}
-                onClick={() => { setYolo(v => !v); }}>--yolo</button>
-            </div>
-          </div>
+              {/* Flags */}
+              <div>
+                <label className={labelCls}>Flags</label>
+                <div className="flex gap-1.5">
+                  <button type="button" className={toggleCls(allowAll)}
+                    onClick={() => setAllowAll(v => !v)}>--allow-all</button>
+                  <button type="button" className={toggleCls(experimental)}
+                    onClick={() => setExperimental(v => !v)}>--experimental</button>
+                  <button type="button" className={toggleCls(yolo)}
+                    onClick={() => { setYolo(v => !v); }}>--yolo</button>
+                </div>
+              </div>
 
-          {/* Custom Flags */}
-          <div>
-            <label className={labelCls}>Custom Flags</label>
-            <input type="text" className={inputCls} value={customFlags}
-              onChange={e => setCustomFlags(e.target.value)}
-              placeholder="e.g. --autopilot --effort=low" />
-          </div>
+              {/* Custom Flags */}
+              <div>
+                <label className={labelCls}>Custom Flags</label>
+                <input type="text" className={inputCls} value={customFlags}
+                  onChange={e => setCustomFlags(e.target.value)}
+                  placeholder="e.g. --autopilot --effort=low" />
+              </div>
+            </>
+          )}
 
           {/* Preview */}
           <div>

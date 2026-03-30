@@ -29,11 +29,14 @@ const GLOW: Record<string, string> = {
 
 function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'promoting' | 'demoting' | null>(null);
   const [resumeError, setResumeError] = useState('');
   const [showLaunchConfig, setShowLaunchConfig] = useState<'resume' | 'start' | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [modelInput, setModelInput] = useState('');
+  const [effortInput, setEffortInput] = useState('');
   const prevStatus = useRef(agent.status);
   const { openTerminal } = useTerminalPanel();
 
@@ -71,6 +74,35 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
     }
   };
 
+  const handlePromote = async () => {
+    setPendingAction('promoting');
+    try { await api.promoteAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+    catch { setPendingAction(null); }
+  };
+
+  const handleDemote = async () => {
+    setPendingAction('demoting');
+    try { await api.demoteAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+    catch { setPendingAction(null); }
+  };
+
+  const handleModelSwitch = async () => {
+    if (!modelInput) return;
+    try {
+      await api.setAgentModel(agent.name, modelInput, effortInput || undefined);
+      setShowModelPicker(false);
+      setModelInput('');
+      setEffortInput('');
+      onRefresh?.();
+    } catch {}
+  };
+
+  const handleModeSwitch = async (mode: string) => {
+    try { await api.setAgentMode(agent.name, mode); onRefresh?.(); } catch {}
+  };
+
+  const isHeadless = agent.type === 'headless';
+
   const desc = agent.description || agent.template?.description || 'Copilot session';
   const truncDesc = desc.length > 45 ? desc.slice(0, 42) + '…' : desc;
   const paneLabel = agent.pane?.target;
@@ -94,6 +126,9 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
           </button>
         )}
         <span className="text-sm font-medium truncate min-w-0">{agent.name}</span>
+        {isHeadless && (
+          <span className="text-[9px] font-mono text-cyan/70 bg-cyan/5 px-1.5 py-0.5 rounded flex-shrink-0">⚡ headless</span>
+        )}
         {agent.template && (
           <span className="text-[9px] font-mono text-purple/70 bg-purple/5 px-1.5 py-0.5 rounded flex-shrink-0">{agent.template.name}</span>
         )}
@@ -115,10 +150,16 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
           <p className="text-[11px] text-fg-2 leading-relaxed">{desc}</p>
 
           {/* Metadata badges */}
-          {(displayModel || (agent.flags && agent.flags.length > 0)) && (
+          {(displayModel || (agent.flags && agent.flags.length > 0) || isHeadless) && (
             <div className="flex items-center gap-1.5 flex-wrap">
               {displayModel && (
                 <span className="text-[9px] font-mono text-green/70 bg-green/5 px-1.5 py-0.5 rounded">{displayModel}</span>
+              )}
+              {agent.reasoningEffort && (
+                <span className="text-[9px] font-mono text-orange/70 bg-orange/5 px-1.5 py-0.5 rounded">effort: {agent.reasoningEffort}</span>
+              )}
+              {agent.agentMode && agent.agentMode !== 'interactive' && (
+                <span className="text-[9px] font-mono text-purple/70 bg-purple/5 px-1.5 py-0.5 rounded">mode: {agent.agentMode}</span>
               )}
               {agent.flags?.map(f => (
                 <span key={f} className="text-[9px] font-mono text-yellow/70 bg-yellow/5 px-1.5 py-0.5 rounded">{f}</span>
@@ -134,13 +175,29 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
           {/* Actions */}
           <div className="flex items-center gap-1.5 flex-wrap">
             {pendingAction ? (
-              <span className="text-[10px] text-fg-2 italic">{pendingAction === 'stopping' ? 'Stopping…' : 'Starting…'}</span>
+              <span className="text-[10px] text-fg-2 italic">
+                {pendingAction === 'stopping' ? 'Stopping…' : pendingAction === 'starting' ? 'Starting…'
+                  : pendingAction === 'promoting' ? 'Promoting…' : 'Demoting…'}
+              </span>
             ) : status === 'running' || status === 'idle' ? (
               <>
                 <button className="text-[10px] px-2.5 py-1 rounded bg-bg-2 text-fg-1 border border-border hover:border-border-1"
                   onClick={(e) => { e.stopPropagation(); setShowChat(true); }}>Chat</button>
                 <button className="text-[10px] px-2.5 py-1 rounded bg-bg-2 text-red border border-border hover:border-red/30"
                   onClick={(e) => { e.stopPropagation(); handleStop(); }}>Stop</button>
+                {/* Promote/Demote */}
+                {isHeadless ? (
+                  <button className="text-[10px] px-2.5 py-1 rounded bg-blue/10 text-blue border border-blue/20"
+                    onClick={(e) => { e.stopPropagation(); handlePromote(); }} title="Promote to terminal pane">⬆ Pane</button>
+                ) : agent.pane && agent.sessionId && !agent.sessionId.startsWith('pane-') ? (
+                  <button className="text-[10px] px-2.5 py-1 rounded bg-cyan/10 text-cyan border border-cyan/20"
+                    onClick={(e) => { e.stopPropagation(); handleDemote(); }} title="Demote to headless (SDK)">⬇ Headless</button>
+                ) : null}
+                {/* Model switch (headless only) */}
+                {isHeadless && (
+                  <button className="text-[10px] px-2.5 py-1 rounded border border-border bg-bg-2 text-fg-2 hover:text-fg-1"
+                    onClick={(e) => { e.stopPropagation(); setShowModelPicker(!showModelPicker); }}>🔄 Model</button>
+                )}
               </>
             ) : status === 'stopped' ? (
               <>
@@ -168,6 +225,36 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
             <button className="text-[10px] px-2.5 py-1 rounded border border-border bg-bg-2 text-fg-2 hover:text-fg-1"
               onClick={(e) => { e.stopPropagation(); setShowEdit(true); }}>Edit</button>
           </div>
+
+          {/* Model picker (inline) */}
+          {showModelPicker && isHeadless && (
+            <div className="flex items-center gap-1.5 p-2 bg-bg rounded border border-border">
+              <input type="text" className="flex-1 bg-bg-1 border border-border rounded px-2 py-1 text-[10px] text-fg"
+                placeholder="Model (e.g. claude-haiku-4.5)" value={modelInput} onChange={e => setModelInput(e.target.value)} />
+              <select className="bg-bg-1 border border-border rounded px-1.5 py-1 text-[10px] text-fg"
+                value={effortInput} onChange={e => setEffortInput(e.target.value)}>
+                <option value="">effort</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+              <button className="text-[10px] px-2 py-1 rounded bg-green/10 text-green border border-green/20"
+                onClick={handleModelSwitch}>Apply</button>
+            </div>
+          )}
+
+          {/* Mode switcher (headless only) */}
+          {isHeadless && (status === 'running' || status === 'idle') && (
+            <div className="flex items-center gap-1">
+              <span className="text-[9px] text-fg-2 mr-1">Mode:</span>
+              {['interactive', 'plan', 'autopilot'].map(m => (
+                <button key={m} className={`text-[9px] px-2 py-0.5 rounded border ${
+                  agent.agentMode === m ? 'bg-purple/10 text-purple border-purple/30 font-medium' : 'border-border text-fg-2 hover:text-fg-1'
+                }`} onClick={(e) => { e.stopPropagation(); handleModeSwitch(m); }}>{m}</button>
+              ))}
+            </div>
+          )}
 
           {/* Resume error */}
           {resumeError && <p className="text-[10px] text-red">⚠ {resumeError}</p>}

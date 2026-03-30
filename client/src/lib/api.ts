@@ -4,6 +4,7 @@ export interface AgentData {
   id: string;              // session ID (UUID) — primary key
   name: string;            // display name
   status: 'running' | 'idle' | 'stopped';
+  type?: 'pane' | 'headless';
   template?: {
     name: string;
     description: string;
@@ -26,6 +27,10 @@ export interface AgentData {
   flags?: string[];
   envVars?: Record<string, string>;
   task?: string;
+  // SDK enrichment
+  summary?: string;
+  reasoningEffort?: string;
+  agentMode?: string;
 }
 
 export interface AgentTemplate {
@@ -148,8 +153,11 @@ export const api = {
     postJson<{ success: boolean; from: string; to: string }>('/agents/relay', { from, to, message }),
   startAgent: (id: string, target?: string) =>
     postJson<{ success: boolean }>(`/agents/${encodeURIComponent(id)}/start`, { target }),
-  spawnAgent: (opts: { name: string; template?: string; model?: string; flags?: string[]; session?: string }) =>
-    postJson<{ ok: boolean; name: string; pane: string; command: string }>('/agents/spawn', opts),
+  spawnAgent: (opts: {
+    name: string; template?: string; model?: string; flags?: string[];
+    session?: string; headless?: boolean; role?: string; reasoningEffort?: string;
+  }) =>
+    postJson<{ ok: boolean; name: string; pane?: string; command?: string; type?: string; sessionId?: string; model?: string }>('/agents/spawn', opts),
   resumeAgent: (id: string, target?: string, autoCreate?: boolean, session?: string, command?: string) => {
     const body: any = {};
     if (target) body.target = target;
@@ -159,6 +167,27 @@ export const api = {
     return postJson<{ success: boolean }>(`/agents/${encodeURIComponent(id)}/resume`, body);
   },
   stopAgent: (id: string) => postJson<{ success: boolean }>(`/agents/${encodeURIComponent(id)}/stop`),
+
+  // SDK features — headless agents
+  setAgentModel: (id: string, model: string, reasoningEffort?: string) =>
+    postJson<{ success: boolean; model: string; reasoningEffort?: string }>(
+      `/agents/${encodeURIComponent(id)}/model`, { model, reasoningEffort }),
+  setAgentMode: (id: string, mode: string) =>
+    postJson<{ success: boolean; mode: string }>(
+      `/agents/${encodeURIComponent(id)}/mode`, { mode }),
+  getAgentMode: (id: string) =>
+    fetchJson<{ mode: string }>(`/agents/${encodeURIComponent(id)}/mode`),
+  promoteAgent: (id: string) =>
+    postJson<{ success: boolean; pane: string; sessionId: string }>(
+      `/agents/${encodeURIComponent(id)}/promote`),
+  demoteAgent: (id: string) =>
+    postJson<{ success: boolean; sessionId: string; model: string }>(
+      `/agents/${encodeURIComponent(id)}/demote`),
+  getToolActivity: (id: string) =>
+    fetchJson<{ agent: string; activity: { timestamp: string; tool: string; result?: string }[] }>(
+      `/agents/${encodeURIComponent(id)}/tools/activity`),
+  getAgentMessages: (id: string) =>
+    fetchJson<any[]>(`/agents/${encodeURIComponent(id)}/messages`),
 
   // Templates
   getTemplates: () => fetchJson<AgentTemplate[]>('/templates'),
