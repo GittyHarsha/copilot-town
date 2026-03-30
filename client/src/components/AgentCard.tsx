@@ -190,7 +190,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
                 {isHeadless ? (
                   <button className="text-[10px] px-2.5 py-1 rounded bg-blue/10 text-blue border border-blue/20"
                     onClick={(e) => { e.stopPropagation(); handlePromote(); }} title="Promote to terminal pane">⬆ Pane</button>
-                ) : agent.pane && agent.sessionId && !agent.sessionId.startsWith('pane-') ? (
+                ) : agent.pane && agent.sessionId ? (
                   <button className="text-[10px] px-2.5 py-1 rounded bg-cyan/10 text-cyan border border-cyan/20"
                     onClick={(e) => { e.stopPropagation(); handleDemote(); }} title="Demote to headless (SDK)">⬇ Headless</button>
                 ) : null}

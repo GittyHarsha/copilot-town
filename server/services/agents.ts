@@ -148,6 +148,7 @@ interface SessionMapEntry {
   startedAt?: string;
   stoppedAt?: string;
   panePid?: number;
+  type?: 'pane' | 'headless';
 }
 
 // ── Consolidated session file reader (single read, three views) ────
@@ -254,6 +255,7 @@ function loadSessionFile(): SessionFileData {
           startedAt: data.startedAt,
           stoppedAt: data.stoppedAt,
           panePid: data.panePid,
+          type: data.type,
         });
         nameToSessionId.set(name, sessionId);
         if (data.panePid) nameToPanePid.set(name, data.panePid);
@@ -520,7 +522,7 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
       status = 'idle';
     }
 
-    agents.push({ id: sessionId, name, template, status, sessionId });
+    agents.push({ id: sessionId, name, template, status, sessionId, type: entry.type });
     seenSessionIds.add(sessionId);
   }
 
