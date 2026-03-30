@@ -27,6 +27,7 @@ export interface StepDef {
   type?: 'step' | 'gate';  // gate = pause for human approval
   agent?: { model?: string; systemPrompt?: string };
   prompt: string;
+  prompt_file?: string;     // reference a .md file in data/stages/ instead of inline prompt
   timeout?: number;
   // Iterative review: after step completes, a reviewer evaluates output.
   // If it fails criteria, feedback is sent to the SAME agent for revision.
@@ -76,6 +77,7 @@ type RunListener = (run: WorkflowRun) => void;
 // ─── State ───────────────────────────────────────────────────────────
 
 const WORKFLOWS_DIR = join(process.cwd(), 'data', 'workflows');
+const STAGES_DIR = join(process.cwd(), 'data', 'stages');
 const workflows = new Map<string, WorkflowDef>();
 const runs = new Map<string, WorkflowRun>();
 const runListeners = new Set<RunListener>();
@@ -146,6 +148,42 @@ function interpolate(template: string, ctx: { inputs: Record<string, string>; st
     }
     return '';
   });
+}
+
+// Resolve step prompt: load from file if prompt_file is set, otherwise use inline prompt
+async function resolvePrompt(stepDef: StepDef): Promise<string> {
+  if (stepDef.prompt_file) {
+    try {
+      const filePath = join(STAGES_DIR, stepDef.prompt_file);
+      return await readFile(filePath, 'utf-8');
+    } catch (e: any) {
+      console.error(`Failed to load stage file "${stepDef.prompt_file}":`, e.message);
+      // Fall back to inline prompt if file fails
+      if (stepDef.prompt) return stepDef.prompt;
+      throw new Error(`Stage file "${stepDef.prompt_file}" not found and no inline prompt`);
+    }
+  }
+  return stepDef.prompt;
+}
+
+// List available stage files
+export async function getStageFiles(): Promise<string[]> {
+  try {
+    await mkdir(STAGES_DIR, { recursive: true });
+    const files = await readdir(STAGES_DIR);
+    return files.filter(f => f.endsWith('.md'));
+  } catch { return []; }
+}
+
+// Read a stage file
+export async function getStageFile(name: string): Promise<string> {
+  return readFile(join(STAGES_DIR, name), 'utf-8');
+}
+
+// Save a stage file
+export async function saveStageFile(name: string, content: string): Promise<void> {
+  await mkdir(STAGES_DIR, { recursive: true });
+  await writeFile(join(STAGES_DIR, name), content, 'utf-8');
 }
 
 // ─── DAG Execution ──────────────────────────────────────────────────
@@ -287,7 +325,8 @@ export async function executeWorkflow(
         broadcast(run);
 
         try {
-          const prompt = interpolate(stepDef.prompt, { inputs, steps: stepResults });
+          const rawPrompt = await resolvePrompt(stepDef);
+          const prompt = interpolate(rawPrompt, { inputs, steps: stepResults });
           const model = stepDef.agent?.model || 'claude-sonnet-4';
           const timeout = (stepDef.timeout || 120) * 1000;
 

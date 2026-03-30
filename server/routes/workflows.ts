@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate,
+  getStageFiles, getStageFile, saveStageFile,
 } from '../services/workflows.js';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
@@ -104,6 +105,36 @@ router.post('/runs/:runId/steps/:stepId/gate', (req, res) => {
   const ok = resolveGate(req.params.runId, req.params.stepId, !!approved, feedback);
   if (!ok) return res.status(404).json({ error: 'No pending gate found' });
   res.json({ ok: true });
+});
+
+// ─── Stage Files ────────────────────────────────────────────────────
+
+// List stage files
+router.get('/stages/list', async (_req, res) => {
+  res.json(await getStageFiles());
+});
+
+// Read a stage file
+router.get('/stages/:name', async (req, res) => {
+  try {
+    const content = await getStageFile(req.params.name);
+    res.json({ name: req.params.name, content });
+  } catch {
+    res.status(404).json({ error: 'Stage file not found' });
+  }
+});
+
+// Create/update a stage file
+router.post('/stages', async (req, res) => {
+  try {
+    const { name, content } = req.body;
+    if (!name || !content) return res.status(400).json({ error: 'name and content required' });
+    const fileName = name.endsWith('.md') ? name : `${name}.md`;
+    await saveStageFile(fileName, content);
+    res.json({ ok: true, name: fileName });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 export default router;
