@@ -5,6 +5,7 @@ export interface AgentData {
   name: string;            // display name
   status: 'running' | 'idle' | 'stopped';
   type?: 'pane' | 'headless';
+  source?: 'user' | 'workflow';
   template?: {
     name: string;
     description: string;

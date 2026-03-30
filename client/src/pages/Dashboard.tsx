@@ -17,6 +17,10 @@ function agentGroupKey(agent: AgentData): string {
   return (agent.status === 'running' || agent.status === 'idle') ? 'Active' : 'Stopped';
 }
 
+function isWorkflowAgent(agent: AgentData): boolean {
+  return agent.source === 'workflow' || agent.name.startsWith('wf-');
+}
+
 const PINS_KEY = 'copilot-town-pins';
 
 function loadPins(): Set<string> {
@@ -44,7 +48,7 @@ interface Props {
 export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
   const [pins, setPins] = useState<Set<string>>(loadPins);
   const [groupMode, setGroupMode] = useState<GroupMode>('flat');
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['__workflow']));
   const [createOpen, setCreateOpen] = useState(false);
 
   const togglePin = useCallback((id: string) => {
@@ -80,11 +84,15 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
     [pins]
   );
 
+  // Separate workflow agents from user agents
+  const userAgents = useMemo(() => agents.filter(a => !isWorkflowAgent(a)), [agents]);
+  const workflowAgents = useMemo(() => agents.filter(a => isWorkflowAgent(a)), [agents]);
+
   const groups = useMemo(() => {
-    if (groupMode === 'flat') return [{ name: '', agents: sortAgents(agents) }];
+    if (groupMode === 'flat') return [{ name: '', agents: sortAgents(userAgents) }];
 
     const buckets = new Map<string, AgentData[]>();
-    for (const agent of agents) {
+    for (const agent of userAgents) {
       let key: string;
       if (groupMode === 'by status') {
         key = agent.status.charAt(0).toUpperCase() + agent.status.slice(1);
@@ -107,9 +115,9 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
       if (!result.find(r => r.name === key)) result.push({ name: key, agents: sortAgents(val) });
     }
     return result;
-  }, [agents, groupMode, sortAgents]);
+  }, [userAgents, groupMode, sortAgents]);
 
-  if (agents.length === 0) {
+  if (userAgents.length === 0 && workflowAgents.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <span className="text-2xl mb-3 opacity-30">⊘</span>
@@ -185,6 +193,36 @@ export default function Dashboard({ agents, onRefresh, onViewHistory }: Props) {
           </div>
         ))}
       </div>
+
+      {/* Workflow agents — separate collapsible section */}
+      {workflowAgents.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-border/30">
+          <button
+            className="flex items-center gap-2 w-full text-left mb-2"
+            onClick={() => toggleCollapse('__workflow')}
+          >
+            <span className="text-[10px] text-fg-2/50 transition-transform duration-200"
+              style={{ transform: collapsed.has('__workflow') ? undefined : 'rotate(90deg)' }}>▸</span>
+            <span className="text-[11px] font-semibold text-violet-400/70 uppercase tracking-wider">⚡ Workflow Agents</span>
+            <span className="text-[10px] text-fg-2/40 tabular-nums">{workflowAgents.length}</span>
+            <span className="flex-1 border-b border-border/20" />
+          </button>
+          {!collapsed.has('__workflow') && (
+            <div className="space-y-2">
+              {sortAgents(workflowAgents).map(agent => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  onRefresh={onRefresh}
+                  onViewHistory={onViewHistory}
+                  pinned={pins.has(agent.id)}
+                  onTogglePin={() => togglePin(agent.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <RelayPanel agents={agents} />
     </div>

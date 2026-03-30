@@ -509,6 +509,7 @@ export async function executeWorkflow(
                   model,
                   systemPrompt: stepDef.agent?.systemPrompt ||
                     'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+                  source: 'workflow',
                 });
                 runAgents.push(sharedAgentName);
                 sharedSessions.set(stepDef.session!, sharedAgentName);
@@ -526,6 +527,7 @@ export async function executeWorkflow(
                 model,
                 systemPrompt: stepDef.agent?.systemPrompt ||
                   'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+                source: 'workflow',
               });
               runAgents.push(retryAgentName);
               activeAgentName = retryAgentName;
@@ -629,6 +631,7 @@ export async function executeWorkflow(
                     model: fallbackDef.agent?.model || 'claude-sonnet-4',
                     systemPrompt: fallbackDef.agent?.systemPrompt ||
                       'You are a fallback agent. The previous step failed. Complete the task with a simpler approach.',
+                    source: 'workflow',
                   });
                   runAgents.push(fbAgent);
                   const fbRes = await sendToHeadless(fbAgent, fbPrompt, { timeoutMs: (fallbackDef.timeout || 120) * 1000 });

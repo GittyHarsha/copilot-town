@@ -50,6 +50,7 @@ export interface Agent {
   template?: AgentTemplate;
   status: AgentStatus;
   type?: 'pane' | 'headless';
+  source?: 'user' | 'workflow';
   pane?: PsmuxPane;
   sessionId: string;       // same as id, but explicit
   // Enriched from @github/copilot-sdk
@@ -628,6 +629,8 @@ export async function refreshAgents(): Promise<Agent[]> {
       for (const agent of _agentListCache) {
         if (isHeadlessAgent(agent.name)) {
           agent.type = 'headless';
+          const ha = listHeadlessAgents().find(h => h.name === agent.name);
+          if (ha?.source) agent.source = ha.source;
         }
       }
 
@@ -639,6 +642,7 @@ export async function refreshAgents(): Promise<Agent[]> {
             name: h.name,
             status: h.status,
             type: 'headless',
+            source: h.source,
             sessionId: h.sessionId,
           });
         }

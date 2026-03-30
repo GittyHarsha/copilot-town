@@ -21,6 +21,7 @@ export interface HeadlessAgent {
   messageCount: number;
   reasoningEffort?: string;
   agentMode?: string;
+  source?: 'user' | 'workflow';
   toolActivity: ToolActivityEntry[];
   /** User prompts indexed by message count (SDK doesn't persist these) */
   userPrompts: { prompt: string; timestamp: string }[];
@@ -127,7 +128,7 @@ function buildHooks(agent: HeadlessAgent) {
  */
 export async function createHeadlessAgent(
   name: string,
-  options?: { model?: string; systemPrompt?: string; role?: string; reasoningEffort?: string; streaming?: boolean }
+  options?: { model?: string; systemPrompt?: string; role?: string; reasoningEffort?: string; streaming?: boolean; source?: 'user' | 'workflow' }
 ): Promise<HeadlessAgent> {
   if (_headlessAgents.has(name)) {
     throw new Error(`Headless agent "${name}" already exists`);
@@ -147,6 +148,7 @@ export async function createHeadlessAgent(
     lastMessageAt: null,
     messageCount: 0,
     reasoningEffort: options?.reasoningEffort,
+    source: options?.source || 'user',
     toolActivity: [],
     userPrompts: [],
   };
