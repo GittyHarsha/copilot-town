@@ -447,6 +447,17 @@ function buildAgentList(paneData: Map<string, PaneScanResult>): Agent[] {
       matchedVia = 'agent-name';
     }
 
+    // Strategy D: psmux_layout says this pane belongs to a spawned agent
+    // Spawn registers layout before copilot session ID is known
+    if (!matchedVia) {
+      const layoutAgent = paneLayout.get(pane.target);
+      if (layoutAgent) {
+        agentName = layoutAgent;
+        sessionId = nameToSessionId.get(layoutAgent) || sessionId;
+        matchedVia = 'layout';
+      }
+    }
+
     // No strong match — skip this pane (don't create phantom agents)
     if (!matchedVia) continue;
 
@@ -531,6 +542,8 @@ export function getAllAgents(): Agent[] {
     const paneData = scanPanesSync(allPanes);
     _agentListCache = buildAgentList(paneData);
     _agentListCacheTime = Date.now();
+    // Kick off async SDK warm + enrich (updates cache in background)
+    refreshAgents().catch(() => {});
   }
   return _agentListCache;
 }

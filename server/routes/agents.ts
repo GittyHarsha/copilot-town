@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates, cleanSessionFile } from '../services/agents.js';
+import { getAllAgents, getAgent, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents } from '../services/agents.js';
 import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
@@ -209,8 +209,8 @@ router.post('/register', (_req, res) => {
 // ── Agent CRUD ────────────────────────────────────────────────────
 
 // List all agents
-router.get('/', (_req, res) => {
-  const agents = getAllAgents();
+router.get('/', async (_req, res) => {
+  const agents = await refreshAgents();
   const tasks = getAllAgentTasks();
   // Merge metadata + task into each agent
   try {
