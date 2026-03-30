@@ -29,8 +29,17 @@ export interface StepDef {
   prompt: string;
   prompt_file?: string;     // reference a .md file in data/stages/ instead of inline prompt
   timeout?: number;
+  // Conditionals: expression evaluated before step runs — skip if false
+  if?: string;
+  // Output parsing: 'json' auto-extracts JSON from output → accessible as ${{ steps.X.outputs.key }}
+  outputs?: 'json' | boolean;
+  // Retry on failure
+  retry?: number;           // max attempts (default 1 = no retry)
+  retry_delay?: number;     // seconds between retries (default 2)
+  // Error handling
+  on_fail?: string;         // step ID to run as fallback if this step fails
+  continue_on_fail?: boolean; // don't fail the entire run if this step fails
   // Iterative review: after step completes, a reviewer evaluates output.
-  // If it fails criteria, feedback is sent to the SAME agent for revision.
   review?: {
     criteria: string;       // what "good" looks like
     max_iterations?: number; // default 3
@@ -58,6 +67,8 @@ export interface StepResult {
   tokens?: number;
   iteration: number;
   iterations: Iteration[];
+  outputs?: Record<string, any>;  // parsed structured data from agent output
+  retries?: number;               // retry attempts made
 }
 
 export interface WorkflowRun {
@@ -141,14 +152,127 @@ export async function saveWorkflow(id: string, yamlContent: string): Promise<Wor
 
 function interpolate(template: string, ctx: { inputs: Record<string, string>; steps: Record<string, StepResult> }): string {
   return template.replace(/\$\{\{\s*([^}]+)\s*\}\}/g, (_, expr: string) => {
-    const parts = expr.trim().split('.');
-    if (parts[0] === 'inputs' && parts[1]) return ctx.inputs[parts[1]] || '';
-    if (parts[0] === 'steps' && parts[1] && parts[2] === 'output') {
-      return ctx.steps[parts[1]]?.output || '';
-    }
-    return '';
+    return resolveRef(expr.trim(), ctx);
   });
 }
+
+function resolveRef(ref: string, ctx: { inputs: Record<string, string>; steps: Record<string, StepResult> }): string {
+  const parts = ref.split('.');
+  if (parts[0] === 'inputs' && parts[1]) return ctx.inputs[parts[1]] || '';
+  if (parts[0] === 'steps' && parts[1]) {
+    const step = ctx.steps[parts[1]];
+    if (!step) return '';
+    if (parts[2] === 'output') return step.output || '';
+    if (parts[2] === 'status') return step.status || '';
+    if (parts[2] === 'error') return step.error || '';
+    if (parts[2] === 'outputs' && parts[3]) return String(step.outputs?.[parts[3]] ?? '');
+  }
+  return '';
+}
+
+// ─── Condition Evaluator ────────────────────────────────────────────
+//
+// Simple expression language for step conditions. Supports:
+//   ${{ steps.X.status }} == 'complete'
+//   ${{ steps.X.output }} contains 'CRITICAL'
+//   ${{ steps.X.outputs.severity }} == 'high'
+//   ${{ inputs.flag }} != 'true'
+//   expr && expr, expr || expr, !expr
+//   true, false
+
+function evaluateCondition(
+  expr: string,
+  ctx: { inputs: Record<string, string>; steps: Record<string, StepResult> },
+): boolean {
+  // First resolve all ${{ }} references to their string values
+  const resolved = expr.replace(/\$\{\{\s*([^}]+)\s*\}\}/g, (_, ref: string) => {
+    return resolveRef(ref.trim(), ctx);
+  });
+  return evalExpr(resolved.trim());
+}
+
+function stripQuotes(s: string): string {
+  s = s.trim();
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+    return s.slice(1, -1);
+  }
+  return s;
+}
+
+function evalExpr(expr: string): boolean {
+  expr = expr.trim();
+  if (!expr) return true;
+
+  // Handle || (lowest precedence)
+  if (expr.includes('||')) {
+    return expr.split('||').some(part => evalExpr(part));
+  }
+  // Handle && 
+  if (expr.includes('&&')) {
+    return expr.split('&&').every(part => evalExpr(part));
+  }
+  // Handle negation
+  if (expr.startsWith('!')) return !evalExpr(expr.slice(1));
+
+  // Literal booleans
+  if (expr === 'true') return true;
+  if (expr === 'false') return false;
+
+  // 'contains' operator
+  if (expr.includes(' contains ')) {
+    const idx = expr.indexOf(' contains ');
+    const left = stripQuotes(expr.slice(0, idx));
+    const right = stripQuotes(expr.slice(idx + 10));
+    return left.toLowerCase().includes(right.toLowerCase());
+  }
+  // 'startsWith' operator
+  if (expr.includes(' startsWith ')) {
+    const idx = expr.indexOf(' startsWith ');
+    const left = stripQuotes(expr.slice(0, idx));
+    const right = stripQuotes(expr.slice(idx + 12));
+    return left.startsWith(right);
+  }
+  // != operator
+  if (expr.includes('!=')) {
+    const [left, right] = expr.split('!=', 2);
+    return stripQuotes(left) !== stripQuotes(right);
+  }
+  // == operator
+  if (expr.includes('==')) {
+    const [left, right] = expr.split('==', 2);
+    return stripQuotes(left) === stripQuotes(right);
+  }
+  // > and < for numeric comparison
+  if (expr.includes('>')) {
+    const [left, right] = expr.split('>', 2);
+    return Number(stripQuotes(left)) > Number(stripQuotes(right));
+  }
+  if (expr.includes('<')) {
+    const [left, right] = expr.split('<', 2);
+    return Number(stripQuotes(left)) < Number(stripQuotes(right));
+  }
+
+  // Truthy: non-empty, non-null string
+  return expr !== '' && expr !== 'undefined' && expr !== 'null' && expr !== '0';
+}
+
+// ─── Output Parser ──────────────────────────────────────────────────
+//
+// Extracts structured data from agent output. When outputs: 'json',
+// finds JSON in the response and parses it. Parsed fields become
+// accessible via ${{ steps.X.outputs.key }} in downstream steps.
+
+function parseStepOutputs(output: string): Record<string, any> {
+  // Try to find a JSON object in the output
+  const jsonMatch = output.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try { return JSON.parse(jsonMatch[0]); } catch {}
+  }
+  // Try parsing the entire trimmed output as JSON
+  try { return JSON.parse(output.trim()); } catch {}
+  return {};
+}
+
 
 // Resolve step prompt: load from file if prompt_file is set, otherwise use inline prompt
 async function resolvePrompt(stepDef: StepDef): Promise<string> {
@@ -189,7 +313,11 @@ export async function saveStageFile(name: string, content: string): Promise<void
 // ─── DAG Execution ──────────────────────────────────────────────────
 
 function topologicalOrder(steps: StepDef[]): StepDef[][] {
-  const remaining = new Map(steps.map(s => [s.id, s]));
+  // Collect step IDs that are on_fail targets — they run inline, not in the DAG
+  const fallbackIds = new Set(steps.map(s => s.on_fail).filter(Boolean) as string[]);
+  const dagSteps = steps.filter(s => !fallbackIds.has(s.id));
+
+  const remaining = new Map(dagSteps.map(s => [s.id, s]));
   const completed = new Set<string>();
   const layers: StepDef[][] = [];
   while (remaining.size > 0) {
@@ -285,12 +413,25 @@ export async function executeWorkflow(
         const stepResult = run.steps.find(s => s.id === stepDef.id)!;
         const agentName = `wf-${runId}-${stepDef.id}`;
         stepResult.agentName = agentName;
+        const ctx = { inputs, steps: stepResults };
+
+        // ── Conditional: evaluate if expression ──
+        if (stepDef.if) {
+          const shouldRun = evaluateCondition(stepDef.if, ctx);
+          if (!shouldRun) {
+            stepResult.status = 'skipped';
+            stepResult.output = `Condition not met: ${stepDef.if}`;
+            stepResult.finishedAt = new Date().toISOString();
+            stepResults[stepDef.id] = stepResult;
+            broadcast(run);
+            return;
+          }
+        }
 
         // ── Gate step: pause for human approval ──
         if (stepDef.type === 'gate') {
           stepResult.status = 'waiting';
-          // Interpolate the gate message for display
-          stepResult.output = interpolate(stepDef.prompt, { inputs, steps: stepResults });
+          stepResult.output = interpolate(stepDef.prompt, ctx);
           run.status = 'waiting';
           broadcast(run);
 
@@ -307,8 +448,10 @@ export async function executeWorkflow(
             stepResult.error = 'Rejected by human';
             stepResult.finishedAt = new Date().toISOString();
             stepResults[stepDef.id] = stepResult;
-            run.status = 'running'; // briefly before failing
-            throw new Error(`Gate "${stepDef.id}" rejected`);
+            run.status = 'running';
+            if (!stepDef.continue_on_fail) throw new Error(`Gate "${stepDef.id}" rejected`);
+            broadcast(run);
+            return;
           }
 
           stepResult.status = 'complete';
@@ -319,86 +462,157 @@ export async function executeWorkflow(
           return;
         }
 
-        // ── Normal step: spawn agent, prompt, optionally review-loop ──
-        stepResult.status = 'running';
-        stepResult.startedAt = new Date().toISOString();
-        broadcast(run);
+        // ── Normal step: spawn agent, prompt, review-loop, with retry ──
+        const maxAttempts = stepDef.retry || 1;
+        const retryDelay = (stepDef.retry_delay || 2) * 1000;
+        let lastError: Error | null = null;
 
-        try {
-          const rawPrompt = await resolvePrompt(stepDef);
-          const prompt = interpolate(rawPrompt, { inputs, steps: stepResults });
-          const model = stepDef.agent?.model || 'claude-sonnet-4';
-          const timeout = (stepDef.timeout || 120) * 1000;
+        for (let retryAttempt = 1; retryAttempt <= maxAttempts; retryAttempt++) {
+          stepResult.status = 'running';
+          stepResult.startedAt = stepResult.startedAt || new Date().toISOString();
+          if (retryAttempt > 1) stepResult.retries = retryAttempt - 1;
+          broadcast(run);
 
-          // Create persistent agent for this step
-          await createHeadlessAgent(agentName, {
-            model,
-            systemPrompt: stepDef.agent?.systemPrompt ||
-              'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
-          });
-          runAgents.push(agentName);
+          try {
+            const rawPrompt = await resolvePrompt(stepDef);
+            const prompt = interpolate(rawPrompt, ctx);
+            const model = stepDef.agent?.model || 'claude-sonnet-4';
+            const timeout = (stepDef.timeout || 120) * 1000;
 
-          // Send initial prompt
-          let result = await sendToHeadless(agentName, prompt, { timeoutMs: timeout });
-          let output = result.response || '';
-          let totalTokens = result.outputTokens || 0;
+            // Create agent (fresh on each retry)
+            const retryAgentName = retryAttempt > 1 ? `${agentName}-r${retryAttempt}` : agentName;
+            if (retryAttempt > 1) {
+              try { await destroyHeadlessAgent(agentName); } catch {}
+              stepResult.agentName = retryAgentName;
+            }
+            await createHeadlessAgent(retryAgentName, {
+              model,
+              systemPrompt: stepDef.agent?.systemPrompt ||
+                'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+            });
+            runAgents.push(retryAgentName);
 
-          stepResult.iteration = 1;
-          stepResult.iterations.push({
-            attempt: 1, output, tokens: result.outputTokens,
-          });
-          stepResult.output = output;
-          stepResult.tokens = totalTokens;
+            // Send initial prompt
+            let result = await sendToHeadless(retryAgentName, prompt, { timeoutMs: timeout });
+            let output = result.response || '';
+            let totalTokens = result.outputTokens || 0;
 
-          // ── Review loop (if review criteria defined) ──
-          if (stepDef.review?.criteria) {
-            const maxIter = stepDef.review.max_iterations || 3;
+            stepResult.iteration = 1;
+            stepResult.iterations = [{
+              attempt: 1, output, tokens: result.outputTokens,
+            }];
+            stepResult.output = output;
+            stepResult.tokens = totalTokens;
 
-            for (let attempt = 1; attempt <= maxIter; attempt++) {
-              stepResult.status = 'reviewing';
+            // ── Review loop (if review criteria defined) ──
+            if (stepDef.review?.criteria) {
+              const maxIter = stepDef.review.max_iterations || 3;
+
+              for (let attempt = 1; attempt <= maxIter; attempt++) {
+                stepResult.status = 'reviewing';
+                broadcast(run);
+
+                const review = await reviewOutput(
+                  output, stepDef.review.criteria, stepDef.name || stepDef.id, attempt, model,
+                );
+
+                stepResult.iterations[stepResult.iterations.length - 1].review = review;
+                broadcast(run);
+
+                if (review.pass) break;
+                if (attempt === maxIter) break;
+
+                stepResult.status = 'running';
+                stepResult.iteration = attempt + 1;
+                broadcast(run);
+
+                const revisionPrompt =
+                  `Review feedback (attempt ${attempt}/${maxIter}):\n${review.feedback}\n\nPlease revise your previous output to address this feedback.`;
+                result = await sendToHeadless(retryAgentName, revisionPrompt, { timeoutMs: timeout });
+                output = result.response || '';
+                totalTokens += result.outputTokens || 0;
+
+                stepResult.iterations.push({
+                  attempt: attempt + 1, output, tokens: result.outputTokens,
+                });
+                stepResult.output = output;
+                stepResult.tokens = totalTokens;
+              }
+            }
+
+            // ── Parse outputs (if outputs defined) ──
+            if (stepDef.outputs) {
+              stepResult.outputs = parseStepOutputs(stepResult.output);
+            }
+
+            stepResult.status = 'complete';
+            stepResult.finishedAt = new Date().toISOString();
+            stepResults[stepDef.id] = stepResult;
+            broadcast(run);
+            lastError = null;
+            break; // success — exit retry loop
+
+          } catch (e: any) {
+            lastError = e;
+            if (retryAttempt < maxAttempts) {
+              // Retry: wait then try again
+              stepResult.output = `Attempt ${retryAttempt} failed: ${e.message}. Retrying...`;
               broadcast(run);
+              await new Promise(r => setTimeout(r, retryDelay));
+            }
+          }
+        }
 
-              const review = await reviewOutput(
-                output, stepDef.review.criteria, stepDef.name || stepDef.id, attempt, model,
-              );
+        // All retries exhausted or success
+        if (lastError) {
+          stepResult.status = 'failed';
+          stepResult.error = lastError.message;
+          stepResult.finishedAt = new Date().toISOString();
+          stepResults[stepDef.id] = stepResult;
+          broadcast(run);
 
-              // Record review result on the current iteration
-              stepResult.iterations[stepResult.iterations.length - 1].review = review;
-              broadcast(run);
-
-              if (review.pass) break; // quality met
-              if (attempt === maxIter) break; // max attempts, accept as-is
-
-              // Send feedback to the SAME agent — it has full context
-              stepResult.status = 'running';
-              stepResult.iteration = attempt + 1;
-              broadcast(run);
-
-              const revisionPrompt =
-                `Review feedback (attempt ${attempt}/${maxIter}):\n${review.feedback}\n\nPlease revise your previous output to address this feedback.`;
-              result = await sendToHeadless(agentName, revisionPrompt, { timeoutMs: timeout });
-              output = result.response || '';
-              totalTokens += result.outputTokens || 0;
-
-              stepResult.iterations.push({
-                attempt: attempt + 1, output, tokens: result.outputTokens,
-              });
-              stepResult.output = output;
-              stepResult.tokens = totalTokens;
+          // ── on_fail: execute fallback step ──
+          if (stepDef.on_fail) {
+            const fallbackDef = def.steps.find(s => s.id === stepDef.on_fail);
+            if (fallbackDef) {
+              const fbResult = run.steps.find(s => s.id === fallbackDef.id);
+              if (fbResult && fbResult.status === 'pending') {
+                // Execute fallback inline (it gets the error context)
+                fbResult.status = 'running';
+                fbResult.startedAt = new Date().toISOString();
+                const fbAgent = `wf-${runId}-${fallbackDef.id}`;
+                fbResult.agentName = fbAgent;
+                broadcast(run);
+                try {
+                  const rawPrompt = await resolvePrompt(fallbackDef);
+                  const fbPrompt = interpolate(rawPrompt, ctx);
+                  await createHeadlessAgent(fbAgent, {
+                    model: fallbackDef.agent?.model || 'claude-sonnet-4',
+                    systemPrompt: fallbackDef.agent?.systemPrompt ||
+                      'You are a fallback agent. The previous step failed. Complete the task with a simpler approach.',
+                  });
+                  runAgents.push(fbAgent);
+                  const fbRes = await sendToHeadless(fbAgent, fbPrompt, { timeoutMs: (fallbackDef.timeout || 120) * 1000 });
+                  fbResult.output = fbRes.response || '';
+                  fbResult.tokens = fbRes.outputTokens;
+                  fbResult.iteration = 1;
+                  fbResult.iterations = [{ attempt: 1, output: fbResult.output, tokens: fbRes.outputTokens }];
+                  if (fallbackDef.outputs) fbResult.outputs = parseStepOutputs(fbResult.output);
+                  fbResult.status = 'complete';
+                  fbResult.finishedAt = new Date().toISOString();
+                  stepResults[fallbackDef.id] = fbResult;
+                } catch (fbErr: any) {
+                  fbResult.status = 'failed';
+                  fbResult.error = fbErr.message;
+                  fbResult.finishedAt = new Date().toISOString();
+                  stepResults[fallbackDef.id] = fbResult;
+                }
+                broadcast(run);
+              }
             }
           }
 
-          stepResult.status = 'complete';
-          stepResult.finishedAt = new Date().toISOString();
-          stepResults[stepDef.id] = stepResult;
-          broadcast(run);
-        } catch (e: any) {
-          stepResult.status = 'failed';
-          stepResult.error = e.message;
-          stepResult.finishedAt = new Date().toISOString();
-          stepResults[stepDef.id] = stepResult;
-          broadcast(run);
-          throw e;
+          if (!stepDef.continue_on_fail) throw lastError;
         }
       }));
     }
