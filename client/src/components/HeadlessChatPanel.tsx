@@ -177,6 +177,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   const thinkBuf = useRef('');
   const toolsBuf = useRef<ToolCall[]>([]);
   const activeStreamId = useRef<string | null>(null);
+  const pendingSend = useRef<string | null>(null);
 
   /* ── Auto-scroll ── */
   useEffect(() => {
@@ -188,10 +189,17 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  /* ── Escape to close ── */
+  /* ── Escape to close (only when not typing) ── */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        const tag = document.activeElement?.tagName;
+        if (tag === 'TEXTAREA' || tag === 'INPUT') {
+          (document.activeElement as HTMLElement).blur();
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -232,10 +240,20 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   }, [agentName]);
 
   /* ── WebSocket ── */
-  useEffect(() => {
-    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
-    wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
+  const wireWs = useCallback((ws: WebSocket) => {
+    ws.onopen = () => {
+      setConnected(true);
+      if (pendingSend.current) {
+        const prompt = pendingSend.current;
+        pendingSend.current = null;
+        const agentId = `a-${msgCounter.current++}`;
+        setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+        activeStreamId.current = agentId;
+        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+        setSending(true);
+        ws.send(JSON.stringify({ prompt }));
+      }
+    };
     ws.onclose = () => setConnected(false);
 
     ws.onmessage = (ev) => {
@@ -338,14 +356,28 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
         }
       } catch {}
     };
-
-    return () => { ws.close(); wsRef.current = null; };
   }, [agentName]);
+
+  // Auto-connect on mount
+  useEffect(() => {
+    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
+    wsRef.current = ws;
+    wireWs(ws);
+    return () => { ws.close(); wsRef.current = null; };
+  }, [agentName, wireWs]);
+
+  const ensureWs = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return wsRef.current;
+    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
+    wsRef.current = ws;
+    wireWs(ws);
+    return ws;
+  }, [agentName, wireWs]);
 
   /* ── Actions ── */
   const sendMessage = useCallback((action?: 'enqueue' | 'steer', textOverride?: string) => {
     const text = (textOverride || input).trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!text) return;
 
     const userId = `u-${msgCounter.current++}`;
     const userMsg: ChatMessage = { id: userId, role: 'user', text, from: 'you', timestamp: Date.now() };
@@ -353,8 +385,11 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     setMessages(prev => [...prev, userMsg]);
     setInput('');
 
+    const ws = wsRef.current;
+    const isOpen = ws && ws.readyState === WebSocket.OPEN;
+
     if (action === 'enqueue') {
-      wsRef.current.send(JSON.stringify({ action: 'enqueue', prompt: text }));
+      if (isOpen) ws.send(JSON.stringify({ action: 'enqueue', prompt: text }));
       return;
     }
     if (action === 'steer') {
@@ -362,18 +397,24 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
       const agentId = `a-${msgCounter.current++}`;
       setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
       activeStreamId.current = agentId;
-      wsRef.current.send(JSON.stringify({ action: 'steer', prompt: text }));
+      if (isOpen) ws!.send(JSON.stringify({ action: 'steer', prompt: text }));
+      else { pendingSend.current = text; ensureWs(); }
       return;
     }
 
     if (sending) return;
-    const agentId = `a-${msgCounter.current++}`;
-    setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-    activeStreamId.current = agentId;
-    streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-    setSending(true);
-    wsRef.current.send(JSON.stringify({ prompt: text }));
-  }, [input, sending]);
+    if (isOpen) {
+      const agentId = `a-${msgCounter.current++}`;
+      setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+      activeStreamId.current = agentId;
+      streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+      setSending(true);
+      ws!.send(JSON.stringify({ prompt: text }));
+    } else {
+      pendingSend.current = text;
+      ensureWs();
+    }
+  }, [input, sending, ensureWs]);
 
   const abortAgent = useCallback(() => {
     wsRef.current?.readyState === WebSocket.OPEN && wsRef.current.send(JSON.stringify({ action: 'abort' }));
@@ -645,7 +686,6 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={!connected}
               onInput={e => {
                 const t = e.currentTarget;
                 t.style.height = 'auto';
@@ -661,7 +701,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                   : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/15'
               } disabled:opacity-20`}
               onClick={() => sending ? (input.trim() ? sendMessage('steer') : abortAgent()) : sendMessage()}
-              disabled={!connected || (!input.trim() && !sending)}
+              disabled={!input.trim() && !sending}
               title={sending ? (input.trim() ? 'Steer (redirect agent)' : 'Stop') : 'Send'}
             >
               {sending ? (
