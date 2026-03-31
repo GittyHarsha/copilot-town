@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
-  executeWorkflow, getRuns, getRun, cancelRun, resolveGate,
+  executeWorkflow, getRuns, getRun, cancelRun, resolveGate, rerunFromStep,
   getStageFiles, getStageFile, saveStageFile, deleteStageFile,
 } from '../services/workflows.js';
 import { readFile } from 'fs/promises';
@@ -125,6 +125,18 @@ router.post('/runs/:runId/steps/:stepId/gate', (req, res) => {
   const ok = resolveGate(req.params.runId, req.params.stepId, !!approved, feedback);
   if (!ok) return res.status(404).json({ error: 'No pending gate found' });
   res.json({ ok: true });
+});
+
+// Rerun a workflow from a specific step
+router.post('/runs/:runId/steps/:stepId/rerun', async (req, res) => {
+  try {
+    const { feedback } = req.body || {};
+    const run = await rerunFromStep(req.params.runId, req.params.stepId, feedback);
+    res.json({ success: true, run });
+  } catch (e: any) {
+    const status = e.message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: e.message });
+  }
 });
 
 // ─── Stage Files ────────────────────────────────────────────────────

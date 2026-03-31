@@ -363,6 +363,8 @@ export const api = {
   cancelWorkflowRun: (runId: string) => deleteJson<any>(`/workflows/runs/${encodeURIComponent(runId)}`),
   resolveWorkflowGate: (runId: string, stepId: string, approved: boolean, feedback?: string) =>
     postJson<any>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/gate`, { approved, feedback }),
+  rerunFromStep: (runId: string, stepId: string, feedback?: string) =>
+    postJson<{ success: boolean; run: any }>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/rerun`, { feedback }),
 
   // Stage files
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),

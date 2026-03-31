@@ -41,11 +41,12 @@ const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-fg-2', running: 'bg-blue-500 animate-pulse', complete: 'bg-emerald-500',
   failed: 'bg-red-500', skipped: 'bg-fg-2', cancelled: 'bg-amber-500',
   reviewing: 'bg-purple-500 animate-pulse', waiting: 'bg-amber-500 animate-pulse',
+  rewinding: 'bg-amber-400 animate-pulse',
 };
 
 const STATUS_ICONS: Record<string, string> = {
   pending: '○', running: '◉', complete: '✓', failed: '✗', skipped: '—', cancelled: '⊘',
-  reviewing: '🔍', waiting: '⏸',
+  reviewing: '🔍', waiting: '⏸', rewinding: '↩',
 };
 
 function elapsed(start: string, end?: string): string {
@@ -64,7 +65,7 @@ function formatDuration(ms: number): string {
 const DURATION_BAR_COLORS: Record<string, string> = {
   pending: '#71717a', running: '#3b82f6', complete: '#10b981',
   failed: '#ef4444', skipped: '#71717a', cancelled: '#f59e0b',
-  reviewing: '#a855f7', waiting: '#f59e0b',
+  reviewing: '#a855f7', waiting: '#f59e0b', rewinding: '#fbbf24',
 };
 
 /* ─── 3. Main Workflows Component ───────────────────────────────── */
@@ -861,6 +862,8 @@ function RunMonitor({
 }) {
   const completedSteps = run.steps.filter(s => s.status === 'complete').length;
   const progress = run.steps.length > 0 ? (completedSteps / run.steps.length) * 100 : 0;
+  const [rewindStep, setRewindStep] = useState<string | null>(null);
+  const runFinished = run.status === 'complete' || run.status === 'failed';
 
   return (
     <div className="p-6 max-w-4xl">
@@ -944,13 +947,15 @@ function RunMonitor({
       <div className="space-y-3">
         {run.steps.map((step, i) => {
           const isActive = step.status === 'running' || step.status === 'reviewing';
+          const isRewinding = step.status === 'rewinding';
           return (
             <div
               key={step.id}
               className={`bg-bg-1 border overflow-hidden ${
                 step.status === 'running' ? 'border-blue-500/50' :
                 step.status === 'failed' ? 'border-red-500/30' :
-                step.status === 'complete' ? 'border-emerald-500/20' : 'border-border'
+                step.status === 'complete' ? 'border-emerald-500/20' :
+                isRewinding ? 'border-amber-400/40' : 'border-border'
               }`}
               style={{ borderRadius: 'var(--shape-md)', transition: 'border-color var(--duration-short) var(--ease-standard)' }}
             >
@@ -972,6 +977,11 @@ function RunMonitor({
                     )}
                     {step.status === 'reviewing' && (
                       <span className="text-[10px] text-purple-400 animate-pulse">reviewing...</span>
+                    )}
+                    {isRewinding && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/30 animate-pulse">
+                        ↩ rewinding...
+                      </span>
                     )}
                   </div>
                   {step.startedAt && (
@@ -1092,6 +1102,27 @@ function RunMonitor({
                           className="px-3 py-1.5 text-xs bg-bg-2 hover:bg-bg-3 border border-border-1 rounded-lg transition-colors"
                         >
                           🔗 Connect
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Rewind button — only on complete/failed steps when run is finished */}
+                  {runFinished && (step.status === 'complete' || step.status === 'failed') && (
+                    <div className="mt-3">
+                      {rewindStep === step.id ? (
+                        <RewindPanel
+                          runId={run.runId}
+                          stepId={step.id}
+                          onClose={() => setRewindStep(null)}
+                        />
+                      ) : (
+                        <button
+                          onClick={() => setRewindStep(step.id)}
+                          className="px-3 py-1.5 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-colors"
+                          style={{ borderRadius: 'var(--shape-full)' }}
+                        >
+                          ↩ Rewind
                         </button>
                       )}
                     </div>
@@ -1321,6 +1352,70 @@ function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => 
           className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
         >
           Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─── 7b. RewindPanel Component ────────────────────────────────── */
+
+function RewindPanel({ runId, stepId, onClose }: { runId: string; stepId: string; onClose: () => void }) {
+  const [feedback, setFeedback] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleRewind = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.rerunFromStep(runId, stepId, feedback || undefined);
+      onClose();
+    } catch (e: any) {
+      setError(e.message || 'Rewind failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="animate-slide-down bg-amber-500/5 border border-amber-500/20 p-4" style={{ borderRadius: 'var(--shape-md)' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-amber-400 text-base">↩</span>
+        <span className="text-sm font-medium text-amber-300">Rewind from this step</span>
+      </div>
+      <p className="text-xs text-fg-2 mb-3">
+        Re-run from this step. Optionally send corrections to the agent.
+      </p>
+      <textarea
+        value={feedback}
+        onChange={e => setFeedback(e.target.value)}
+        placeholder="What should the agent do differently?"
+        className="w-full input-m3 px-4 py-2.5 text-xs text-fg placeholder-fg-2/40 outline-none resize-y mb-3 transition-colors"
+        rows={3}
+      />
+      {error && (
+        <div className="text-xs text-red-400 mb-2">{error}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleRewind}
+          disabled={submitting}
+          className="px-4 py-1.5 text-xs font-medium text-white transition-colors disabled:opacity-50"
+          style={{
+            borderRadius: 'var(--shape-full)',
+            background: submitting ? 'var(--color-fg-2)' : 'var(--color-accent)',
+          }}
+        >
+          {submitting ? '⏳ Rewinding...' : '🔄 Rewind & Re-run'}
+        </button>
+        <button
+          onClick={onClose}
+          disabled={submitting}
+          className="px-4 py-1.5 text-xs text-fg-2 hover:text-fg-1 bg-bg-2 border border-border transition-colors disabled:opacity-50"
+          style={{ borderRadius: 'var(--shape-full)' }}
+        >
+          Cancel
         </button>
       </div>
     </div>

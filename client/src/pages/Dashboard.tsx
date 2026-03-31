@@ -201,7 +201,11 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
     onRefresh();
   }, [agents, selectedAgents, clearSelection, onRefresh]);
 
-  if (userAgents.length === 0 && workflowAgents.length === 0) {
+  // Show empty state only if there are truly zero agents (no filters applied)
+  const hasAnyAgents = agents.length > 0;
+  const hasFilteredResults = userAgents.length > 0 || workflowAgents.length > 0;
+
+  if (!hasAnyAgents) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '5rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '1rem' }}>
         <div style={{ fontSize: '3.5rem', marginBottom: '0.5rem', opacity: 0.8 }}>🏘️</div>
@@ -455,10 +459,20 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
             )}
           </div>
         ))}
-        {search && userAgents.length === 0 && workflowAgents.length === 0 && (
+        {!hasFilteredResults && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <span className="text-3xl mb-3 opacity-25">🔍</span>
-            <p className="text-sm text-fg-2/70">No agents match "{search}"</p>
+            <p className="text-sm" style={{ color: 'var(--color-fg-2)' }}>
+              {search ? `No agents match "${search}"` : `No ${statusFilter !== 'all' ? statusFilter : ''} ${typeFilter !== 'all' ? typeFilter : ''} agents found`}
+            </p>
+            {(activeFilterCount > 0 || search) && (
+              <button
+                className="btn btn-primary mt-3"
+                onClick={clearAllFilters}
+              >
+                Clear all filters
+              </button>
+            )}
           </div>
         )}
       </div>

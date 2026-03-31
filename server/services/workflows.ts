@@ -391,6 +391,267 @@ async function reviewOutput(
   }
 }
 
+// ─── Step Execution Context ─────────────────────────────────────────
+//
+// Shared context passed to executeStep so it can manage agents, sessions,
+// and step results the same way for both initial runs and reruns.
+
+interface StepExecContext {
+  run: WorkflowRun;
+  def: WorkflowDef;
+  inputs: Record<string, string>;
+  stepResults: Record<string, StepResult>;
+  runAgents: string[];
+  sharedSessions: Map<string, string>;
+  targetedAgents: Set<string>;
+}
+
+// ─── Execute a Single Step ──────────────────────────────────────────
+
+async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void> {
+  const { run, def, inputs, stepResults, runAgents, sharedSessions, targetedAgents } = ctx;
+  const runId = run.runId;
+
+  const stepResult = run.steps.find(s => s.id === stepDef.id)!;
+  const agentName = `wf-${runId}-${stepDef.id}`;
+  stepResult.agentName = agentName;
+  const interpCtx = { inputs, steps: stepResults };
+
+  // ── Conditional: evaluate if expression ──
+  if (stepDef.if) {
+    const shouldRun = evaluateCondition(stepDef.if, interpCtx);
+    if (!shouldRun) {
+      stepResult.status = 'skipped';
+      stepResult.output = `Condition not met: ${stepDef.if}`;
+      stepResult.finishedAt = new Date().toISOString();
+      stepResults[stepDef.id] = stepResult;
+      broadcast(run);
+      return;
+    }
+  }
+
+  // ── Gate step: pause for human approval ──
+  if (stepDef.type === 'gate') {
+    stepResult.status = 'waiting';
+    stepResult.output = interpolate(stepDef.prompt, interpCtx);
+    run.status = 'waiting';
+    broadcast(run);
+
+    const approved = await new Promise<boolean>((resolve) => {
+      gateResolvers.set(`${runId}:${stepDef.id}`, (ok, feedback) => {
+        if (feedback) stepResult.output += `\n\nHuman feedback: ${feedback}`;
+        resolve(ok);
+      });
+    });
+    gateResolvers.delete(`${runId}:${stepDef.id}`);
+
+    if (!approved) {
+      stepResult.status = 'failed';
+      stepResult.error = 'Rejected by human';
+      stepResult.finishedAt = new Date().toISOString();
+      stepResults[stepDef.id] = stepResult;
+      run.status = 'running';
+      if (!stepDef.continue_on_fail) throw new Error(`Gate "${stepDef.id}" rejected`);
+      broadcast(run);
+      return;
+    }
+
+    stepResult.status = 'complete';
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    run.status = 'running';
+    broadcast(run);
+    return;
+  }
+
+  // ── Normal step: spawn agent, prompt, review-loop, with retry ──
+  const maxAttempts = stepDef.retry || 1;
+  const retryDelay = (stepDef.retry_delay || 2) * 1000;
+  let lastError: Error | null = null;
+
+  for (let retryAttempt = 1; retryAttempt <= maxAttempts; retryAttempt++) {
+    stepResult.status = 'running';
+    stepResult.startedAt = stepResult.startedAt || new Date().toISOString();
+    if (retryAttempt > 1) stepResult.retries = retryAttempt - 1;
+    broadcast(run);
+
+    try {
+      const rawPrompt = await resolvePrompt(stepDef);
+      const prompt = interpolate(rawPrompt, interpCtx);
+      const model = stepDef.agent?.model || 'claude-sonnet-4';
+      const timeout = (stepDef.timeout || 120) * 1000;
+
+      let activeAgentName: string;
+      const isTargeted = !!stepDef.target;
+      const isShared = !!stepDef.session;
+
+      if (isTargeted) {
+        // ── Target mode: use an existing named agent (don't create or destroy) ──
+        activeAgentName = stepDef.target!;
+        stepResult.agentName = activeAgentName;
+        targetedAgents.add(activeAgentName);
+      } else if (isShared) {
+        // ── Shared session: reuse agent if session group already has one ──
+        const existingAgent = sharedSessions.get(stepDef.session!);
+        if (existingAgent) {
+          activeAgentName = existingAgent;
+          stepResult.agentName = activeAgentName;
+        } else {
+          // First step in this session group — create the agent
+          const sharedAgentName = `wf-${runId}-s-${stepDef.session}`;
+          await createHeadlessAgent(sharedAgentName, {
+            model,
+            systemPrompt: stepDef.agent?.systemPrompt ||
+              'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+            source: 'workflow',
+          });
+          runAgents.push(sharedAgentName);
+          sharedSessions.set(stepDef.session!, sharedAgentName);
+          activeAgentName = sharedAgentName;
+          stepResult.agentName = activeAgentName;
+        }
+      } else {
+        // ── Default: fresh agent per step (with retry support) ──
+        const retryAgentName = retryAttempt > 1 ? `${agentName}-r${retryAttempt}` : agentName;
+        if (retryAttempt > 1) {
+          try { await destroyHeadlessAgent(agentName); } catch {}
+          stepResult.agentName = retryAgentName;
+        }
+        await createHeadlessAgent(retryAgentName, {
+          model,
+          systemPrompt: stepDef.agent?.systemPrompt ||
+            'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
+          source: 'workflow',
+        });
+        runAgents.push(retryAgentName);
+        activeAgentName = retryAgentName;
+      }
+
+      // Send initial prompt
+      let result = await sendToHeadless(activeAgentName, prompt, { timeoutMs: timeout });
+      let output = result.response || '';
+      let totalTokens = result.outputTokens || 0;
+
+      stepResult.iteration = 1;
+      stepResult.iterations = [{
+        attempt: 1, output, tokens: result.outputTokens,
+      }];
+      stepResult.output = output;
+      stepResult.tokens = totalTokens;
+
+      // ── Review loop (if review criteria defined) ──
+      if (stepDef.review?.criteria) {
+        const maxIter = stepDef.review.max_iterations || 3;
+
+        for (let attempt = 1; attempt <= maxIter; attempt++) {
+          stepResult.status = 'reviewing';
+          broadcast(run);
+
+          const review = await reviewOutput(
+            output, stepDef.review.criteria, stepDef.name || stepDef.id, attempt, model,
+          );
+
+          stepResult.iterations[stepResult.iterations.length - 1].review = review;
+          broadcast(run);
+
+          if (review.pass) break;
+          if (attempt === maxIter) break;
+
+          stepResult.status = 'running';
+          stepResult.iteration = attempt + 1;
+          broadcast(run);
+
+          const revisionPrompt =
+            `Review feedback (attempt ${attempt}/${maxIter}):\n${review.feedback}\n\nPlease revise your previous output to address this feedback.`;
+          result = await sendToHeadless(activeAgentName, revisionPrompt, { timeoutMs: timeout });
+          output = result.response || '';
+          totalTokens += result.outputTokens || 0;
+
+          stepResult.iterations.push({
+            attempt: attempt + 1, output, tokens: result.outputTokens,
+          });
+          stepResult.output = output;
+          stepResult.tokens = totalTokens;
+        }
+      }
+
+      // ── Parse outputs (if outputs defined) ──
+      if (stepDef.outputs) {
+        stepResult.outputs = parseStepOutputs(stepResult.output);
+      }
+
+      stepResult.status = 'complete';
+      stepResult.finishedAt = new Date().toISOString();
+      stepResults[stepDef.id] = stepResult;
+      broadcast(run);
+      lastError = null;
+      break; // success — exit retry loop
+
+    } catch (e: any) {
+      lastError = e;
+      if (retryAttempt < maxAttempts) {
+        // Retry: wait then try again
+        stepResult.output = `Attempt ${retryAttempt} failed: ${e.message}. Retrying...`;
+        broadcast(run);
+        await new Promise(r => setTimeout(r, retryDelay));
+      }
+    }
+  }
+
+  // All retries exhausted or success
+  if (lastError) {
+    stepResult.status = 'failed';
+    stepResult.error = lastError.message;
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+
+    // ── on_fail: execute fallback step ──
+    if (stepDef.on_fail) {
+      const fallbackDef = def.steps.find(s => s.id === stepDef.on_fail);
+      if (fallbackDef) {
+        const fbResult = run.steps.find(s => s.id === fallbackDef.id);
+        if (fbResult && fbResult.status === 'pending') {
+          // Execute fallback inline (it gets the error context)
+          fbResult.status = 'running';
+          fbResult.startedAt = new Date().toISOString();
+          const fbAgent = `wf-${run.runId}-${fallbackDef.id}`;
+          fbResult.agentName = fbAgent;
+          broadcast(run);
+          try {
+            const rawPrompt = await resolvePrompt(fallbackDef);
+            const fbPrompt = interpolate(rawPrompt, interpCtx);
+            await createHeadlessAgent(fbAgent, {
+              model: fallbackDef.agent?.model || 'claude-sonnet-4',
+              systemPrompt: fallbackDef.agent?.systemPrompt ||
+                'You are a fallback agent. The previous step failed. Complete the task with a simpler approach.',
+              source: 'workflow',
+            });
+            runAgents.push(fbAgent);
+            const fbRes = await sendToHeadless(fbAgent, fbPrompt, { timeoutMs: (fallbackDef.timeout || 120) * 1000 });
+            fbResult.output = fbRes.response || '';
+            fbResult.tokens = fbRes.outputTokens;
+            fbResult.iteration = 1;
+            fbResult.iterations = [{ attempt: 1, output: fbResult.output, tokens: fbRes.outputTokens }];
+            if (fallbackDef.outputs) fbResult.outputs = parseStepOutputs(fbResult.output);
+            fbResult.status = 'complete';
+            fbResult.finishedAt = new Date().toISOString();
+            stepResults[fallbackDef.id] = fbResult;
+          } catch (fbErr: any) {
+            fbResult.status = 'failed';
+            fbResult.error = fbErr.message;
+            fbResult.finishedAt = new Date().toISOString();
+            stepResults[fallbackDef.id] = fbResult;
+          }
+          broadcast(run);
+        }
+      }
+    }
+
+    if (!stepDef.continue_on_fail) throw lastError;
+  }
+}
+
 // ─── Execute Workflow ───────────────────────────────────────────────
 
 export async function executeWorkflow(
@@ -424,6 +685,7 @@ export async function executeWorkflow(
   pushEvent({ type: 'workflow', action: 'started', agent: workflowId, detail: `Run ${runId}` });
 
   const layers = topologicalOrder(def.steps);
+  const execCtx: StepExecContext = { run, def, inputs, stepResults, runAgents, sharedSessions, targetedAgents };
 
   try {
     for (const layer of layers) {
@@ -432,245 +694,7 @@ export async function executeWorkflow(
 
       await Promise.all(layer.map(async (stepDef) => {
         if (run.status === 'cancelled') return;
-
-        const stepResult = run.steps.find(s => s.id === stepDef.id)!;
-        const agentName = `wf-${runId}-${stepDef.id}`;
-        stepResult.agentName = agentName;
-        const ctx = { inputs, steps: stepResults };
-
-        // ── Conditional: evaluate if expression ──
-        if (stepDef.if) {
-          const shouldRun = evaluateCondition(stepDef.if, ctx);
-          if (!shouldRun) {
-            stepResult.status = 'skipped';
-            stepResult.output = `Condition not met: ${stepDef.if}`;
-            stepResult.finishedAt = new Date().toISOString();
-            stepResults[stepDef.id] = stepResult;
-            broadcast(run);
-            return;
-          }
-        }
-
-        // ── Gate step: pause for human approval ──
-        if (stepDef.type === 'gate') {
-          stepResult.status = 'waiting';
-          stepResult.output = interpolate(stepDef.prompt, ctx);
-          run.status = 'waiting';
-          broadcast(run);
-
-          const approved = await new Promise<boolean>((resolve) => {
-            gateResolvers.set(`${runId}:${stepDef.id}`, (ok, feedback) => {
-              if (feedback) stepResult.output += `\n\nHuman feedback: ${feedback}`;
-              resolve(ok);
-            });
-          });
-          gateResolvers.delete(`${runId}:${stepDef.id}`);
-
-          if (!approved) {
-            stepResult.status = 'failed';
-            stepResult.error = 'Rejected by human';
-            stepResult.finishedAt = new Date().toISOString();
-            stepResults[stepDef.id] = stepResult;
-            run.status = 'running';
-            if (!stepDef.continue_on_fail) throw new Error(`Gate "${stepDef.id}" rejected`);
-            broadcast(run);
-            return;
-          }
-
-          stepResult.status = 'complete';
-          stepResult.finishedAt = new Date().toISOString();
-          stepResults[stepDef.id] = stepResult;
-          run.status = 'running';
-          broadcast(run);
-          return;
-        }
-
-        // ── Normal step: spawn agent, prompt, review-loop, with retry ──
-        const maxAttempts = stepDef.retry || 1;
-        const retryDelay = (stepDef.retry_delay || 2) * 1000;
-        let lastError: Error | null = null;
-
-        for (let retryAttempt = 1; retryAttempt <= maxAttempts; retryAttempt++) {
-          stepResult.status = 'running';
-          stepResult.startedAt = stepResult.startedAt || new Date().toISOString();
-          if (retryAttempt > 1) stepResult.retries = retryAttempt - 1;
-          broadcast(run);
-
-          try {
-            const rawPrompt = await resolvePrompt(stepDef);
-            const prompt = interpolate(rawPrompt, ctx);
-            const model = stepDef.agent?.model || 'claude-sonnet-4';
-            const timeout = (stepDef.timeout || 120) * 1000;
-
-            let activeAgentName: string;
-            const isTargeted = !!stepDef.target;
-            const isShared = !!stepDef.session;
-
-            if (isTargeted) {
-              // ── Target mode: use an existing named agent (don't create or destroy) ──
-              activeAgentName = stepDef.target!;
-              stepResult.agentName = activeAgentName;
-              targetedAgents.add(activeAgentName);
-            } else if (isShared) {
-              // ── Shared session: reuse agent if session group already has one ──
-              const existingAgent = sharedSessions.get(stepDef.session!);
-              if (existingAgent) {
-                activeAgentName = existingAgent;
-                stepResult.agentName = activeAgentName;
-              } else {
-                // First step in this session group — create the agent
-                const sharedAgentName = `wf-${runId}-s-${stepDef.session}`;
-                await createHeadlessAgent(sharedAgentName, {
-                  model,
-                  systemPrompt: stepDef.agent?.systemPrompt ||
-                    'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
-                  source: 'workflow',
-                });
-                runAgents.push(sharedAgentName);
-                sharedSessions.set(stepDef.session!, sharedAgentName);
-                activeAgentName = sharedAgentName;
-                stepResult.agentName = activeAgentName;
-              }
-            } else {
-              // ── Default: fresh agent per step (with retry support) ──
-              const retryAgentName = retryAttempt > 1 ? `${agentName}-r${retryAttempt}` : agentName;
-              if (retryAttempt > 1) {
-                try { await destroyHeadlessAgent(agentName); } catch {}
-                stepResult.agentName = retryAgentName;
-              }
-              await createHeadlessAgent(retryAgentName, {
-                model,
-                systemPrompt: stepDef.agent?.systemPrompt ||
-                  'You are a focused task agent. Complete the task concisely. Respond with your analysis/output directly.',
-                source: 'workflow',
-              });
-              runAgents.push(retryAgentName);
-              activeAgentName = retryAgentName;
-            }
-
-            // Send initial prompt
-            let result = await sendToHeadless(activeAgentName, prompt, { timeoutMs: timeout });
-            let output = result.response || '';
-            let totalTokens = result.outputTokens || 0;
-
-            stepResult.iteration = 1;
-            stepResult.iterations = [{
-              attempt: 1, output, tokens: result.outputTokens,
-            }];
-            stepResult.output = output;
-            stepResult.tokens = totalTokens;
-
-            // ── Review loop (if review criteria defined) ──
-            if (stepDef.review?.criteria) {
-              const maxIter = stepDef.review.max_iterations || 3;
-
-              for (let attempt = 1; attempt <= maxIter; attempt++) {
-                stepResult.status = 'reviewing';
-                broadcast(run);
-
-                const review = await reviewOutput(
-                  output, stepDef.review.criteria, stepDef.name || stepDef.id, attempt, model,
-                );
-
-                stepResult.iterations[stepResult.iterations.length - 1].review = review;
-                broadcast(run);
-
-                if (review.pass) break;
-                if (attempt === maxIter) break;
-
-                stepResult.status = 'running';
-                stepResult.iteration = attempt + 1;
-                broadcast(run);
-
-                const revisionPrompt =
-                  `Review feedback (attempt ${attempt}/${maxIter}):\n${review.feedback}\n\nPlease revise your previous output to address this feedback.`;
-                result = await sendToHeadless(activeAgentName, revisionPrompt, { timeoutMs: timeout });
-                output = result.response || '';
-                totalTokens += result.outputTokens || 0;
-
-                stepResult.iterations.push({
-                  attempt: attempt + 1, output, tokens: result.outputTokens,
-                });
-                stepResult.output = output;
-                stepResult.tokens = totalTokens;
-              }
-            }
-
-            // ── Parse outputs (if outputs defined) ──
-            if (stepDef.outputs) {
-              stepResult.outputs = parseStepOutputs(stepResult.output);
-            }
-
-            stepResult.status = 'complete';
-            stepResult.finishedAt = new Date().toISOString();
-            stepResults[stepDef.id] = stepResult;
-            broadcast(run);
-            lastError = null;
-            break; // success — exit retry loop
-
-          } catch (e: any) {
-            lastError = e;
-            if (retryAttempt < maxAttempts) {
-              // Retry: wait then try again
-              stepResult.output = `Attempt ${retryAttempt} failed: ${e.message}. Retrying...`;
-              broadcast(run);
-              await new Promise(r => setTimeout(r, retryDelay));
-            }
-          }
-        }
-
-        // All retries exhausted or success
-        if (lastError) {
-          stepResult.status = 'failed';
-          stepResult.error = lastError.message;
-          stepResult.finishedAt = new Date().toISOString();
-          stepResults[stepDef.id] = stepResult;
-          broadcast(run);
-
-          // ── on_fail: execute fallback step ──
-          if (stepDef.on_fail) {
-            const fallbackDef = def.steps.find(s => s.id === stepDef.on_fail);
-            if (fallbackDef) {
-              const fbResult = run.steps.find(s => s.id === fallbackDef.id);
-              if (fbResult && fbResult.status === 'pending') {
-                // Execute fallback inline (it gets the error context)
-                fbResult.status = 'running';
-                fbResult.startedAt = new Date().toISOString();
-                const fbAgent = `wf-${runId}-${fallbackDef.id}`;
-                fbResult.agentName = fbAgent;
-                broadcast(run);
-                try {
-                  const rawPrompt = await resolvePrompt(fallbackDef);
-                  const fbPrompt = interpolate(rawPrompt, ctx);
-                  await createHeadlessAgent(fbAgent, {
-                    model: fallbackDef.agent?.model || 'claude-sonnet-4',
-                    systemPrompt: fallbackDef.agent?.systemPrompt ||
-                      'You are a fallback agent. The previous step failed. Complete the task with a simpler approach.',
-                    source: 'workflow',
-                  });
-                  runAgents.push(fbAgent);
-                  const fbRes = await sendToHeadless(fbAgent, fbPrompt, { timeoutMs: (fallbackDef.timeout || 120) * 1000 });
-                  fbResult.output = fbRes.response || '';
-                  fbResult.tokens = fbRes.outputTokens;
-                  fbResult.iteration = 1;
-                  fbResult.iterations = [{ attempt: 1, output: fbResult.output, tokens: fbRes.outputTokens }];
-                  if (fallbackDef.outputs) fbResult.outputs = parseStepOutputs(fbResult.output);
-                  fbResult.status = 'complete';
-                  fbResult.finishedAt = new Date().toISOString();
-                  stepResults[fallbackDef.id] = fbResult;
-                } catch (fbErr: any) {
-                  fbResult.status = 'failed';
-                  fbResult.error = fbErr.message;
-                  fbResult.finishedAt = new Date().toISOString();
-                  stepResults[fallbackDef.id] = fbResult;
-                }
-                broadcast(run);
-              }
-            }
-          }
-
-          if (!stepDef.continue_on_fail) throw lastError;
-        }
+        await executeStep(stepDef, execCtx);
       }));
     }
 
@@ -691,6 +715,139 @@ export async function executeWorkflow(
 
   broadcast(run);
   pushEvent({ type: 'workflow', action: run.status, agent: workflowId, detail: `Run ${runId} ${run.status}` });
+  return run;
+}
+
+// ─── Rerun From Step ────────────────────────────────────────────────
+//
+// Re-execute a workflow from a specific step forward. All downstream
+// dependents are reset and re-run. Upstream steps retain their results.
+// Optionally sends feedback to the step's agent before re-execution.
+
+export async function rerunFromStep(
+  runId: string,
+  stepId: string,
+  feedback?: string,
+): Promise<WorkflowRun> {
+  const run = runs.get(runId);
+  if (!run) throw new Error(`Run "${runId}" not found`);
+  if (run.status !== 'complete' && run.status !== 'failed') {
+    throw new Error(`Run "${runId}" is still ${run.status} — can only rerun a complete or failed run`);
+  }
+
+  const targetStep = run.steps.find(s => s.id === stepId);
+  if (!targetStep) throw new Error(`Step "${stepId}" not found in run "${runId}"`);
+  if (targetStep.status !== 'complete' && targetStep.status !== 'failed') {
+    throw new Error(`Step "${stepId}" is ${targetStep.status} — can only rerun a complete or failed step`);
+  }
+
+  const def = workflows.get(run.workflowId);
+  if (!def) throw new Error(`Workflow "${run.workflowId}" no longer exists`);
+
+  // ── Find all downstream steps (transitive dependents of stepId) ──
+  const resetSet = new Set<string>([stepId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const s of def.steps) {
+      if (resetSet.has(s.id)) continue;
+      if (s.needs?.some(dep => resetSet.has(dep))) {
+        resetSet.add(s.id);
+        changed = true;
+      }
+    }
+  }
+
+  // ── Send feedback to the step's agent if requested ──
+  if (feedback && targetStep.agentName) {
+    try {
+      const result = await sendToHeadless(targetStep.agentName, feedback, { timeoutMs: 120_000 });
+      targetStep.output = result.response || '';
+      targetStep.tokens = (targetStep.tokens || 0) + (result.outputTokens || 0);
+      targetStep.iterations.push({
+        attempt: targetStep.iterations.length + 1,
+        output: targetStep.output,
+        tokens: result.outputTokens,
+      });
+      // Update parsed outputs if applicable
+      const stepDef = def.steps.find(s => s.id === stepId);
+      if (stepDef?.outputs) {
+        targetStep.outputs = parseStepOutputs(targetStep.output);
+      }
+    } catch {
+      // Agent may be gone — that's fine, we'll create a fresh one during re-execution
+    }
+  }
+
+  // ── Reset target + downstream steps to pending ──
+  for (const step of run.steps) {
+    if (resetSet.has(step.id)) {
+      step.status = 'pending';
+      step.output = '';
+      step.error = undefined;
+      step.startedAt = undefined;
+      step.finishedAt = undefined;
+      step.iteration = 0;
+      step.iterations = [];
+      step.tokens = undefined;
+      step.retries = undefined;
+      step.outputs = undefined;
+    }
+  }
+
+  // ── Build stepResults from already-complete steps ──
+  const stepResults: Record<string, StepResult> = {};
+  for (const step of run.steps) {
+    if (step.status === 'complete' || step.status === 'skipped') {
+      stepResults[step.id] = step;
+    }
+  }
+
+  // ── Set run back to running ──
+  run.status = 'running';
+  run.error = undefined;
+  run.finishedAt = undefined;
+  broadcast(run);
+  pushEvent({ type: 'workflow', action: 'rerun', agent: run.workflowId, detail: `Rerun ${runId} from ${stepId}` });
+
+  // ── Re-execute from the target step forward ──
+  const runAgents: string[] = [];
+  const sharedSessions = new Map<string, string>();
+  const targetedAgents = new Set<string>();
+  const execCtx: StepExecContext = { run, def, inputs: run.inputs, stepResults, runAgents, sharedSessions, targetedAgents };
+
+  const layers = topologicalOrder(def.steps);
+
+  try {
+    for (const layer of layers) {
+      if (run.status === 'cancelled') break;
+
+      // Only run steps that are pending (i.e. in the reset set)
+      const pendingInLayer = layer.filter(s => resetSet.has(s.id));
+      if (pendingInLayer.length === 0) continue;
+
+      await Promise.all(pendingInLayer.map(async (stepDef) => {
+        if (run.status === 'cancelled') return;
+        await executeStep(stepDef, execCtx);
+      }));
+    }
+
+    run.status = 'complete';
+    run.finishedAt = new Date().toISOString();
+  } catch (e: any) {
+    run.status = 'failed';
+    run.error = e.message;
+    run.finishedAt = new Date().toISOString();
+    run.steps.forEach(s => { if (s.status === 'pending') s.status = 'skipped'; });
+  } finally {
+    for (const name of runAgents) {
+      if (targetedAgents.has(name)) continue;
+      try { await destroyHeadlessAgent(name); } catch {}
+    }
+  }
+
+  broadcast(run);
+  pushEvent({ type: 'workflow', action: run.status, agent: run.workflowId, detail: `Rerun ${runId} ${run.status}` });
   return run;
 }
 
