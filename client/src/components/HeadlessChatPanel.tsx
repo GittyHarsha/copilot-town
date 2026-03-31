@@ -326,8 +326,11 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
         } else if (msg.type === 'compacted') {
           setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '🗜️ Context compacted', timestamp: Date.now() }]);
         } else if (msg.type === 'mode_changed') {
-          if (msg.mode) setAgentMode(msg.mode);
-          setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: `Mode → ${msg.mode}`, timestamp: Date.now() }]);
+          const m = msg.mode ?? msg.data?.mode;
+          if (m) {
+            setAgentMode(m);
+            setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: `Mode → ${m}`, timestamp: Date.now() }]);
+          }
         } else if (msg.type === 'permission_request') {
           setPendingPermission({ id: msg.requestId, tool: msg.tool, args: msg.args });
         } else if (msg.type === 'error') {
