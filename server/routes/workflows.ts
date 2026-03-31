@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate, rerunFromStep,
+  pauseRun, resumeRun, chatWithStepAgent, rerunSingleStep, getAliveAgents, cleanupAgentsNow,
   getStageFiles, getStageFile, saveStageFile, deleteStageFile,
 } from '../services/workflows.js';
 import { readFile } from 'fs/promises';
@@ -137,6 +138,56 @@ router.post('/runs/:runId/steps/:stepId/rerun', async (req, res) => {
     const status = e.message.includes('not found') ? 404 : 400;
     res.status(status).json({ error: e.message });
   }
+});
+
+// Rerun a single step without cascading downstream
+router.post('/runs/:runId/steps/:stepId/rerun-single', async (req, res) => {
+  try {
+    const { feedback } = req.body || {};
+    const run = await rerunSingleStep(req.params.runId, req.params.stepId, feedback);
+    res.json({ success: true, run });
+  } catch (e: any) {
+    const status = e.message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: e.message });
+  }
+});
+
+// Chat with a step's agent (post-completion interaction)
+router.post('/runs/:runId/steps/:stepId/chat', async (req, res) => {
+  try {
+    const { message } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message required' });
+    const result = await chatWithStepAgent(req.params.runId, req.params.stepId, message);
+    res.json(result);
+  } catch (e: any) {
+    const status = e.message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: e.message });
+  }
+});
+
+// Pause a running workflow
+router.post('/runs/:runId/pause', (_req, res) => {
+  const ok = pauseRun(_req.params.runId);
+  if (!ok) return res.status(400).json({ error: 'Run not found or not running' });
+  res.json({ ok: true });
+});
+
+// Resume a paused workflow
+router.post('/runs/:runId/resume', (_req, res) => {
+  const ok = resumeRun(_req.params.runId);
+  if (!ok) return res.status(400).json({ error: 'Run not found or not paused' });
+  res.json({ ok: true });
+});
+
+// Get alive agents for a run
+router.get('/runs/:runId/agents', (req, res) => {
+  res.json({ agents: getAliveAgents(req.params.runId) });
+});
+
+// Force cleanup agents for a run
+router.delete('/runs/:runId/agents', async (req, res) => {
+  await cleanupAgentsNow(req.params.runId);
+  res.json({ ok: true });
 });
 
 // ─── Stage Files ────────────────────────────────────────────────────

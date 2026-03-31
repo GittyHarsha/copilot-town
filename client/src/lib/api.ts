@@ -365,6 +365,18 @@ export const api = {
     postJson<any>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/gate`, { approved, feedback }),
   rerunFromStep: (runId: string, stepId: string, feedback?: string) =>
     postJson<{ success: boolean; run: any }>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/rerun`, { feedback }),
+  rerunSingleStep: (runId: string, stepId: string, feedback?: string) =>
+    postJson<{ success: boolean; run: any }>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/rerun-single`, { feedback }),
+  chatWithStepAgent: (runId: string, stepId: string, message: string) =>
+    postJson<{ response: string; tokens?: number }>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/chat`, { message }),
+  pauseWorkflowRun: (runId: string) =>
+    postJson<{ ok: boolean }>(`/workflows/runs/${encodeURIComponent(runId)}/pause`),
+  resumeWorkflowRun: (runId: string) =>
+    postJson<{ ok: boolean }>(`/workflows/runs/${encodeURIComponent(runId)}/resume`),
+  getAliveAgents: (runId: string) =>
+    fetchJson<{ agents: string[] }>(`/workflows/runs/${encodeURIComponent(runId)}/agents`),
+  cleanupRunAgents: (runId: string) =>
+    deleteJson<{ ok: boolean }>(`/workflows/runs/${encodeURIComponent(runId)}/agents`),
 
   // Stage files
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),

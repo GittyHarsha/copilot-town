@@ -24,7 +24,7 @@ import { setBroadcaster, type ActivityEvent } from './services/events.js';
 import { startHealthMonitor, getHealthStatus } from './services/healthMonitor.js';
 import { getAllAgentTasks } from './routes/agents.js';
 import { listCopilotModels, listCopilotSessions, stopClient } from './services/copilot-sdk.js';
-import { loadWorkflows, addRunListener } from './services/workflows.js';
+import { loadWorkflows, loadRuns, addRunListener } from './services/workflows.js';
 
 const app = express();
 const PORT = 3848;
@@ -507,6 +507,7 @@ server.listen(PORT, () => {
   console.log('');
   startHealthMonitor();
   loadWorkflows().then(defs => console.log(`   📋 ${defs.length} workflow(s) loaded`));
+  loadRuns().then(() => console.log(`   📦 Workflow runs loaded from disk`));
 
   // Broadcast workflow run updates to WS clients
   addRunListener((run) => {

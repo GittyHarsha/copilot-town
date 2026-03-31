@@ -1,4 +1,5 @@
 import { readdir, readFile, writeFile, mkdir, unlink } from 'fs/promises';
+import { existsSync } from 'fs';
 import { join, basename, resolve, sep } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { createHeadlessAgent, sendToHeadless, destroyHeadlessAgent } from './headless.js';
@@ -60,6 +61,7 @@ export interface Iteration {
 }
 
 export type StepStatus = 'pending' | 'running' | 'reviewing' | 'waiting' | 'complete' | 'failed' | 'skipped';
+export type RunStatus = 'pending' | 'running' | 'waiting' | 'paused' | 'complete' | 'failed' | 'cancelled';
 
 export interface StepResult {
   id: string;
@@ -81,7 +83,7 @@ export interface WorkflowRun {
   runId: string;
   workflowId: string;
   workflowName: string;
-  status: 'pending' | 'running' | 'waiting' | 'complete' | 'failed' | 'cancelled';
+  status: RunStatus;
   inputs: Record<string, string>;
   steps: StepResult[];
   startedAt: string;
@@ -95,11 +97,20 @@ type RunListener = (run: WorkflowRun) => void;
 
 const WORKFLOWS_DIR = join(process.cwd(), 'data', 'workflows');
 const STAGES_DIR = join(process.cwd(), 'data', 'stages');
+const RUNS_DIR = join(process.cwd(), 'data', 'runs');
 const workflows = new Map<string, WorkflowDef>();
 const runs = new Map<string, WorkflowRun>();
 const runListeners = new Set<RunListener>();
 // Gate resolution: runId:stepId → resolve function
 const gateResolvers = new Map<string, (approved: boolean, feedback?: string) => void>();
+// Pause resolution: runId → resolve function (resumes the run)
+const pauseResolvers = new Map<string, () => void>();
+// Persistent agents: agents kept alive after workflow completion for post-run chat
+// Maps runId → Set of agent names still alive
+const persistentAgents = new Map<string, Set<string>>();
+// Cleanup timers for persistent agents (auto-destroy after TTL)
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const AGENT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 let runCounter = 0;
 
 // ─── Loading ─────────────────────────────────────────────────────────
@@ -132,6 +143,44 @@ export async function loadWorkflows(): Promise<WorkflowDef[]> {
     }
   } catch {}
   return Array.from(workflows.values());
+}
+
+// ─── Run Persistence ────────────────────────────────────────────────
+
+async function persistRun(run: WorkflowRun): Promise<void> {
+  try {
+    await mkdir(RUNS_DIR, { recursive: true });
+    await writeFile(
+      join(RUNS_DIR, `${run.runId}.json`),
+      JSON.stringify(run, null, 2),
+      'utf-8',
+    );
+  } catch (e: any) {
+    console.error(`Failed to persist run ${run.runId}:`, e.message);
+  }
+}
+
+export async function loadRuns(): Promise<void> {
+  try {
+    await mkdir(RUNS_DIR, { recursive: true });
+    const files = await readdir(RUNS_DIR);
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const raw = await readFile(join(RUNS_DIR, f), 'utf-8');
+        const run: WorkflowRun = JSON.parse(raw);
+        runs.set(run.runId, run);
+        // Restore runCounter to avoid ID collisions
+        const match = run.runId.match(/^run-(\d+)-/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n >= runCounter) runCounter = n;
+        }
+      } catch (e: any) {
+        console.error(`Failed to load run ${f}:`, e.message);
+      }
+    }
+  } catch {}
 }
 
 export function getWorkflows(): WorkflowDef[] {
@@ -692,6 +741,13 @@ export async function executeWorkflow(
       // Check for cancellation
       if (run.status === 'cancelled') break;
 
+      // Check for pause — wait until resumed
+      if (run.status as string === 'paused') {
+        await new Promise<void>(resolve => { pauseResolvers.set(runId, resolve); });
+        pauseResolvers.delete(runId);
+        if ((run.status as string) === 'cancelled') break;
+      }
+
       await Promise.all(layer.map(async (stepDef) => {
         if (run.status === 'cancelled') return;
         await executeStep(stepDef, execCtx);
@@ -706,10 +762,15 @@ export async function executeWorkflow(
     run.finishedAt = new Date().toISOString();
     run.steps.forEach(s => { if (s.status === 'pending') s.status = 'skipped'; });
   } finally {
-    // Clean up workflow-created agents (skip targeted external agents)
+    // Keep agents alive for post-run interaction — schedule TTL cleanup
+    const alive = new Set<string>();
     for (const name of runAgents) {
       if (targetedAgents.has(name)) continue;
-      try { await destroyHeadlessAgent(name); } catch {}
+      alive.add(name);
+    }
+    if (alive.size > 0) {
+      persistentAgents.set(runId, alive);
+      cleanupTimers.set(runId, setTimeout(() => cleanupRunAgents(runId), AGENT_TTL_MS));
     }
   }
 
@@ -875,7 +936,7 @@ export function getRun(runId: string): WorkflowRun | undefined {
 
 export async function cancelRun(runId: string): Promise<boolean> {
   const run = runs.get(runId);
-  if (!run || (run.status !== 'running' && run.status !== 'waiting')) return false;
+  if (!run || (run.status !== 'running' && run.status !== 'waiting' && run.status !== 'paused')) return false;
   run.status = 'cancelled';
   run.finishedAt = new Date().toISOString();
   run.steps.forEach(s => {
@@ -893,14 +954,204 @@ export async function cancelRun(runId: string): Promise<boolean> {
       gateResolvers.delete(key);
     }
   }
+  // Resume if paused (so the execution loop exits)
+  const pauseResolver = pauseResolvers.get(runId);
+  if (pauseResolver) { pauseResolver(); pauseResolvers.delete(runId); }
   broadcast(run);
   return true;
+}
+
+// ─── Pause / Resume ─────────────────────────────────────────────────
+
+export function pauseRun(runId: string): boolean {
+  const run = runs.get(runId);
+  if (!run || run.status !== 'running') return false;
+  run.status = 'paused';
+  broadcast(run);
+  pushEvent('workflow', `Run ${runId} paused`, 'info', run.workflowId);
+  return true;
+}
+
+export function resumeRun(runId: string): boolean {
+  const run = runs.get(runId);
+  if (!run || run.status !== 'paused') return false;
+  run.status = 'running';
+  broadcast(run);
+  const resolver = pauseResolvers.get(runId);
+  if (resolver) { resolver(); pauseResolvers.delete(runId); }
+  pushEvent('workflow', `Run ${runId} resumed`, 'info', run.workflowId);
+  return true;
+}
+
+// ─── Chat With Step Agent ───────────────────────────────────────────
+
+export async function chatWithStepAgent(
+  runId: string,
+  stepId: string,
+  message: string,
+): Promise<{ response: string; tokens?: number }> {
+  const run = runs.get(runId);
+  if (!run) throw new Error(`Run "${runId}" not found`);
+
+  const step = run.steps.find(s => s.id === stepId);
+  if (!step) throw new Error(`Step "${stepId}" not found in run "${runId}"`);
+  if (!step.agentName) throw new Error(`Step "${stepId}" has no agent`);
+
+  // Check if agent is still alive (in persistent set or in an active run)
+  const alive = persistentAgents.get(runId);
+  const isRunning = run.status === 'running' || run.status === 'paused' || run.status === 'waiting';
+  if (!isRunning && (!alive || !alive.has(step.agentName))) {
+    throw new Error(`Agent "${step.agentName}" is no longer alive — it was cleaned up after the TTL expired`);
+  }
+
+  // Reset TTL timer on interaction
+  if (alive) {
+    const timer = cleanupTimers.get(runId);
+    if (timer) clearTimeout(timer);
+    cleanupTimers.set(runId, setTimeout(() => cleanupRunAgents(runId), AGENT_TTL_MS));
+  }
+
+  const result = await sendToHeadless(step.agentName, message, { timeoutMs: 120_000 });
+  const response = result.response || '';
+
+  // Record in step iterations for audit trail
+  step.iterations.push({
+    attempt: step.iterations.length + 1,
+    output: response,
+    tokens: result.outputTokens,
+  });
+  step.tokens = (step.tokens || 0) + (result.outputTokens || 0);
+  broadcast(run);
+
+  return { response, tokens: result.outputTokens };
+}
+
+// ─── Rerun Single Step (No Cascade) ─────────────────────────────────
+
+export async function rerunSingleStep(
+  runId: string,
+  stepId: string,
+  feedback?: string,
+): Promise<WorkflowRun> {
+  const run = runs.get(runId);
+  if (!run) throw new Error(`Run "${runId}" not found`);
+  if (run.status !== 'complete' && run.status !== 'failed') {
+    throw new Error(`Run "${runId}" is still ${run.status} — can only rerun a complete or failed run`);
+  }
+
+  const targetStep = run.steps.find(s => s.id === stepId);
+  if (!targetStep) throw new Error(`Step "${stepId}" not found in run "${runId}"`);
+
+  const def = workflows.get(run.workflowId);
+  if (!def) throw new Error(`Workflow "${run.workflowId}" no longer exists`);
+  const stepDef = def.steps.find(s => s.id === stepId)!;
+
+  // Try to send feedback to existing agent first
+  if (feedback && targetStep.agentName) {
+    const alive = persistentAgents.get(runId);
+    if (alive?.has(targetStep.agentName)) {
+      try {
+        const result = await sendToHeadless(targetStep.agentName, feedback, { timeoutMs: 120_000 });
+        targetStep.output = result.response || '';
+        targetStep.tokens = (targetStep.tokens || 0) + (result.outputTokens || 0);
+        targetStep.iterations.push({
+          attempt: targetStep.iterations.length + 1,
+          output: targetStep.output,
+          tokens: result.outputTokens,
+        });
+        if (stepDef.outputs) targetStep.outputs = parseStepOutputs(targetStep.output);
+        broadcast(run);
+        return run;
+      } catch {
+        // Agent gone — fall through to fresh re-execution
+      }
+    }
+  }
+
+  // Reset just this step
+  targetStep.status = 'pending';
+  targetStep.output = '';
+  targetStep.error = undefined;
+  targetStep.startedAt = undefined;
+  targetStep.finishedAt = undefined;
+  targetStep.iteration = 0;
+  targetStep.iterations = [];
+  targetStep.tokens = undefined;
+  targetStep.retries = undefined;
+  targetStep.outputs = undefined;
+
+  // Build context from all other completed steps
+  const stepResults: Record<string, StepResult> = {};
+  for (const step of run.steps) {
+    if (step.id !== stepId && (step.status === 'complete' || step.status === 'skipped')) {
+      stepResults[step.id] = step;
+    }
+  }
+
+  run.status = 'running';
+  run.error = undefined;
+  run.finishedAt = undefined;
+  broadcast(run);
+
+  const runAgents: string[] = [];
+  const sharedSessions = new Map<string, string>();
+  const targetedAgents = new Set<string>();
+  const execCtx: StepExecContext = { run, def, inputs: run.inputs, stepResults, runAgents, sharedSessions, targetedAgents };
+
+  try {
+    await executeStep(stepDef, execCtx);
+    run.status = 'complete';
+    run.finishedAt = new Date().toISOString();
+  } catch (e: any) {
+    run.status = 'failed';
+    run.error = e.message;
+    run.finishedAt = new Date().toISOString();
+  } finally {
+    // Keep new agents alive too
+    const alive = persistentAgents.get(runId) || new Set<string>();
+    for (const name of runAgents) {
+      if (!targetedAgents.has(name)) alive.add(name);
+    }
+    if (alive.size > 0) {
+      persistentAgents.set(runId, alive);
+      const timer = cleanupTimers.get(runId);
+      if (timer) clearTimeout(timer);
+      cleanupTimers.set(runId, setTimeout(() => cleanupRunAgents(runId), AGENT_TTL_MS));
+    }
+  }
+
+  broadcast(run);
+  pushEvent('workflow', `Single rerun ${stepId} in ${runId}: ${run.status}`, 'info', run.workflowId);
+  return run;
+}
+
+// ─── Agent Lifecycle ────────────────────────────────────────────────
+
+async function cleanupRunAgents(runId: string) {
+  const alive = persistentAgents.get(runId);
+  if (!alive) return;
+  for (const name of alive) {
+    try { await destroyHeadlessAgent(name); } catch {}
+  }
+  persistentAgents.delete(runId);
+  cleanupTimers.delete(runId);
+}
+
+export function getAliveAgents(runId: string): string[] {
+  return Array.from(persistentAgents.get(runId) || []);
+}
+
+export async function cleanupAgentsNow(runId: string): Promise<void> {
+  const timer = cleanupTimers.get(runId);
+  if (timer) clearTimeout(timer);
+  await cleanupRunAgents(runId);
 }
 
 // ─── Real-time Updates ──────────────────────────────────────────────
 
 function broadcast(run: WorkflowRun) {
   for (const fn of runListeners) { try { fn(run); } catch {} }
+  persistRun(run).catch(() => {}); // fire-and-forget disk write
 }
 
 export function addRunListener(fn: RunListener) { runListeners.add(fn); }

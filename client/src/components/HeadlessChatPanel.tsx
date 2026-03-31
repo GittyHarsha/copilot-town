@@ -1,27 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { api } from '../lib/api';
 import { MarkdownContent, CopyButton, copyToClipboard, relativeTime, formatDuration } from './ChatMarkdown';
-
-/* ═══════════════════════════════════════════════════════════════════
-   Types
-   ═══════════════════════════════════════════════════════════════════ */
-
-interface ToolCall {
-  tool: string;
-  status: 'running' | 'done';
-  timestamp: number;
-  endTimestamp?: number;
-  input?: string;
-  output?: string;
-}
-
-interface UsageInfo {
-  model?: string;
-  inputTokens?: number;
-  outputTokens?: number;
-  cost?: number;
-  duration?: number;
-}
+import { ThinkingBlock, InlineToolCall, ToolTimeline, type ToolCall, type UsageInfo } from './ChatWidgets';
 
 interface ChatMessage {
   id: string;
@@ -53,109 +33,6 @@ const WS_BASE = `ws://${window.location.host}/ws/headless`;
 /* ═══════════════════════════════════════════════════════════════════
    Sub-components (panel-specific)
    ═══════════════════════════════════════════════════════════════════ */
-
-/** Thinking block — sleek animated accordion */
-function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string; isStreaming: boolean; hasResponse: boolean }) {
-  const [expanded, setExpanded] = useState(false);
-  const charCount = text.length;
-
-  return (
-    <div className="mb-2">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full text-left group/think"
-      >
-        <div className="flex items-center gap-1.5 text-[11px]">
-          <svg
-            className={`w-3 h-3 text-violet-400/60 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-          ><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
-          <span className="text-violet-400/70 group-hover/think:text-violet-400 transition-colors font-medium">
-            Reasoning
-          </span>
-          {isStreaming && !hasResponse && (
-            <span className="flex gap-0.5 ml-1">
-              <span className="w-1 h-1 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1 h-1 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1 h-1 rounded-full bg-violet-400/60 animate-bounce" style={{ animationDelay: '300ms' }} />
-            </span>
-          )}
-        </div>
-        <span className="text-[10px] text-fg-2/25 tabular-nums">
-          {charCount > 100 && `${(charCount / 1000).toFixed(1)}k chars`}
-        </span>
-      </button>
-      <div className={`overflow-hidden transition-all duration-300 ease-out ${expanded ? 'max-h-[400px] opacity-100 mt-1.5' : 'max-h-0 opacity-0'}`}>
-        <div className="text-[11px] text-fg-2/55 bg-violet-500/[0.03] rounded-lg p-3 border border-violet-500/[0.06] whitespace-pre-wrap font-mono leading-relaxed overflow-y-auto max-h-[380px]">
-          {text}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Inline expandable tool call card */
-function InlineToolCall({ tool }: { tool: ToolCall }) {
-  const [expanded, setExpanded] = useState(false);
-  const now = Date.now();
-  const elapsed = (tool.endTimestamp || now) - tool.timestamp;
-  const hasDetails = !!(tool.input || tool.output);
-
-  return (
-    <div
-      style={{
-        background: 'transparent',
-        border: '1px solid var(--color-border-1)',
-        borderRadius: 'var(--shape-md)',
-        padding: '4px 8px',
-        fontSize: '0.75rem',
-        fontFamily: 'monospace',
-        cursor: hasDetails ? 'pointer' : 'default',
-      }}
-      onClick={() => hasDetails && setExpanded(!expanded)}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ color: tool.status === 'done' ? '#22c55e' : '#3b82f6' }}>
-          {tool.status === 'done' ? '✓' : '⏳'}
-        </span>
-        <span style={{ color: '#60a5fa' }}>{tool.tool}</span>
-        <span style={{ marginLeft: 'auto', color: 'var(--color-fg-2)', fontSize: '0.7rem' }}>
-          {formatDuration(elapsed)}
-        </span>
-        {hasDetails && (
-          <span style={{ color: 'var(--color-fg-2)' }}>{expanded ? '▾' : '▸'}</span>
-        )}
-      </div>
-      {expanded && (
-        <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--color-border)' }}>
-          {tool.input && (
-            <div style={{ color: 'var(--color-fg-2)', marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 100, overflow: 'auto' }}>
-              <span style={{ color: 'var(--color-fg-1)' }}>→ </span>
-              {typeof tool.input === 'string' ? tool.input.slice(0, 300) : JSON.stringify(tool.input).slice(0, 300)}
-            </div>
-          )}
-          {tool.output && (
-            <div style={{ color: 'var(--color-fg-1)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 150, overflow: 'auto' }}>
-              <span style={{ color: '#22c55e' }}>← </span>
-              {typeof tool.output === 'string' ? tool.output.slice(0, 500) : JSON.stringify(tool.output).slice(0, 500)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Tool timeline — vertical stack of inline tool cards */
-function ToolTimeline({ tools }: { tools: ToolCall[] }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0' }}>
-      {tools.map((t, i) => (
-        <InlineToolCall key={`${t.tool}-${i}`} tool={t} />
-      ))}
-    </div>
-  );
-}
 
 /** Empty state with quick suggestions */
 function EmptyState({ onSend }: { onSend: (text: string) => void }) {
@@ -424,21 +301,6 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
 
   /* ── WebSocket ── */
   const wireWs = useCallback((ws: WebSocket) => {
-    ws.onopen = () => {
-      setConnected(true);
-      if (pendingSend.current) {
-        const prompt = pendingSend.current;
-        pendingSend.current = null;
-        const agentId = `a-${msgCounter.current++}`;
-        setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-        activeStreamId.current = agentId;
-        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-        setSending(true);
-        ws.send(JSON.stringify({ prompt }));
-      }
-    };
-    ws.onclose = () => setConnected(false);
-
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
@@ -546,21 +408,54 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
     };
   }, [agentName]);
 
-  // Auto-connect on mount
-  useEffect(() => {
+  // Auto-connect on mount with auto-reconnect
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reconnectDelay = useRef(1000);
+
+  const connectWs = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
     const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
     wsRef.current = ws;
     wireWs(ws);
-    return () => { ws.close(); wsRef.current = null; };
+    ws.onopen = () => {
+      setConnected(true);
+      reconnectDelay.current = 1000; // reset backoff on success
+      if (pendingSend.current) {
+        const prompt = pendingSend.current;
+        pendingSend.current = null;
+        const agentId = `a-${msgCounter.current++}`;
+        setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+        activeStreamId.current = agentId;
+        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+        setSending(true);
+        ws.send(JSON.stringify({ prompt }));
+      }
+    };
+    ws.onclose = () => {
+      setConnected(false);
+      wsRef.current = null;
+      // Auto-reconnect with exponential backoff (max 15s)
+      reconnectTimer.current = setTimeout(() => {
+        connectWs();
+      }, reconnectDelay.current);
+      reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 15000);
+    };
   }, [agentName, wireWs]);
+
+  useEffect(() => {
+    connectWs();
+    return () => {
+      clearTimeout(reconnectTimer.current);
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  }, [connectWs]);
 
   const ensureWs = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return wsRef.current;
-    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
-    wsRef.current = ws;
-    wireWs(ws);
-    return ws;
-  }, [agentName, wireWs]);
+    connectWs();
+    return wsRef.current!;
+  }, [connectWs]);
 
   /* ── Actions ── */
   const sendMessage = useCallback((action?: 'enqueue' | 'steer', textOverride?: string) => {

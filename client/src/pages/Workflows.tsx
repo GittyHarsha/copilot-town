@@ -53,12 +53,12 @@ const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-fg-2', running: 'bg-blue-500 animate-pulse', complete: 'bg-emerald-500',
   failed: 'bg-red-500', skipped: 'bg-fg-2', cancelled: 'bg-amber-500',
   reviewing: 'bg-purple-500 animate-pulse', waiting: 'bg-amber-500 animate-pulse',
-  rewinding: 'bg-amber-400 animate-pulse',
+  rewinding: 'bg-amber-400 animate-pulse', paused: 'bg-yellow-500',
 };
 
 const STATUS_ICONS: Record<string, string> = {
   pending: '○', running: '◉', complete: '✓', failed: '✗', skipped: '—', cancelled: '⊘',
-  reviewing: '🔍', waiting: '⏸', rewinding: '↩',
+  reviewing: '🔍', waiting: '⏸', rewinding: '↩', paused: '⏯',
 };
 
 function elapsed(start: string, end?: string): string {
@@ -78,6 +78,7 @@ const DURATION_BAR_COLORS: Record<string, string> = {
   pending: '#71717a', running: '#3b82f6', complete: '#10b981',
   failed: '#ef4444', skipped: '#71717a', cancelled: '#f59e0b',
   reviewing: '#a855f7', waiting: '#f59e0b', rewinding: '#fbbf24',
+  paused: '#eab308',
 };
 
 /* ─── 3. Main Workflows Component ───────────────────────────────── */
@@ -1001,6 +1002,7 @@ function RunMonitor({
   const progress = run.steps.length > 0 ? (completedSteps / run.steps.length) * 100 : 0;
   const [rewindStep, setRewindStep] = useState<string | null>(null);
   const runFinished = run.status === 'complete' || run.status === 'failed';
+  const isActive = run.status === 'running' || run.status === 'waiting' || run.status === 'paused';
 
   return (
     <div className="p-6 max-w-4xl">
@@ -1016,14 +1018,32 @@ function RunMonitor({
             {run.finishedAt && ` · ${elapsed(run.startedAt, run.finishedAt)}`}
           </div>
         </div>
-        {(run.status === 'running' || run.status === 'waiting') && (
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 bg-red-600/20 text-red-400 border border-red-600/30 rounded-lg text-sm hover:bg-red-600/30 transition-colors"
-          >
-            ■ Cancel
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {run.status === 'running' && (
+            <button
+              onClick={async () => { await api.pauseWorkflowRun(run.runId); }}
+              className="px-4 py-2 bg-yellow-600/20 text-yellow-300 border border-yellow-600/30 rounded-lg text-sm hover:bg-yellow-600/30 transition-colors"
+            >
+              ⏸ Pause
+            </button>
+          )}
+          {run.status === 'paused' && (
+            <button
+              onClick={async () => { await api.resumeWorkflowRun(run.runId); }}
+              className="px-4 py-2 bg-emerald-600/20 text-emerald-300 border border-emerald-600/30 rounded-lg text-sm hover:bg-emerald-600/30 transition-colors"
+            >
+              ▶ Resume
+            </button>
+          )}
+          {isActive && (
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 bg-red-600/20 text-red-400 border border-red-600/30 rounded-lg text-sm hover:bg-red-600/30 transition-colors"
+            >
+              ■ Cancel
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -1036,7 +1056,8 @@ function RunMonitor({
           <div
             className={`h-full transition-all duration-500 ${
               run.status === 'failed' ? 'bg-red-500' :
-              run.status === 'complete' ? 'bg-emerald-500' : 'bg-blue-500'
+              run.status === 'complete' ? 'bg-emerald-500' :
+              run.status === 'paused' ? 'bg-yellow-500' : 'bg-blue-500'
             }`}
             style={{ width: `${progress}%`, borderRadius: 'var(--shape-xl)' }}
           />
@@ -1267,8 +1288,8 @@ function RunMonitor({
                     <LiveStream agentName={step.agentName} isActive={isActive} />
                   )}
 
-                  {/* Connect & Steer button */}
-                  {isActive && step.agentName && (
+                  {/* Connect & Steer — available on active AND completed steps (agents persist post-run) */}
+                  {step.agentName && (isActive || step.status === 'complete' || step.status === 'failed') && (
                     <div className="mt-3">
                       {steerStep === step.id ? (
                         <SteerPanel
@@ -1280,7 +1301,7 @@ function RunMonitor({
                           onClick={() => setSteerStep(step.id)}
                           className="px-3 py-1.5 text-xs bg-bg-2 hover:bg-bg-3 border border-border-1 rounded-lg transition-colors"
                         >
-                          🔗 Connect
+                          🔗 {isActive ? 'Connect' : 'Chat with agent'}
                         </button>
                       )}
                     </div>
@@ -1543,12 +1564,17 @@ function RewindPanel({ runId, stepId, onClose }: { runId: string; stepId: string
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'cascade' | 'single'>('cascade');
 
   const handleRewind = async () => {
     setSubmitting(true);
     setError(null);
     try {
-      await api.rerunFromStep(runId, stepId, feedback || undefined);
+      if (mode === 'single') {
+        await api.rerunSingleStep(runId, stepId, feedback || undefined);
+      } else {
+        await api.rerunFromStep(runId, stepId, feedback || undefined);
+      }
       onClose();
     } catch (e: any) {
       setError(e.message || 'Rewind failed');
@@ -1563,8 +1589,31 @@ function RewindPanel({ runId, stepId, onClose }: { runId: string; stepId: string
         <span className="text-amber-400 text-base">↩</span>
         <span className="text-sm font-medium text-amber-300">Rewind from this step</span>
       </div>
+
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 mb-3 bg-bg-2 p-0.5 rounded-lg w-fit">
+        <button
+          onClick={() => setMode('cascade')}
+          className={`px-3 py-1 text-[11px] rounded-md transition-colors ${
+            mode === 'cascade' ? 'bg-amber-500/20 text-amber-300 font-medium' : 'text-fg-2 hover:text-fg-1'
+          }`}
+        >
+          ↩ Cascade (rerun downstream)
+        </button>
+        <button
+          onClick={() => setMode('single')}
+          className={`px-3 py-1 text-[11px] rounded-md transition-colors ${
+            mode === 'single' ? 'bg-blue-500/20 text-blue-300 font-medium' : 'text-fg-2 hover:text-fg-1'
+          }`}
+        >
+          ⟳ This step only
+        </button>
+      </div>
+
       <p className="text-xs text-fg-2 mb-3">
-        Re-run from this step. Optionally send corrections to the agent.
+        {mode === 'cascade'
+          ? 'Re-run from this step and all downstream steps. Optionally send corrections.'
+          : 'Re-run only this step. Downstream outputs stay unchanged.'}
       </p>
       <textarea
         value={feedback}
@@ -1586,7 +1635,7 @@ function RewindPanel({ runId, stepId, onClose }: { runId: string; stepId: string
             background: submitting ? 'var(--color-fg-2)' : 'var(--color-accent)',
           }}
         >
-          {submitting ? '⏳ Rewinding...' : '🔄 Rewind & Re-run'}
+          {submitting ? '⏳ Running...' : mode === 'cascade' ? '🔄 Rewind & Re-run' : '⟳ Rerun Step'}
         </button>
         <button
           onClick={onClose}

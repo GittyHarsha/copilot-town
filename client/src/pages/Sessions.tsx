@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, type CopilotSession, type AgentData } from '../lib/api';
+import { MarkdownContent } from '../components/ChatMarkdown';
+import { ThinkingBlock, ToolTimeline, type ToolCall, type UsageInfo } from '../components/ChatWidgets';
 
 interface Turn {
   turn_index: number;
@@ -21,6 +23,18 @@ interface SessionEntry {
 interface Props {
   agents: AgentData[];
   initialAgent?: string | null;
+}
+
+interface RichChatMessage {
+  id: string;
+  role: 'user' | 'agent' | 'system';
+  text: string;
+  thinking?: string;
+  tokens?: number;
+  tools?: ToolCall[];
+  usage?: UsageInfo;
+  intent?: string;
+  timestamp: number;
 }
 
 function relativeTime(dateStr: string): string {
@@ -71,6 +85,65 @@ function normalizeHeadlessMessages(msgs: any[]): Turn[] {
     normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
   }
   return normalized;
+}
+
+/** Convert headless SDK messages to RichChatMessage[] preserving thinking, tool calls, tokens */
+function normalizeToRichMessages(msgs: any[]): RichChatMessage[] {
+  const rich: RichChatMessage[] = [];
+  let counter = 0;
+  let pendingTools: ToolCall[] = [];
+
+  for (const m of msgs) {
+    if (m.type === 'user.message') {
+      pendingTools = [];
+      rich.push({
+        id: `rich-${counter++}`,
+        role: 'user',
+        text: m.prompt || m.content || m.text || '',
+        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+      });
+    } else if (m.type === 'tool.call') {
+      pendingTools.push({
+        tool: m.name || m.tool || 'unknown',
+        status: 'done' as const,
+        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+        endTimestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+        input: m.arguments || m.input ? (typeof (m.arguments || m.input) === 'string' ? (m.arguments || m.input) : JSON.stringify(m.arguments || m.input)) : undefined,
+      });
+    } else if (m.type === 'tool.result') {
+      // Attach result to the last pending tool
+      if (pendingTools.length > 0) {
+        const last = pendingTools[pendingTools.length - 1];
+        last.output = m.result || m.output || m.content || '';
+        if (typeof last.output !== 'string') last.output = JSON.stringify(last.output);
+        if (m.timestamp) last.endTimestamp = new Date(m.timestamp).getTime();
+      }
+    } else if (m.type === 'assistant.message') {
+      const msg: RichChatMessage = {
+        id: `rich-${counter++}`,
+        role: 'agent',
+        text: m.content || m.text || '',
+        thinking: m.reasoningText || m.thinking || undefined,
+        tokens: m.outputTokens || m.tokens || undefined,
+        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
+      };
+      if (pendingTools.length > 0) {
+        msg.tools = [...pendingTools];
+        pendingTools = [];
+      }
+      if (m.usage) {
+        msg.usage = {
+          model: m.usage.model,
+          inputTokens: m.usage.inputTokens,
+          outputTokens: m.usage.outputTokens,
+          cost: m.usage.cost,
+          duration: m.usage.duration,
+        };
+      }
+      rich.push(msg);
+    }
+  }
+  return rich;
 }
 
 // ── Register / rename button ──────────────────────────────────────
@@ -144,32 +217,109 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [turnPage, setTurnPage] = useState(0);
 
+  // Rich message state for headless agents
+  const [richMessages, setRichMessages] = useState<RichChatMessage[] | null>(null);
+  const [liveIntent, setLiveIntent] = useState<string | null>(null);
+
   // Chat input
   const [chatInput, setChatInput] = useState('');
   const [sending, setSending] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const streamBuf = useRef('');
+  const thinkBuf = useRef('');
+  const toolsBuf = useRef<ToolCall[]>([]);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const wsReconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const wsReconnectDelay = useRef(1000);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  // Connect WebSocket for headless agent chat
+  // Connect WebSocket for headless agent chat (with auto-reconnect)
   useEffect(() => {
     if (selectedType !== 'headless' || !selectedAgentName) {
       wsRef.current?.close();
       wsRef.current = null;
+      setWsConnected(false);
       return;
     }
-    const ws = new WebSocket(`ws://${window.location.host}/ws/headless?agent=${encodeURIComponent(selectedAgentName)}`);
-    wsRef.current = ws;
+
+    let cancelled = false;
+    const connect = () => {
+      if (cancelled) return;
+      const ws = new WebSocket(`ws://${window.location.host}/ws/headless?agent=${encodeURIComponent(selectedAgentName)}`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setWsConnected(true);
+        wsReconnectDelay.current = 1000;
+      };
 
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
           streamBuf.current += msg.content || msg.deltaContent || '';
+          // Update Turn[] for fallback
           setTurns(prev => {
             const last = prev[prev.length - 1];
             if (!last) return prev;
             return [...prev.slice(0, -1), { ...last, assistant_response: streamBuf.current }];
+          });
+          // Update rich messages
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, text: streamBuf.current, thinking: thinkBuf.current || undefined, tools: toolsBuf.current.length > 0 ? [...toolsBuf.current] : undefined }];
+          });
+        } else if (msg.type === 'reasoning_delta') {
+          thinkBuf.current += msg.content || msg.deltaContent || '';
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, thinking: thinkBuf.current }];
+          });
+        } else if (msg.type === 'tool_start') {
+          const tc: ToolCall = {
+            tool: msg.tool || msg.name || 'unknown',
+            status: 'running',
+            timestamp: Date.now(),
+            input: msg.input || msg.arguments ? (typeof (msg.input || msg.arguments) === 'string' ? (msg.input || msg.arguments) : JSON.stringify(msg.input || msg.arguments)) : undefined,
+          };
+          toolsBuf.current = [...toolsBuf.current, tc];
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, tools: [...toolsBuf.current] }];
+          });
+        } else if (msg.type === 'tool_complete') {
+          const toolName = msg.tool || msg.name || 'unknown';
+          toolsBuf.current = toolsBuf.current.map(t =>
+            t.tool === toolName && t.status === 'running'
+              ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output: msg.output || msg.result || undefined }
+              : t
+          );
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, tools: [...toolsBuf.current] }];
+          });
+        } else if (msg.type === 'intent') {
+          setLiveIntent(msg.intent || msg.content || null);
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, intent: msg.intent || msg.content || undefined }];
+          });
+        } else if (msg.type === 'usage') {
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, usage: { model: msg.model, inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, cost: msg.cost, duration: msg.duration }, tokens: msg.outputTokens || last.tokens }];
           });
         } else if (msg.type === 'response') {
           const final = msg.content || streamBuf.current;
@@ -178,7 +328,16 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             if (!last) return prev;
             return [...prev.slice(0, -1), { ...last, assistant_response: final }];
           });
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, text: final, thinking: thinkBuf.current || undefined, tools: toolsBuf.current.length > 0 ? [...toolsBuf.current] : undefined }];
+          });
           streamBuf.current = '';
+          thinkBuf.current = '';
+          toolsBuf.current = [];
+          setLiveIntent(null);
           setSending(false);
         } else if (msg.type === 'error') {
           setTurns(prev => {
@@ -186,14 +345,41 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             if (!last) return prev;
             return [...prev.slice(0, -1), { ...last, assistant_response: `⚠️ Error: ${msg.message}` }];
           });
+          setRichMessages(prev => {
+            if (!prev) return prev;
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'agent') return prev;
+            return [...prev.slice(0, -1), { ...last, text: `⚠️ Error: ${msg.message}` }];
+          });
           streamBuf.current = '';
+          thinkBuf.current = '';
+          toolsBuf.current = [];
+          setLiveIntent(null);
           setSending(false);
         }
       } catch {}
     };
 
-    ws.onclose = () => { wsRef.current = null; setSending(false); };
-    return () => { ws.close(); wsRef.current = null; };
+    ws.onclose = () => {
+        wsRef.current = null;
+        setWsConnected(false);
+        setSending(false);
+        // Auto-reconnect with exponential backoff (max 15s)
+        if (!cancelled) {
+          wsReconnectTimer.current = setTimeout(() => connect(), wsReconnectDelay.current);
+          wsReconnectDelay.current = Math.min(wsReconnectDelay.current * 1.5, 15000);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      cancelled = true;
+      clearTimeout(wsReconnectTimer.current);
+      wsRef.current?.close();
+      wsRef.current = null;
+      setWsConnected(false);
+    };
   }, [selectedType, selectedAgentName]);
 
   // Send message handler
@@ -212,15 +398,38 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     setSending(true);
 
     if (selectedType === 'headless') {
+      // Add rich messages for headless
+      const userMsg: RichChatMessage = {
+        id: `rich-live-${Date.now()}-u`,
+        role: 'user',
+        text,
+        timestamp: Date.now(),
+      };
+      const agentMsg: RichChatMessage = {
+        id: `rich-live-${Date.now()}-a`,
+        role: 'agent',
+        text: '',
+        timestamp: Date.now(),
+      };
+      setRichMessages(prev => prev ? [...prev, userMsg, agentMsg] : [userMsg, agentMsg]);
+
       // Send via WebSocket
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         streamBuf.current = '';
+        thinkBuf.current = '';
+        toolsBuf.current = [];
         wsRef.current.send(JSON.stringify({ prompt: text }));
       } else {
         setTurns(prev => {
           const last = prev[prev.length - 1];
           if (!last) return prev;
           return [...prev.slice(0, -1), { ...last, assistant_response: '⚠️ WebSocket not connected' }];
+        });
+        setRichMessages(prev => {
+          if (!prev) return prev;
+          const last = prev[prev.length - 1];
+          if (!last || last.role !== 'agent') return prev;
+          return [...prev.slice(0, -1), { ...last, text: '⚠️ WebSocket not connected' }];
         });
         setSending(false);
       }
@@ -289,7 +498,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
   // Load detail when selection changes
   useEffect(() => {
-    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); setLoadError(null); return; }
+    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); setLoadError(null); setRichMessages(null); setLiveIntent(null); return; }
     setTurnPage(0);
     setDetailLoading(true);
     setLoadError(null);
@@ -301,10 +510,13 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
           .then(data => {
             const msgs = data?.messages || [];
             const normalized = normalizeHeadlessMessages(msgs);
+            const rich = normalizeToRichMessages(msgs);
             if (normalized.length > 0) {
               setTurns(normalized);
+              setRichMessages(rich);
               setSessionMeta({ id: selectedId, summary: selectedAgentName + ' (headless)', branch: '', created_at: '', updated_at: '' });
             } else {
+              setRichMessages(null);
               // No live messages — try session-store.db as fallback
               return api.getConversation(selectedId).then(t => {
                 setTurns(t);
@@ -315,6 +527,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             }
           })
           .catch(() => {
+            setRichMessages(null);
             // Live agent failed — try session-store.db as fallback
             return api.getConversation(selectedId)
               .then(t => {
@@ -331,6 +544,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
           })
           .finally(() => setDetailLoading(false));
       } else {
+        setRichMessages(null);
         // Pane agent — use existing conversation endpoint
         Promise.all([
           api.getConversation(selectedId),
@@ -348,10 +562,10 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     }
   }, [selectedId, detailTab, selectedType, selectedAgentName]);
 
-  // Scroll to bottom on new turns
+  // Scroll to bottom on new turns or rich messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [turns]);
+  }, [turns, richMessages]);
 
   // Auto-advance to last page when streaming (headless agent)
   useEffect(() => {
@@ -619,7 +833,11 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                       {selectedType === 'headless' && (
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,211,238,0.06)', color: 'rgba(34,211,238,0.6)', fontWeight: 500, flexShrink: 0 }}>headless</span>
                       )}
-                      {isLive && (
+                      {selectedType === 'headless' ? (
+                        wsConnected
+                          ? <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,197,94,0.06)', color: 'rgba(34,197,94,0.7)', fontWeight: 500, flexShrink: 0 }}>connected</span>
+                          : <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(245,158,11,0.08)', color: 'rgba(245,158,11,0.7)', fontWeight: 500, flexShrink: 0 }}>reconnecting…</span>
+                      ) : isLive && (
                         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,197,94,0.06)', color: 'rgba(34,197,94,0.7)', fontWeight: 500, flexShrink: 0 }}>connected</span>
                       )}
                       {sessionMeta?.branch && (
@@ -717,7 +935,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                   }}
                 >
                   <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 24px 16px' }}>
-                    {paginatedTurns.length === 0 ? (
+                    {paginatedTurns.length === 0 && (!richMessages || richMessages.length === 0) ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 8 }}>
                         {loadError ? (
                           <>
@@ -738,6 +956,100 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                           </>
                         )}
                       </div>
+                    ) : richMessages ? (
+                      /* ── Rich message rendering (headless agents) ── */
+                      <>
+                        {richMessages.map((msg, i) => (
+                          <div key={msg.id}>
+                            {msg.role === 'user' && (
+                              <div style={{
+                                display: 'flex', gap: 14, padding: '20px 0',
+                                borderTop: i > 0 ? '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)' : 'none',
+                              }}>
+                                <div style={{
+                                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                                  background: 'var(--accent-dim)', color: 'var(--accent)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 14, fontWeight: 700, marginTop: 2,
+                                }}>Y</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-fg)' }}>You</span>
+                                    <span style={{ fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.5 }}>
+                                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  <pre style={{
+                                    fontSize: 14, lineHeight: 1.65, color: 'var(--color-fg)',
+                                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                                    fontFamily: 'inherit', margin: 0,
+                                  }}>
+                                    {truncateUser(msg.text)}
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+
+                            {msg.role === 'agent' && (
+                              <div style={{
+                                display: 'flex', gap: 14,
+                                borderTop: '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)',
+                                background: 'color-mix(in srgb, var(--color-bg-2) 30%, transparent)',
+                                margin: '0 -24px', padding: '20px 24px',
+                                borderRadius: 'var(--shape-md)',
+                              }}>
+                                <div style={{
+                                  width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                                  background: 'color-mix(in srgb, var(--color-fg-2) 12%, transparent)',
+                                  color: 'var(--color-fg-2)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 14, marginTop: 2,
+                                }}>✦</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-fg)' }}>
+                                      {selectedAgentName || 'Assistant'}
+                                    </span>
+                                    <span style={{ fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.5 }}>
+                                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                    {msg.intent && (
+                                      <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 'var(--shape-full)', background: 'rgba(99,102,241,0.08)', color: 'rgba(99,102,241,0.7)', fontWeight: 500 }}>
+                                        {msg.intent}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {msg.thinking && (
+                                    <ThinkingBlock text={msg.thinking} isStreaming={sending && i === richMessages.length - 1 && !msg.text} hasResponse={!!msg.text} />
+                                  )}
+                                  {msg.tools && msg.tools.length > 0 && (
+                                    <ToolTimeline tools={msg.tools} />
+                                  )}
+                                  {msg.text && (
+                                    <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-fg)' }} className="prose-chat">
+                                      <MarkdownContent content={msg.text} />
+                                    </div>
+                                  )}
+                                  {(msg.tokens || msg.usage) && (
+                                    <div style={{ display: 'flex', gap: 8, marginTop: 8, fontSize: 10, color: 'var(--color-fg-2)', opacity: 0.4 }}>
+                                      {msg.tokens && <span>{msg.tokens.toLocaleString()} tokens</span>}
+                                      {msg.usage?.model && <span>· {msg.usage.model}</span>}
+                                      {msg.usage?.cost != null && <span>· ${msg.usage.cost.toFixed(4)}</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {/* Live intent indicator */}
+                        {sending && liveIntent && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', fontSize: 12, color: 'var(--color-fg-2)', opacity: 0.6 }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', animation: 'pulse 1.4s ease-in-out infinite' }} />
+                            {liveIntent}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       paginatedTurns.map((turn, i) => (
                         <div key={turn.turn_index}>
