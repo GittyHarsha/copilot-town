@@ -385,22 +385,96 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const convLookup = new Map<string, SessionEntry>();
   for (const s of convSessions) convLookup.set(s.id, s);
 
+  // ── Split into live agents vs history ──
+  const liveAgentSessions = displaySessions.filter(s => {
+    const agent = agents.find(a => a.sessionId === s.id || a.name === s.agentName);
+    return agent && (agent.status === 'running' || agent.status === 'idle');
+  });
+  const historySessions = displaySessions.filter(s => {
+    const agent = agents.find(a => a.sessionId === s.id || a.name === s.agentName);
+    return !agent || agent.status === 'stopped';
+  });
+
+  // Search filter
+  const filterSession = (s: CopilotSession) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (s.agentName || '').toLowerCase().includes(q) ||
+      (s.summary || '').toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q);
+  };
+
+  const filteredLive = liveAgentSessions.filter(filterSession);
+  const filteredHistory = historySessions.filter(filterSession);
+
+  const renderSessionItem = (s: CopilotSession) => {
+    const conv = convLookup.get(s.id);
+    const displaySummary = s.summary || conv?.summary;
+    const agent = agents.find(a => a.sessionId === s.id || a.name === s.agentName);
+    const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
+    const isSelected = selectedId === s.id;
+
+    return (
+      <div key={s.id}
+        className="p-3 cursor-pointer relative group"
+        style={{
+          borderRadius: 'var(--shape-md)',
+          background: isSelected ? 'var(--accent-dim)' : 'transparent',
+          transition: 'all var(--duration-short) var(--ease-standard)',
+        }}
+        onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--color-bg-2)'; }}
+        onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+        onClick={() => {
+          setSelectedId(s.id);
+          setSelectedType(agent?.type === 'headless' || s.type === 'headless' ? 'headless' : 'pane');
+          setSelectedAgentName(agent?.name || s.agentName || null);
+          setDetailTab('chat');
+          setTurnPage(0);
+        }}>
+        {isSelected && (
+          <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 20, borderRadius: 'var(--shape-full)', background: 'var(--accent)' }} />
+        )}
+        <div className="flex items-center justify-between mb-0.5">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Status dot */}
+            {isLive && (
+              <span className="dot-live flex-shrink-0" style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: agent?.status === 'running' ? '#22c55e' : '#eab308',
+              }} />
+            )}
+            {!isLive && (
+              <span className="flex-shrink-0" style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: 'var(--color-fg-2)', opacity: 0.25,
+              }} />
+            )}
+            <span className="text-[13px] font-medium truncate" style={{ color: isSelected ? 'var(--accent)' : 'var(--color-fg)' }}>
+              {s.agentName || `session-${s.id.slice(0, 6)}`}
+            </span>
+            {s.type === 'headless' && (
+              <span style={{ fontSize: 10, color: 'var(--color-fg-2)', opacity: 0.5 }}>⚡</span>
+            )}
+          </div>
+          <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--color-fg-2)', opacity: 0.4 }}>
+            {relativeTime(s.lastModified)}
+          </span>
+        </div>
+        {displaySummary && displaySummary !== 'Start Conversation' && displaySummary.length > 3 && !/^[\-|─\s]+$/.test(displaySummary) && (
+          <p className="text-[11px] truncate ml-[19px]" style={{ color: 'var(--color-fg-2)', lineHeight: 1.4 }}>{displaySummary}</p>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="flex gap-4 h-[calc(100vh-5.5rem)]">
-      {/* Left panel — session list */}
-      <div className="w-[320px] shrink-0 flex flex-col border-r border-border pr-3">
+      {/* Left panel — agent/session list */}
+      <div className="w-[320px] shrink-0 flex flex-col pr-3" style={{ borderRight: '1px solid var(--color-border)' }}>
         <div className="mb-3">
           <input type="text" value={search} onChange={e => handleSearchChange(e.target.value)}
-            placeholder="Search sessions…"
+            placeholder="🔍 Search agents & sessions…"
             className="w-full input-m3 px-4 py-2.5 text-xs text-fg placeholder-fg-2/40 outline-none transition-colors" />
-        </div>
-
-        {/* Filter tabs */}
-        <div className="flex gap-1 mb-3">
-          <button className={`text-xs px-3 py-1.5 rounded-md transition-colors ${filter === 'all' ? 'bg-bg-2 text-fg font-medium' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-1'}`}
-            onClick={() => setFilter('all')}>All ({allSessions.length})</button>
-          <button className={`text-xs px-3 py-1.5 rounded-md transition-colors ${filter === 'unregistered' ? 'bg-bg-2 text-fg font-medium' : 'text-fg-2 hover:text-fg-1 hover:bg-bg-1'}`}
-            onClick={() => setFilter('unregistered')}>Unregistered ({orphaned.length})</button>
         </div>
 
         {loading ? (
@@ -409,104 +483,125 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
               <div key={i} className="card-surface p-3" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ width: '50%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
                 <div style={{ width: '80%', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
-                <div style={{ width: '35%', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
               </div>
             ))}
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-1">
-            {displaySessions.map(s => {
-              const conv = convLookup.get(s.id);
-              const displaySummary = s.summary || conv?.summary;
-              return (
-                <div key={s.id}
-                  className="p-3 cursor-pointer rounded-lg transition-all relative hover:bg-bg-1"
-                  style={{
-                    background: selectedId === s.id ? 'rgba(59,130,246,0.08)' : undefined,
-                  }}
-                  onClick={() => {
-                    setSelectedId(s.id);
-                    const matchAgent = agents.find(a => a.sessionId === s.id);
-                    setSelectedType(matchAgent?.type === 'headless' || s.type === 'headless' ? 'headless' : 'pane');
-                    setSelectedAgentName(matchAgent?.name || s.agentName || null);
-                    setDetailTab('chat');
-                    setTurnPage(0);
-                  }}>
-                  <div className="flex items-center justify-between mb-1">
-                    {selectedId === s.id && (
-                      <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 20, borderRadius: 99, background: '#3b82f6' }} />
-                    )}
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {s.agentName
-                        ? <span className="badge text-blue-400/80 bg-blue-400/8 font-medium truncate">{s.agentName}</span>
-                        : <span className="text-[10px] text-fg-2/30 px-1.5 py-0.5 rounded border border-dashed border-border">anon</span>}
-                      {s.type === 'headless' && (
-                        <span className="badge text-cyan-400/70 bg-cyan-400/8">⚡</span>
-                      )}
-                      {s.checkpoints.length > 0 && (
-                        <span className="text-[10px] text-fg-2/40 flex-shrink-0">{s.checkpoints.length} ckpt</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <RegisterButton session={s} onRegistered={loadSessions} />
-                      <span className="text-[10px] text-fg-2/30" title={new Date(s.lastModified).toLocaleString()}>
-                        {relativeTime(s.lastModified)}
-                      </span>
-                    </div>
-                  </div>
-                  {displaySummary && displaySummary !== 'Start Conversation' && displaySummary.length > 3 && !/^[\-|─\s]+$/.test(displaySummary) && (
-                    <p className="text-xs text-fg-1 truncate leading-snug">{displaySummary}</p>
-                  )}
+            {/* ── Live Agents section ── */}
+            {filteredLive.length > 0 && (
+              <div className="mb-2">
+                <div className="flex items-center gap-2 px-3 py-1.5 mb-1">
+                  <span className="dot-live" style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e' }} />
+                  <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-fg-2)' }}>
+                    Live · {filteredLive.length}
+                  </span>
                 </div>
-              );
-            })}
-            {displaySessions.length === 0 && (
+                {filteredLive.map(renderSessionItem)}
+              </div>
+            )}
+
+            {/* ── Divider ── */}
+            {filteredLive.length > 0 && filteredHistory.length > 0 && (
+              <div style={{ height: 1, background: 'var(--color-border)', margin: '8px 12px' }} />
+            )}
+
+            {/* ── History section ── */}
+            {filteredHistory.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between px-3 py-1.5 mb-1">
+                  <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-fg-2)' }}>
+                    History · {filteredHistory.length}
+                  </span>
+                  <div className="flex gap-1">
+                    <button className="text-[10px] px-2 py-0.5" style={{
+                      borderRadius: 'var(--shape-full)', border: 'none', cursor: 'pointer',
+                      background: filter === 'all' ? 'var(--accent-dim)' : 'transparent',
+                      color: filter === 'all' ? 'var(--accent)' : 'var(--color-fg-2)',
+                      transition: 'all var(--duration-short) var(--ease-standard)',
+                    }} onClick={() => setFilter('all')}>All</button>
+                    <button className="text-[10px] px-2 py-0.5" style={{
+                      borderRadius: 'var(--shape-full)', border: 'none', cursor: 'pointer',
+                      background: filter === 'unregistered' ? 'var(--accent-dim)' : 'transparent',
+                      color: filter === 'unregistered' ? 'var(--accent)' : 'var(--color-fg-2)',
+                      transition: 'all var(--duration-short) var(--ease-standard)',
+                    }} onClick={() => setFilter('unregistered')}>Unregistered</button>
+                  </div>
+                </div>
+                {filteredHistory.map(renderSessionItem)}
+              </div>
+            )}
+
+            {filteredLive.length === 0 && filteredHistory.length === 0 && (
               <div className="text-center py-12 text-fg-2 text-xs">
-                <span className="text-2xl block mb-3 opacity-30">↻</span>
-                <p>{filter === 'unregistered' ? 'No unregistered sessions' : 'No sessions found'}</p>
+                <span className="text-2xl block mb-3 opacity-20">↻</span>
+                <p>{search ? 'No matching sessions' : 'No sessions found'}</p>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Right panel — detail (chat or plan) */}
-      <div className="flex-1 flex flex-col min-w-0 card-surface overflow-hidden">
+      {/* Right panel — chat */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ background: 'var(--color-bg-1)', borderRadius: 'var(--shape-lg)', boxShadow: 'var(--elevation-1)' }}>
         {!selectedId ? (
-          <div className="flex-1 flex items-center justify-center text-fg-2 text-xs">
-            <div className="text-center">
-              <span className="text-3xl block mb-3 opacity-20">💬</span>
-              <p>Select a session to view conversation</p>
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center" style={{ maxWidth: 280 }}>
+              <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: 12, opacity: 0.15 }}>💬</span>
+              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-fg-1)', marginBottom: 4 }}>
+                {liveAgentSessions.length > 0 ? 'Select an agent to chat' : 'No live agents'}
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--color-fg-2)', lineHeight: 1.5 }}>
+                {liveAgentSessions.length > 0
+                  ? 'Pick a live agent from the sidebar to start a conversation'
+                  : 'Spawn agents from the Dashboard, then come here to chat'}
+              </p>
             </div>
           </div>
         ) : (
           <div key={selectedId} className="flex-1 flex flex-col min-h-0 animate-fade-in">
-            {/* Header with chat/plan toggle */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+            {/* Header with connection status */}
+            <div className="flex items-center justify-between px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
               <div className="min-w-0 flex-1 mr-3">
-                <button
-                  onClick={() => { setSelectedId(null); setSelectedType(null); setSelectedAgentName(null); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--color-fg-1)', cursor: 'pointer', fontSize: '0.75rem', padding: '0 0 0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                >
-                  ← Back to sessions
-                </button>
-                <h3 className="text-sm font-medium truncate">
+                <div className="flex items-center gap-2">
+                  {/* Live indicator */}
                   {(() => {
-                    const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
-                    const cleaned = (raw && raw.length > 3 && !/^[\-|─\s]+$/.test(raw) && raw !== 'Start Conversation') ? raw : '';
-                    return cleaned || selectedAgentName || selectedId.slice(0, 24);
+                    const agent = agents.find(a => a.sessionId === selectedId || a.name === selectedAgentName);
+                    const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
+                    return isLive ? (
+                      <span className="dot-live flex-shrink-0" style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: agent?.status === 'running' ? '#22c55e' : '#eab308',
+                      }} />
+                    ) : (
+                      <span className="flex-shrink-0" style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: 'var(--color-fg-2)', opacity: 0.2,
+                      }} />
+                    );
                   })()}
+                  <h3 className="text-sm font-medium truncate" style={{ letterSpacing: '-0.01em' }}>
+                    {selectedAgentName || (() => {
+                      const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
+                      const cleaned = (raw && raw.length > 3 && !/^[\-|─\s]+$/.test(raw) && raw !== 'Start Conversation') ? raw : '';
+                      return cleaned || selectedId.slice(0, 24);
+                    })()}
+                  </h3>
                   {selectedType === 'headless' && (
-                    <span className="badge text-cyan-400/70 bg-cyan-400/8 ml-2">⚡ headless</span>
+                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,211,238,0.08)', color: 'rgba(34,211,238,0.7)' }}>⚡ headless</span>
                   )}
-                </h3>
-                <div className="flex items-center gap-3 mt-1">
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 ml-[18px]">
                   {sessionMeta?.branch && (
-                    <span className="text-[11px] text-fg-2 font-mono">⎇ {sessionMeta.branch}</span>
+                    <span className="text-[11px] font-mono" style={{ color: 'var(--color-fg-2)' }}>⎇ {sessionMeta.branch}</span>
                   )}
-                  {sessionMeta?.created_at && (
-                    <span className="text-[11px] text-fg-2/60">{new Date(sessionMeta.created_at).toLocaleString()}</span>
-                  )}
+                  {(() => {
+                    const agent = agents.find(a => a.sessionId === selectedId || a.name === selectedAgentName);
+                    const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
+                    return isLive
+                      ? <span className="text-[10px]" style={{ color: '#22c55e', opacity: 0.7 }}>Connected</span>
+                      : <span className="text-[10px]" style={{ color: 'var(--color-fg-2)', opacity: 0.4 }}>History only</span>;
+                  })()}
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
