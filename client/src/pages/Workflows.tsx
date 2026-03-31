@@ -721,7 +721,8 @@ function WorkflowEditor(props:
         <textarea
           value={props.stageContent}
           onChange={e => props.onStageContentChange(e.target.value)}
-          className="w-full h-[calc(100vh-240px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+          className="w-full h-[calc(100vh-240px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
+          style={{ transition: 'border-color 0.2s, box-shadow 0.2s' }}
           placeholder="# Stage content (Markdown)..."
           spellCheck={false}
         />
@@ -785,7 +786,8 @@ function WorkflowEditor(props:
           <textarea
             value={props.yaml}
             onChange={e => props.onYamlChange(e.target.value)}
-            className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+            className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
+            style={{ transition: 'border-color 0.2s, box-shadow 0.2s' }}
             placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
             spellCheck={false}
           />
@@ -954,11 +956,12 @@ function RunMonitor({
               {/* Step header */}
               <button
                 onClick={() => setExpandedStep(expandedStep === step.id ? null : step.id)}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-bg-2/50 transition-colors"
+                className="w-full px-4 py-3 hover:bg-bg-2/50 transition-colors"
+                style={{ display: 'flex', alignItems: 'center', gap: 8 }}
               >
-                <span className="text-lg font-mono">{STATUS_ICONS[step.status] || '○'}</span>
+                <span className="text-lg font-mono" style={{ flexShrink: 0 }}>{STATUS_ICONS[step.status] || '○'}</span>
                 <div className="flex-1 min-w-0 text-left">
-                  <div className="text-sm font-medium flex items-center gap-2">
+                  <div className="text-sm font-medium" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="text-fg-2 mr-1">#{i + 1}</span>
                     {step.name || step.id}
                     {(step.iteration || 0) > 1 && (
@@ -971,19 +974,19 @@ function RunMonitor({
                     )}
                   </div>
                   {step.startedAt && (
-                    <div className="text-xs text-fg-2 flex items-center gap-2">
+                    <div className="text-xs text-fg-2" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       {step.startedAt && step.finishedAt && (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)', fontFamily: 'monospace' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)', fontFamily: 'monospace', minWidth: 64 }}>
                           ⏱ {formatDuration(new Date(step.finishedAt).getTime() - new Date(step.startedAt).getTime())}
                         </span>
                       )}
                       {step.startedAt && !step.finishedAt && step.status === 'running' && (
-                        <span style={{ fontSize: '0.75rem', color: '#3b82f6', fontFamily: 'monospace' }}>
+                        <span style={{ fontSize: '0.75rem', color: '#3b82f6', fontFamily: 'monospace', minWidth: 64 }}>
                           ⏱ {formatDuration(Date.now() - new Date(step.startedAt).getTime())}
                         </span>
                       )}
                       {step.tokens && (
-                        <span style={{ fontSize: '0.7rem', color: 'var(--color-fg-2)' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-fg-2)', fontFamily: 'monospace' }}>
                           {step.tokens.toLocaleString()} tok
                         </span>
                       )}
@@ -991,10 +994,10 @@ function RunMonitor({
                     </div>
                   )}
                 </div>
-                <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status] || 'bg-fg-2'} text-white`}>
+                <span className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[step.status] || 'bg-fg-2'} text-white`} style={{ flexShrink: 0 }}>
                   {step.status}
                 </span>
-                <span className="text-fg-2 text-sm">{expandedStep === step.id ? '▾' : '▸'}</span>
+                <span className="text-fg-2 text-sm" style={{ flexShrink: 0 }}>{expandedStep === step.id ? '▾' : '▸'}</span>
               </button>
 
               {/* Step detail */}

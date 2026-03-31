@@ -420,8 +420,11 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
               const displaySummary = s.summary || conv?.summary;
               return (
                 <div key={s.id}
-                  className={`card-surface p-3 cursor-pointer ${
-                    selectedId === s.id ? '!border-blue-500/40 bg-blue-500/5' : ''}`}
+                  className="card-surface p-3 cursor-pointer"
+                  style={{
+                    borderLeft: selectedId === s.id ? '3px solid #3b82f6' : '3px solid transparent',
+                    background: selectedId === s.id ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  }}
                   onClick={() => {
                     setSelectedId(s.id);
                     const matchAgent = agents.find(a => a.sessionId === s.id);
@@ -592,7 +595,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                     </button>
                   </div>
                 )}
-                <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
+                <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
                   {paginatedTurns.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-xs text-fg-2">
                       {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
@@ -608,7 +611,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                                   {truncateUser(turn.user_message)}
                                 </pre>
                               </div>
-                              <p className="text-[10px] text-fg-2/30 mt-1 text-right tabular-nums">
+                              <p className="text-[10px] text-fg-2/30 mt-1 mb-1 text-right tabular-nums">
                                 #{turn.turn_index} · {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : ''}
                               </p>
                             </div>
@@ -624,7 +627,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                                   </ReactMarkdown>
                                 </div>
                               </div>
-                              <p className="text-[10px] text-fg-2/30 mt-1 tabular-nums">
+                              <p className="text-[10px] text-fg-2/30 mt-1 mb-1 tabular-nums">
                                 assistant · #{turn.turn_index}{turn.timestamp ? ` · ${new Date(turn.timestamp).toLocaleTimeString()}` : ''}
                               </p>
                             </div>

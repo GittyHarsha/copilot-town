@@ -219,11 +219,11 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
                 className="flex items-center gap-2 w-full text-left mb-2 group"
                 onClick={() => toggleCollapse(group.name)}
               >
-                <span className="text-[10px] text-fg-2/50 transition-transform duration-200"
+                <span className="text-[10px] text-fg-2/80 transition-transform duration-200"
                   style={{ transform: collapsed.has(group.name) ? undefined : 'rotate(90deg)' }}>▸</span>
-                <span className="text-[11px] font-semibold text-fg-2 uppercase tracking-wider">{group.name}</span>
-                <span className="text-[10px] text-fg-2/40 tabular-nums">{group.agents.length}</span>
-                <span className="flex-1 border-b border-border/30" />
+                <span className="text-[11px] font-semibold text-fg-1 uppercase tracking-wider">{group.name}</span>
+                <span className="text-[10px] text-fg-2/70 tabular-nums">{group.agents.length}</span>
+                <span className="flex-1 border-b border-border/60" />
               </button>
             )}
             {!collapsed.has(group.name) && (
@@ -291,8 +291,9 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
       {/* Floating batch action bar */}
       {selectedAgents.size > 0 && (
         <div style={{
-          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
           background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
+          borderTop: '1px solid rgba(59,130,246,0.3)',
           borderRadius: 12, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12,
           boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 50,
         }}>

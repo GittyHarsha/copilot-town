@@ -332,7 +332,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
             ref={feedRef}
             onScroll={handleScroll}
             style={{
-              flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6,
+              flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10,
               paddingRight: 4, position: 'relative',
             }}
           >
@@ -402,7 +402,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
               </div>
 
               {/* Agent health cards */}
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-fg)', marginTop: 4 }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--color-fg-2)', marginTop: 16, marginBottom: 10, textTransform: 'uppercase' as const, letterSpacing: '0.05em' }}>
                 Agent Health
               </div>
               {healthAgents.length === 0 ? (
@@ -504,7 +504,7 @@ function EventCard({ event, onNavigate }: { event: ActivityEvent; onNavigate?: (
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px',
+      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px',
       background: 'var(--color-bg-1)', border: '1px solid var(--color-border)',
       borderRadius: 8, borderLeft: `3px solid ${sevColor}`, transition: 'background 0.15s',
     }}>

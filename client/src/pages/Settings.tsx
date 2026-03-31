@@ -44,7 +44,8 @@ function InlineEdit({ value, onSave, placeholder, multiline }: {
     return (
       <textarea
         ref={ref as React.RefObject<HTMLTextAreaElement>}
-        className="bg-bg-2 border border-border rounded px-2 py-1 text-xs text-fg w-full resize-y min-h-[48px]"
+        className="bg-bg-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-fg w-full resize-y min-h-[48px]"
+        style={{ transition: 'border-color 0.2s' }}
         value={draft}
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
@@ -57,7 +58,8 @@ function InlineEdit({ value, onSave, placeholder, multiline }: {
   return (
     <input
       ref={ref as React.RefObject<HTMLInputElement>}
-      className="bg-bg-2 border border-border rounded px-2 py-0.5 text-xs text-fg w-full max-w-[200px]"
+      className="bg-bg-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-fg w-full max-w-[200px]"
+      style={{ transition: 'border-color 0.2s' }}
       value={draft}
       onChange={e => setDraft(e.target.value)}
       onBlur={commit}
@@ -108,13 +110,14 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
 
   return (
     <section className="space-y-3">
-      <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">General</h2>
+      <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ fontSize: '0.9rem', fontWeight: 600, borderBottom: '1px solid var(--color-border)', paddingBottom: 8, marginBottom: 16 }}>General</h2>
       {saving && <span className="text-[10px] text-blue animate-pulse">Saving…</span>}
       <div className="grid grid-cols-[180px_1fr] gap-y-2.5 gap-x-4 items-center text-xs">
         <label className="text-fg-2">Hub Port</label>
         <input
           type="number"
-          className="bg-bg-2 border border-border rounded px-2 py-1 text-xs text-fg w-24"
+          className="bg-bg-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-fg w-24"
+          style={{ transition: 'border-color 0.2s' }}
           value={config.port}
           onChange={e => {
             const v = parseInt(e.target.value) || 3848;
@@ -126,7 +129,8 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
         <label className="text-fg-2">Default psmux session</label>
         <input
           type="text"
-          className="bg-bg-2 border border-border rounded px-2 py-1 text-xs text-fg w-40"
+          className="bg-bg-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-fg w-40"
+          style={{ transition: 'border-color 0.2s' }}
           value={config.defaultSession}
           onChange={e => {
             setConfig({ ...config, defaultSession: e.target.value });
@@ -137,7 +141,8 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
         <label className="text-fg-2">Max panes per window</label>
         <input
           type="number"
-          className="bg-bg-2 border border-border rounded px-2 py-1 text-xs text-fg w-24"
+          className="bg-bg-2 border border-border rounded-lg px-2.5 py-1.5 text-xs text-fg w-24"
+          style={{ transition: 'border-color 0.2s' }}
           min={1}
           max={16}
           value={config.maxPanesPerWindow}
@@ -150,7 +155,7 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
 
         <label className="text-fg-2">Auto-open browser on start</label>
         <button
-          className={`w-10 h-5 rounded-full relative transition-colors ${config.autoOpenBrowser ? 'bg-blue' : 'bg-bg-2 border border-border'}`}
+          className={`w-[40px] h-[22px] rounded-full relative transition-colors ${config.autoOpenBrowser ? 'bg-blue' : 'bg-bg-2 border border-border'}`}
           onClick={() => {
             const next = !config.autoOpenBrowser;
             setConfig({ ...config, autoOpenBrowser: next });
@@ -159,7 +164,7 @@ function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: 
           aria-pressed={config.autoOpenBrowser}
           disabled={saving}
         >
-          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${config.autoOpenBrowser ? 'translate-x-5' : 'translate-x-0.5'}`} />
+          <span className={`absolute top-0.5 w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${config.autoOpenBrowser ? 'translate-x-5' : 'translate-x-0.5'}`} />
         </button>
       </div>
     </section>
@@ -260,7 +265,7 @@ function SessionsSection() {
     );
     return (
       <section className="space-y-3">
-        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">Sessions</h2>
+        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ fontSize: '0.9rem', fontWeight: 600, borderBottom: '1px solid var(--color-border)', paddingBottom: 8, marginBottom: 16 }}>Sessions</h2>
         <div className="border border-border rounded overflow-hidden">
           <table className="w-full text-xs">
             <thead>
@@ -292,7 +297,7 @@ function SessionsSection() {
   return (
     <section className="space-y-3">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ flex: 1, margin: 0 }}>Sessions</h2>
+        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ flex: 1, margin: 0, fontSize: '0.9rem', fontWeight: 600, borderBottom: '1px solid var(--color-border)', paddingBottom: 8, marginBottom: 16 }}>Sessions</h2>
         <button className="btn" onClick={handleExport} title="Export agent configs as JSON">
           📥 Export
         </button>
@@ -405,7 +410,7 @@ function SessionsSection() {
 function AboutSection() {
   return (
     <section className="space-y-3">
-      <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">About</h2>
+      <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ fontSize: '0.9rem', fontWeight: 600, borderBottom: '1px solid var(--color-border)', paddingBottom: 8, marginBottom: 16 }}>About</h2>
       <div className="text-xs space-y-1.5 text-fg-2">
         <p><span className="text-fg-1 font-medium">Copilot Town</span> — Copilot CLI Plugin</p>
         <p>Version <span className="font-mono text-fg-1">0.1.0</span></p>
