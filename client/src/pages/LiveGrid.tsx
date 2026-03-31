@@ -361,6 +361,9 @@ export default function LiveGrid() {
   const [cols, setCols] = useState(() => {
     try { return parseInt(localStorage.getItem('copilot-town:grid-cols') || '2') || 2; } catch { return 2; }
   });
+  const [rowHeight, setRowHeight] = useState(() => {
+    try { return parseInt(localStorage.getItem('copilot-town:grid-row-h') || '340') || 340; } catch { return 340; }
+  });
   const [filter, setFilter] = useState<'active' | 'all'>('all');
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
@@ -376,6 +379,11 @@ export default function LiveGrid() {
   const setColsPersist = (n: number) => {
     setCols(n);
     try { localStorage.setItem('copilot-town:grid-cols', String(n)); } catch {}
+  };
+
+  const setRowHeightPersist = (h: number) => {
+    setRowHeight(h);
+    try { localStorage.setItem('copilot-town:grid-row-h', String(h)); } catch {}
   };
 
   const filtered = filter === 'active'
@@ -428,6 +436,22 @@ export default function LiveGrid() {
           <span className="text-[9px] text-fg-2/50 ml-1">cols</span>
         </div>
 
+        {/* Row height slider */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] text-fg-2/50">↕</span>
+          <input
+            type="range"
+            min={180}
+            max={700}
+            step={20}
+            value={rowHeight}
+            onChange={e => setRowHeightPersist(Number(e.target.value))}
+            className="w-16 h-1 accent-fg-2 cursor-pointer"
+            title={`Row height: ${rowHeight}px`}
+          />
+          <span className="text-[9px] text-fg-2/50 tabular-nums w-7">{rowHeight}</span>
+        </div>
+
         <button onClick={load} className="btn text-[10px]">↻</button>
       </div>
 
@@ -438,7 +462,7 @@ export default function LiveGrid() {
           style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${effectiveCols}, minmax(0, 1fr))`,
-            gridAutoRows: 'minmax(200px, 1fr)',
+            gridAutoRows: `${rowHeight}px`,
             gap: '10px',
             alignContent: 'start',
           }}
