@@ -106,9 +106,9 @@ export default function PlanViewer() {
   }, [details, allExpanded]);
 
   return (
-    <div className="flex h-[calc(100vh-60px)] overflow-hidden">
+    <div className="flex flex-col md:flex-row h-auto md:h-[calc(100vh-60px)] overflow-hidden">
       {/* ── Left Panel: Session List ── */}
-      <div className="w-[300px] min-w-[300px] bg-bg-1 border-r border-border flex flex-col">
+      <div className="w-full md:w-[300px] md:min-w-[300px] bg-bg-1 border-b md:border-b-0 md:border-r border-border flex flex-col max-h-[40vh] md:max-h-none">
         {/* Header */}
         <div className="px-3 py-3 border-b border-border space-y-2">
           <div className="flex items-center justify-between">

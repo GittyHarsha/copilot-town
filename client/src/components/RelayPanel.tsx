@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, type AgentData } from '../lib/api';
+import { MiniMarkdownContent } from './ChatMarkdown';
 
 interface Relay {
   from: string;
@@ -123,7 +124,7 @@ export default function RelayPanel({ agents }: Props) {
                 <span className="text-xs text-fg-2/40 mx-1">→</span>
                 <span className="text-xs font-mono text-blue-400/80">{r.to}</span>
               </div>
-              <p className="flex-1 text-xs text-fg-1 truncate min-w-0">{r.message}</p>
+              <div className="flex-1 text-xs text-fg-1 min-w-0 overflow-hidden"><MiniMarkdownContent content={r.message} /></div>
               <span className="text-[10px] text-fg-2/30 flex-shrink-0 whitespace-nowrap">{formatTime(r.timestamp)}</span>
             </div>
           ))

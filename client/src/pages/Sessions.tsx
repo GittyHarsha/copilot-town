@@ -91,7 +91,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   // Conversation data (from /conversations endpoint — has chat history)
   const [convSessions, setConvSessions] = useState<SessionEntry[]>([]);
   const [search, setSearch] = useState('');
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Selection & detail panel
   const [selectedId, setSelectedId] = useState<string | null>(null);

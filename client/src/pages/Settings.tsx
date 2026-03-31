@@ -72,7 +72,7 @@ function InlineEdit({ value, onSave, placeholder, multiline }: {
 // ── General section ───────────────────────────────────────────────
 function GeneralSection({ config, setConfig }: { config: Config; setConfig: (c: Config) => void }) {
   const [saving, setSaving] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const latestConfig = useRef(config);
   latestConfig.current = config;
 

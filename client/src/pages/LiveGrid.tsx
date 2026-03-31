@@ -53,9 +53,16 @@ const MiniChat = memo(function MiniChat({
   const toolsRef = useRef<ToolInfo[]>([]);
 
   const isAlive = agent.status === 'running' || agent.status === 'idle';
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const wireWs = useCallback((ws: WebSocket) => {
     ws.onopen = () => {
+      if (!mountedRef.current) return;
       setState(s => ({ ...s, connected: true }));
       if (pendingSend.current) {
         ws.send(JSON.stringify({ prompt: pendingSend.current }));
@@ -63,10 +70,12 @@ const MiniChat = memo(function MiniChat({
       }
     };
     ws.onclose = () => {
+      if (!mountedRef.current) return;
       setState(s => ({ ...s, connected: false }));
       wsRef.current = null;
     };
     ws.onmessage = (e) => {
+      if (!mountedRef.current) return;
       try {
         const msg = JSON.parse(e.data);
         switch (msg.type) {
@@ -392,7 +401,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
   const effectiveCols = Math.min(cols, Math.max(filtered.length, 1));
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
+    <div className="flex flex-col flex-1 min-h-0" style={{ height: 'calc(100vh - 120px)' }}>
       {/* ── Header ── */}
       <div className="flex items-center gap-3 mb-3 flex-shrink-0">
         <h2 className="text-sm font-semibold flex items-center gap-2">

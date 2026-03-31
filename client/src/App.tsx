@@ -130,6 +130,26 @@ function AppInner() {
 
     // Agent actions
     for (const agent of agents) {
+      // Searchable agent finder
+      cmds.push({
+        id: `find-${agent.id}`,
+        label: `${agent.name}`,
+        icon: agent.type === 'headless' ? '⚡' : '▦',
+        category: 'Agents',
+        action: () => { setPage('dashboard'); },
+      });
+
+      // Chat shortcut for headless agents
+      if (agent.type === 'headless') {
+        cmds.push({
+          id: `chat-${agent.id}`,
+          label: `Chat with ${agent.name}`,
+          icon: '💬',
+          category: 'Chat',
+          action: () => openChat(agent.name),
+        });
+      }
+
       const isActive = agent.status === 'running' || agent.status === 'idle';
       if (isActive) {
         cmds.push({ id: `stop-${agent.id}`, label: `Stop ${agent.name}`, icon: '⏹', category: 'Agents', action: () => { api.stopAgent(agent.id).then(refreshAgents); } });
@@ -152,12 +172,46 @@ function AppInner() {
     // Relay
     cmds.push({ id: 'relay', label: 'Relay message between agents', icon: '↗', category: 'Agents', action: () => setPage('dashboard') });
 
+    // Quick navigation with context
+    cmds.push({
+      id: 'view-tools',
+      label: 'View MCP Tools Registry',
+      icon: '🔧',
+      category: 'Navigation',
+      action: () => setPage('tools'),
+    });
+
+    cmds.push({
+      id: 'view-plans',
+      label: 'View Session Plans',
+      icon: '📋',
+      category: 'Navigation',
+      action: () => setPage('plans'),
+    });
+
+    cmds.push({
+      id: 'new-agent',
+      label: 'Create new agent',
+      icon: '➕',
+      category: 'Actions',
+      action: () => { setPage('dashboard'); },
+    });
+
     // UI
     cmds.push({ id: 'refresh', label: 'Refresh agents', shortcut: 'R', category: 'UI', action: refreshAgents });
     cmds.push({ id: 'theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`, category: 'UI', action: toggleTheme });
 
+    // Help
+    cmds.push({
+      id: 'shortcuts',
+      label: 'Keyboard shortcuts: 1-9 pages, R refresh, ⌘K palette',
+      icon: '⌨️',
+      category: 'Help',
+      action: () => {},
+    });
+
     return cmds;
-  }, [agents, theme, toggleTheme, refreshAgents]);
+  }, [agents, theme, toggleTheme, refreshAgents, openChat]);
 
   const handlePaletteExecute = useCallback((cmd: Command) => {
     setPaletteOpen(false);

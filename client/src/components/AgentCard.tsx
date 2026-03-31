@@ -27,7 +27,7 @@ const GLOW: Record<string, string> = {
 
 function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | 'restarting' | null>(null);
   const [resumeError, setResumeError] = useState('');
   const [showLaunchConfig, setShowLaunchConfig] = useState<'resume' | 'start' | null>(null);
   const [showChat, setShowChat] = useState(false);
@@ -196,7 +196,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
               <div className="flex items-center gap-2 text-xs text-fg-2">
                 <span className="spinner" />
                 <span>{pendingAction === 'stopping' ? 'Stopping…' : pendingAction === 'starting' ? 'Starting…'
-                  : pendingAction === 'movingToPane' ? 'Moving to pane…' : 'Moving to headless…'}</span>
+                  : pendingAction === 'movingToPane' ? 'Moving to pane…' : pendingAction === 'restarting' ? 'Restarting…' : 'Moving to headless…'}</span>
               </div>
             ) : isAlive ? (
               <>
@@ -235,6 +235,23 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                           style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); onViewHistory(agent.id); }}>📜 History</button>
                       )}
+                      <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                        style={{ width: 'calc(100% - 4px)' }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setShowMoreMenu(false);
+                          setPendingAction('restarting');
+                          try {
+                            await api.stopAgent(agent.id);
+                            await new Promise(r => setTimeout(r, 2000));
+                            await api.resumeAgent(agent.id);
+                            setTimeout(() => onRefresh?.(), 1500);
+                          } catch (e: any) {
+                            setError(e?.message || 'Restart failed');
+                            setTimeout(() => setError(null), 3000);
+                          }
+                          setPendingAction(null);
+                        }}>🔄 Restart</button>
                       <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                         style={{ width: 'calc(100% - 4px)' }}
                         onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setShowEdit(true); }}>✏️ Edit</button>
