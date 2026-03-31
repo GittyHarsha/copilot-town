@@ -29,7 +29,6 @@ const GLOW: Record<string, string> = {
 
 function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin, selected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | 'restarting' | null>(null);
   const [resumeError, setResumeError] = useState('');
   const [showLaunchConfig, setShowLaunchConfig] = useState<'resume' | 'start' | null>(null);
@@ -159,19 +158,6 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
         {/* Name + badges */}
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <span className="text-[13px] font-semibold truncate tracking-tight">{agent.name}</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(agent.name);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, color: 'var(--color-fg-2)', fontSize: '0.75rem' }}
-            aria-label="Copy agent name"
-            title="Copy agent name"
-          >
-            {copied ? '✓' : '📋'}
-          </button>
           {isHeadless && (
             <span className="badge text-cyan-400/80 bg-cyan-400/[0.08] border border-cyan-400/10">⚡ headless</span>
           )}

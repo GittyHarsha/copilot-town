@@ -218,6 +218,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
   });
   /* ── Streaming elapsed ── */
   const [elapsedDisplay, setElapsedDisplay] = useState('');
+  /* ── Scroll-to-bottom visibility ── */
+  const [isScrolledUp, setIsScrolledUp] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -239,6 +241,17 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
+
+  /* ── Scroll-to-bottom button listener ── */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      setIsScrolledUp(el.scrollHeight - el.scrollTop - el.clientHeight > 150);
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   /* ── Auto-focus input ── */
   useEffect(() => {
@@ -831,11 +844,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                             }`}>{m.action === 'enqueue' ? '📋 queued' : '↯ steer'}</span>
                           </div>
                         )}
-                        <div className="rounded-2xl rounded-br-sm px-4 py-2.5 bg-blue-500/[0.07] text-fg text-[13px] leading-relaxed border border-blue-500/[0.1] whitespace-pre-wrap break-words">
+                        <div className="rounded-2xl rounded-br-sm px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words">
                           {renderHighlightedText(m.text)}
                         </div>
                         {/* Hover actions + timestamp */}
-                        <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-50'}`}>
                           <span className="text-[10px] text-fg-2/25 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
                           <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
@@ -849,6 +862,12 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                 return (
                   <div key={m.id} id={`msg-${m.id}`} className={`animate-fade-in transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-3' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
                     onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
+                    <div style={{
+                      background: 'var(--color-bg-2)',
+                      borderRadius: 12,
+                      padding: '12px 14px',
+                      border: '1px solid var(--color-border)',
+                    }}>
                     {/* Thinking */}
                     {m.thinking && (
                       <ThinkingBlock text={m.thinking} isStreaming={!!m.streaming} hasResponse={!!m.text} />
@@ -897,20 +916,34 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                         {m.tokens && <span className="text-fg-2/20 tabular-nums">{m.tokens.toLocaleString()} out</span>}
                         {m.usage?.inputTokens && <span className="text-fg-2/20 tabular-nums">{m.usage.inputTokens.toLocaleString()} in</span>}
                         {m.usage?.duration && <span className="text-fg-2/20 tabular-nums">{(m.usage.duration / 1000).toFixed(1)}s</span>}
-                        <div className={`ml-auto flex items-center gap-1.5 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+                        <div className={`ml-auto flex items-center gap-1.5 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-50'}`}>
                           <span className="text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
                           <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
                         </div>
                       </div>
                     )}
-
-                    {/* Separator between agent messages */}
-                    <div className="border-b border-border/20 mt-4" />
+                    </div>
                   </div>
                 );
               })}
             </div>
+          )}
+          {isScrolledUp && (
+            <button
+              onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+              style={{
+                position: 'sticky', bottom: 8, alignSelf: 'center',
+                padding: '6px 16px', borderRadius: 20,
+                background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
+                color: 'var(--color-fg-1)', fontSize: '0.75rem', cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}
+              aria-label="Scroll to latest message"
+            >
+              ↓ Latest
+            </button>
           )}
         </div>
 
@@ -989,9 +1022,16 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
             <span className="text-[10px] text-fg-2/20">
               {sending ? '⏎ steer · ⌃Q queue · click ■ abort' : '⏎ send · ⇧⏎ newline · ⌃Q queue · ⌃F search · ↑ history'}
             </span>
-            {liveUsage?.model && (
-              <span className="text-[10px] text-fg-2/20">{liveUsage.model}</span>
-            )}
+            <div className="flex items-center gap-2">
+              {input.length > 0 && (
+                <span style={{ fontSize: '0.65rem', color: 'var(--color-fg-2)', opacity: 0.3, fontFamily: 'monospace' }}>
+                  {input.length}
+                </span>
+              )}
+              {liveUsage?.model && (
+                <span className="text-[10px] text-fg-2/20">{liveUsage.model}</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
