@@ -12,6 +12,7 @@ interface Props {
   agent: AgentData;
   onRefresh?: () => void;
   onViewHistory?: (name: string) => void;
+  onOpenChat?: (agentName: string) => void;
   pinned?: boolean;
   onTogglePin?: () => void;
 }
@@ -24,7 +25,7 @@ const GLOW: Record<string, string> = {
   running: 'glow-green', idle: 'glow-yellow',
 };
 
-function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Props) {
+function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | null>(null);
   const [resumeError, setResumeError] = useState('');
@@ -199,7 +200,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
             ) : isAlive ? (
               <>
                 <button className="btn btn-primary"
-                  onClick={(e) => { e.stopPropagation(); setShowChat(true); }}>💬 Chat</button>
+                  onClick={(e) => { e.stopPropagation(); if (isHeadless && onOpenChat) onOpenChat(agent.name); else setShowChat(true); }}>💬 Chat</button>
                 <button className="btn btn-danger"
                   onClick={(e) => { e.stopPropagation(); handleStop(); }}>Stop</button>
 
@@ -245,7 +246,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
                 {/* Headless agents: Chat auto-revives the session */}
                 {isHeadless && agent.sessionId && (
                   <button className="btn btn-primary"
-                    onClick={(e) => { e.stopPropagation(); setShowChat(true); }}>💬 Chat</button>
+                    onClick={(e) => { e.stopPropagation(); if (onOpenChat) onOpenChat(agent.name); else setShowChat(true); }}>💬 Chat</button>
                 )}
                 {agent.sessionId && !agent.sessionId.startsWith('pane-') && !isHeadless && (
                   <button className="btn btn-success"
@@ -308,7 +309,13 @@ function AgentCard({ agent, onRefresh, onViewHistory, pinned, onTogglePin }: Pro
       {showChat && createPortal(
         isHeadless
           ? <HeadlessChatPanel agentName={agent.name} onClose={() => setShowChat(false)} />
-          : <ChatPanel agentName={agent.id} onClose={() => setShowChat(false)} />,
+          : <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
+              onClick={e => { if (e.target === e.currentTarget) setShowChat(false); }}>
+              <div className="w-[620px] max-w-[92vw] bg-bg-1 border-l border-border/50 flex flex-col animate-slide-in-right"
+                style={{ boxShadow: '-12px 0 60px rgba(0,0,0,0.5)' }}>
+                <ChatPanel agentName={agent.id} onClose={() => setShowChat(false)} />
+              </div>
+            </div>,
         document.body
       )}
 

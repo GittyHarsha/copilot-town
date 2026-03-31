@@ -8,6 +8,7 @@ import { useToast } from './hooks/useToast';
 import { ThemeToggle } from './components/ThemeToggle';
 import { TerminalPanelProvider, useTerminalPanel } from './components/TerminalPanel';
 import ToastContainer from './components/ToastContainer';
+import HeadlessChatPanel from './components/HeadlessChatPanel';
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));
@@ -40,6 +41,7 @@ function AppInner() {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [conversationAgent, setConversationAgent] = useState<string | null>(null);
+  const [activeChat, setActiveChat] = useState<string | null>(null);
   const { status: wsStatus, connected, latestEvent } = useAgentStatus();
   const { theme, toggleTheme } = useTheme();
   const { panelHeight, isCollapsed } = useTerminalPanel();
@@ -79,6 +81,10 @@ function AppInner() {
 
   const refreshAgents = useCallback(() => {
     api.getAgents().then(setAgents).catch(() => {});
+  }, []);
+
+  const openChat = useCallback((agentName: string | null) => {
+    setActiveChat(agentName);
   }, []);
 
   // Keyboard shortcuts — inline, no separate hook
@@ -188,22 +194,38 @@ function AppInner() {
         </div>
       </header>
 
-      <main className="max-w-[1400px] mx-auto px-4 md:px-6 py-5" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
-        {page === 'dashboard' && (
-          <Dashboard
-            agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
-            onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
-          />
+      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 49px)' }}>
+        <main className="flex-1 overflow-y-auto px-4 md:px-6 py-5" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
+          <div className="max-w-[1400px] mx-auto">
+            {page === 'dashboard' && (
+              <Dashboard
+                agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
+                onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
+                onOpenChat={openChat}
+              />
+            )}
+            <Suspense fallback={LazyFallback}>
+              {page === 'live' && <LiveGrid onOpenChat={openChat} />}
+              {page === 'panes' && <Towns />}
+              {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
+              {page === 'graph' && <Graph />}
+              {page === 'workflows' && <Workflows />}
+              {page === 'settings' && <Settings />}
+            </Suspense>
+          </div>
+        </main>
+
+        {/* ── Chat Sidebar ── */}
+        {activeChat && (
+          <aside className="w-[480px] max-w-[45vw] flex-shrink-0 border-l border-border/30 animate-slide-in-right">
+            <HeadlessChatPanel
+              key={activeChat}
+              agentName={activeChat}
+              onClose={() => setActiveChat(null)}
+            />
+          </aside>
         )}
-        <Suspense fallback={LazyFallback}>
-          {page === 'live' && <LiveGrid />}
-          {page === 'panes' && <Towns />}
-          {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
-          {page === 'graph' && <Graph />}
-          {page === 'workflows' && <Workflows />}
-          {page === 'settings' && <Settings />}
-        </Suspense>
-      </main>
+      </div>
 
       {/* Footer hint */}
       <div className="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none"

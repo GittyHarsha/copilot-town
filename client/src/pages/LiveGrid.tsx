@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { api, type AgentData } from '../lib/api';
-import HeadlessChatPanel from '../components/HeadlessChatPanel';
 import { MiniMarkdownContent, CopyButton, relativeTime } from '../components/ChatMarkdown';
 
 /* ─── Types ──────────────────────────────────────────────────────── */
@@ -356,7 +355,7 @@ const MiniChat = memo(function MiniChat({
 
 /* ─── LiveGrid — mission control for headless agents ─────────────── */
 
-export default function LiveGrid() {
+export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) => void }) {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [cols, setCols] = useState(() => {
     try { return parseInt(localStorage.getItem('copilot-town:grid-cols') || '2') || 2; } catch { return 2; }
@@ -365,7 +364,6 @@ export default function LiveGrid() {
     try { return parseInt(localStorage.getItem('copilot-town:grid-row-h') || '340') || 340; } catch { return 340; }
   });
   const [filter, setFilter] = useState<'active' | 'all'>('all');
-  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -471,7 +469,7 @@ export default function LiveGrid() {
             <MiniChat
               key={agent.name}
               agent={agent}
-              onExpand={() => setExpandedAgent(agent.name)}
+              onExpand={() => onOpenChat?.(agent.name)}
             />
           ))}
         </div>
@@ -493,14 +491,6 @@ export default function LiveGrid() {
             )}
           </div>
         </div>
-      )}
-
-      {/* ── Expanded chat panel (full HeadlessChatPanel as overlay) ── */}
-      {expandedAgent && (
-        <HeadlessChatPanel
-          agentName={expandedAgent}
-          onClose={() => setExpandedAgent(null)}
-        />
       )}
     </div>
   );

@@ -467,12 +467,9 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
-      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="w-[620px] max-w-[92vw] bg-bg-1 border-l border-border/50 flex flex-col animate-slide-in-right"
-        style={{ boxShadow: '-12px 0 60px rgba(0,0,0,0.5)' }}>
+    <div className="h-full bg-bg-1 border-l border-border/50 flex flex-col">
 
-        {/* ── Header ── */}
+      {/* ── Header ── */}
         <div className="flex-shrink-0 border-b border-border/40">
           {/* Top row: agent name + close */}
           <div className="flex items-center justify-between px-5 pt-3.5 pb-2">
@@ -728,6 +725,5 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
   );
 }
