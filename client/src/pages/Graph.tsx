@@ -144,6 +144,8 @@ export default function Graph() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -181,6 +183,14 @@ export default function Graph() {
     edges.forEach(e => { if (e.from === activeNode) s.add(e.to); if (e.to === activeNode) s.add(e.from); });
     return s;
   }, [activeNode, edges]);
+
+  // Focused node filtering (click-to-filter)
+  const focusedConnected = useMemo(() => {
+    if (!focusedNode) return null;
+    const s = new Set<string>([focusedNode]);
+    edges.forEach(e => { if (e.from === focusedNode) s.add(e.to); if (e.to === focusedNode) s.add(e.from); });
+    return s;
+  }, [focusedNode, edges]);
 
   // Selected node detail
   const selectedAgent = agents.find(a => a.name === selected);
@@ -250,7 +260,7 @@ export default function Graph() {
               <p className="text-[11px] text-fg-2/50 mt-1">{agents.length} agents loaded — send a relay to see the graph</p>
             </div>
           ) : null}
-          <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" role="img" aria-label="Agent relay graph" onClick={() => setSelected(null)}>
+          <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" role="img" aria-label="Agent relay graph" onClick={() => { setSelected(null); setFocusedNode(null); }}>
             <defs>
               <marker id="arrow" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto">
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="var(--color-fg-2, #71717a)" strokeWidth="1" opacity="0.5" />
@@ -259,6 +269,7 @@ export default function Graph() {
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="#3b82f6" strokeWidth="1.2" />
               </marker>
             </defs>
+            <g transform={`scale(${zoom})`}>
 
             {/* Edges */}
             {edges.map(e => {
@@ -272,12 +283,14 @@ export default function Graph() {
               const key = `${e.from}→${e.to}`;
               const isActive = activeNode && (e.from === activeNode || e.to === activeNode);
               const isDimmed = activeNode && !isActive;
+              const isFocusDimmed = focusedConnected && !(e.from === focusedNode || e.to === focusedNode);
+              const edgeOpacity = isFocusDimmed ? 0.1 : isDimmed ? 0.08 : 1;
               const w = 1 + (e.count / maxCount) * 2.5;
               // Curved edge (quadratic bezier with slight offset)
               const mx = (x1 + x2) / 2 - uy * 20, my = (y1 + y2) / 2 + ux * 20;
 
               return (
-                <g key={key} opacity={isDimmed ? 0.08 : 1}>
+                <g key={key} opacity={edgeOpacity}>
                   <path
                     d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
                     fill="none"
@@ -308,17 +321,19 @@ export default function Graph() {
               const isSelected = selected === node.id;
               const isHov = hovered === node.id;
               const isDimmed = connectedNodes && !connectedNodes.has(node.id);
+              const isFocusDimmed = focusedConnected && !focusedConnected.has(node.id);
+              const nodeOpacity = isFocusDimmed ? 0.2 : isDimmed ? 0.1 : 1;
               const color = statusColor(node.status);
               const bg = statusBg(node.status);
               const nodeEdgeCount = edges.filter(e => e.from === node.id || e.to === node.id).length;
 
               return (
                 <g key={node.id}
-                  onClick={ev => { ev.stopPropagation(); setSelected(isSelected ? null : node.id); }}
+                  onClick={ev => { ev.stopPropagation(); setSelected(isSelected ? null : node.id); setFocusedNode(prev => prev === node.id ? null : node.id); }}
                   onMouseEnter={() => setHovered(node.id)}
                   onMouseLeave={() => setHovered(null)}
                   style={{ cursor: 'pointer' }}
-                  opacity={isDimmed ? 0.1 : 1}
+                  opacity={nodeOpacity}
                 >
                   {/* Selection ring */}
                   {isSelected && (
@@ -354,7 +369,27 @@ export default function Graph() {
                 </g>
               );
             })}
+            </g>
           </svg>
+          <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+            <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom in">+</button>
+            <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom out">−</button>
+            <button onClick={() => setZoom(1)} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px]" aria-label="Reset zoom">1:1</button>
+          </div>
+          <div className="flex items-center gap-4 text-[10px] text-fg-2 mt-3 px-4 pb-2">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Running
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Idle
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-fg-2/30" /> Stopped
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-[1.5px] bg-blue-400/40" /> Relay connection
+            </span>
+          </div>
         </div>
       </div>
 

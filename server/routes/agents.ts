@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
-import { getAllAgents, getAgent, getAgentAsync, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents } from '../services/agents.js';
+import { getAllAgents, getAgent, getAgentAsync, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents, invalidateAgentCache } from '../services/agents.js';
 import { capturePane, sendKeys, listPanes, provisionPane, renameWindow, killPane, type ProvisionConfig } from '../services/psmux.js';
 import { recordRelay } from './relays.js';
 import { pushEvent } from '../services/events.js';
@@ -13,25 +13,35 @@ const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
 
 // Serialize read-modify-write to agent-sessions.json within this process
+let _writeQueue: Promise<void> = Promise.resolve();
+
 function withSessionFile(fn: (data: any) => void): void {
+  _writeQueue = _writeQueue.then(() => {
+    try {
+      const raw = existsSync(SESSION_MAP_FILE)
+        ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
+        : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
+      fn(raw);
+      writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    } catch (e) {
+      console.error('agent-sessions.json write error:', e);
+    }
+  }).catch(() => {});
+}
+
+function withSessionFileReturn<T>(fn: (data: any) => T): T {
+  // This one is synchronous so we can't easily queue it, but wrap JSON.parse safely
   try {
     const raw = existsSync(SESSION_MAP_FILE)
       ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
       : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-    fn(raw);
+    const result = fn(raw);
     writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
+    return result;
   } catch (e) {
     console.error('agent-sessions.json write error:', e);
+    throw e;
   }
-}
-
-function withSessionFileReturn<T>(fn: (data: any) => T): T {
-  const raw = existsSync(SESSION_MAP_FILE)
-    ? JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'))
-    : { _schema: 'agent-sessions-v2', agents: {}, psmux_layout: {} };
-  const result = fn(raw);
-  writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-  return result;
 }
 
 // Update psmux_layout in agent-sessions.json when an agent is assigned to a pane
@@ -842,6 +852,7 @@ router.delete('/:id/settings', (req, res) => {
       raw.agents = agents;
       if (raw.metadata?.[key]) delete raw.metadata[key];
     });
+    invalidateAgentCache();
     res.json({ success: true });
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to delete agent' });

@@ -47,6 +47,10 @@ export interface Attachment {
 // Active headless sessions — keyed by agent name
 const _headlessAgents = new Map<string, HeadlessAgent>();
 
+// Circuit breaker for auto-revival to prevent infinite retry loops
+const _revivalAttempts = new Map<string, number>();
+const MAX_REVIVAL_ATTEMPTS = 2;
+
 // Event subscribers for streaming — keyed by agent name
 type StreamListener = (event: any) => void;
 const _streamListeners = new Map<string, Set<StreamListener>>();
@@ -308,12 +312,20 @@ export async function sendToHeadless(
   };
 
   try {
-    return await doSend(agent);
+    const result = await doSend(agent);
+    _revivalAttempts.delete(name);  // reset on success
+    return result;
   } catch (e: any) {
     const msg = e?.message || '';
     // Session expired/not found — recreate with a fresh session
     if (msg.includes('Session not found') || msg.includes('session_expired') || msg.includes('invalid_session')) {
-      console.log(`Session for "${name}" expired, creating fresh session...`);
+      const attempts = (_revivalAttempts.get(name) || 0) + 1;
+      _revivalAttempts.set(name, attempts);
+      if (attempts > MAX_REVIVAL_ATTEMPTS) {
+        _revivalAttempts.delete(name);
+        throw new Error(`Agent "${name}" failed after ${MAX_REVIVAL_ATTEMPTS} revival attempts`);
+      }
+      console.log(`Session for "${name}" expired, creating fresh session (attempt ${attempts}/${MAX_REVIVAL_ATTEMPTS})...`);
       pushEvent('auto_revive', `Session expired for "${name}", creating fresh session`, 'warn', name);
       try {
         _headlessAgents.delete(name);

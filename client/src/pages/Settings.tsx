@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api, type AgentData } from '../lib/api';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface Config {
   port: number;
@@ -170,6 +171,7 @@ function SessionsSection() {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [confirmState, setConfirmState] = useState<{action: () => void, title: string, message: string} | null>(null);
 
   useEffect(() => {
     api.getAgents().then(a => { setAgents(a); setLoading(false); }).catch(() => setLoading(false));
@@ -182,12 +184,17 @@ function SessionsSection() {
     } catch { /* ignore */ }
   }, []);
 
-  const deleteAgent = useCallback(async (id: string) => {
-    if (!confirm('Remove this agent from agent-sessions.json?')) return;
-    try {
-      await api.deleteAgentSettings(id);
-      setAgents(prev => prev.filter(a => a.id !== id));
-    } catch { /* ignore */ }
+  const deleteAgent = useCallback((id: string) => {
+    setConfirmState({
+      title: 'Remove Agent',
+      message: 'Remove this agent from agent-sessions.json?',
+      action: async () => {
+        try {
+          await api.deleteAgentSettings(id);
+          setAgents(prev => prev.filter(a => a.id !== id));
+        } catch { /* ignore */ }
+      },
+    });
   }, []);
 
   if (loading) return <div className="text-xs text-fg-2">Loading sessions…</div>;
@@ -268,11 +275,20 @@ function SessionsSection() {
           })()}
         </div>
       )}
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title || ''}
+        message={confirmState?.message || ''}
+        variant="danger"
+        confirmLabel="Remove"
+        onConfirm={() => { confirmState?.action(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
+      />
     </section>
   );
 }
 
-// ── About section ─────────────────────────────────────────────────
+// ── About section─────────────────────────────────────────────────
 function AboutSection() {
   return (
     <section className="space-y-3">

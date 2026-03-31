@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { TerminalView } from '../components/TerminalView';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 interface PsmuxPane {
   sessionName: string;
@@ -45,11 +46,12 @@ function PaneActions({ pane, allPanes, allSessions, onAction }: {
 }) {
   const [menu, setMenu] = useState<'move' | 'resize' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [alertState, setAlertState] = useState<{title: string, message: string} | null>(null);
 
   const run = async (fn: () => Promise<any>) => {
     setBusy(true);
     try { await fn(); setMenu(null); setTimeout(onAction, 400); }
-    catch (e: any) { alert(e.message); }
+    catch (e: any) { setAlertState({ title: 'Error', message: e.message }); }
     finally { setBusy(false); }
   };
 
@@ -77,6 +79,7 @@ function PaneActions({ pane, allPanes, allSessions, onAction }: {
   if (busy) return <span className="text-[9px] text-fg-2 animate-pulse">…</span>;
 
   return (
+    <>
     <div className="flex items-center gap-0.5 flex-wrap">
       {/* Swap up/down */}
       <button className={actBtn} title="Swap with pane above"
@@ -136,6 +139,15 @@ function PaneActions({ pane, allPanes, allSessions, onAction }: {
           onClick={() => setMenu('resize')}>⇔ Resize</button>
       )}
     </div>
+    <ConfirmDialog
+      open={!!alertState}
+      title={alertState?.title || ''}
+      message={alertState?.message || ''}
+      confirmLabel="OK"
+      onConfirm={() => setAlertState(null)}
+      onCancel={() => setAlertState(null)}
+    />
+    </>
   );
 }
 

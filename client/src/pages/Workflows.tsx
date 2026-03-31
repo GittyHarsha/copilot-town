@@ -80,6 +80,7 @@ export default function Workflows() {
 
   // Confirm dialog state
   const [deleteWfId, setDeleteWfId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{action: () => void, title: string, message: string, variant?: 'danger' | 'default', confirmLabel?: string} | null>(null);
 
   // Load workflows + runs + stage files
   const load = useCallback(async () => {
@@ -133,7 +134,7 @@ export default function Workflows() {
         if (latest) setSelectedRun(latest);
       }, 1000);
     } catch (e: any) {
-      alert(`Failed: ${e.message}`);
+      setConfirmState({ title: 'Error', message: `Failed: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
     } finally { setRunning(false); }
   };
 
@@ -172,13 +173,13 @@ export default function Workflows() {
       setEditingStageName(null);
       setView('editor');
     } catch (e: any) {
-      alert(`Failed to load workflow: ${e.message}`);
+      setConfirmState({ title: 'Error', message: `Failed to load workflow: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
     }
   };
 
   // Save workflow from editor
   const saveWorkflow = async () => {
-    if (!editorId.trim()) { alert('Workflow ID is required'); return; }
+    if (!editorId.trim()) { setConfirmState({ title: 'Validation', message: 'Workflow ID is required', action: () => {}, confirmLabel: 'OK' }); return; }
     setEditorSaving(true);
     try {
       await api.createWorkflow(editorId.trim(), editorYaml);
@@ -187,7 +188,7 @@ export default function Workflows() {
       const wf = workflows.find(w => w.id === editorId.trim());
       if (wf) selectWorkflow(wf);
     } catch (e: any) {
-      alert(`Save failed: ${e.message}`);
+      setConfirmState({ title: 'Error', message: `Save failed: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
     } finally { setEditorSaving(false); }
   };
 
@@ -202,7 +203,7 @@ export default function Workflows() {
       setSelectedRun(null);
       setView('editor');
     } catch (e: any) {
-      alert(`Failed to load stage file: ${e.message}`);
+      setConfirmState({ title: 'Error', message: `Failed to load stage file: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
     }
   };
 
@@ -218,7 +219,7 @@ export default function Workflows() {
 
   // Save stage file
   const saveStageFile = async () => {
-    if (!editingStageName?.trim() && editingStageIsNew) { alert('Stage file name is required'); return; }
+    if (!editingStageName?.trim() && editingStageIsNew) { setConfirmState({ title: 'Validation', message: 'Stage file name is required', action: () => {}, confirmLabel: 'OK' }); return; }
     const name = (editingStageName || '').trim();
     setEditorSaving(true);
     try {
@@ -226,11 +227,11 @@ export default function Workflows() {
       await load();
       setView('list');
     } catch (e: any) {
-      alert(`Save failed: ${e.message}`);
+      setConfirmState({ title: 'Error', message: `Save failed: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
     } finally { setEditorSaving(false); }
   };
 
-  const handleDeleteWorkflow = async (e: React.MouseEvent, wfId: string) => {
+  const handleDeleteWorkflow= async (e: React.MouseEvent, wfId: string) => {
     e.stopPropagation();
     setDeleteWfId(wfId);
   };
@@ -242,7 +243,7 @@ export default function Workflows() {
       if (selectedWf?.id === deleteWfId) { setSelectedWf(null); setView('list'); }
       await load();
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      setConfirmState({ title: 'Error', message: `Delete failed: ${err.message}`, action: () => {}, confirmLabel: 'OK' });
     } finally {
       setDeleteWfId(null);
     }
@@ -250,14 +251,21 @@ export default function Workflows() {
 
   const handleDeleteStage = async (e: React.MouseEvent, name: string) => {
     e.stopPropagation();
-    if (!confirm(`Delete stage file "${name}"?`)) return;
-    try {
-      await api.deleteStageFile(name);
-      if (editingStageName === name) { setEditingStageName(null); setView('list'); }
-      await load();
-    } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
-    }
+    setConfirmState({
+      title: 'Delete Stage File',
+      message: `Delete stage file "${name}"?`,
+      variant: 'danger',
+      confirmLabel: 'Delete',
+      action: async () => {
+        try {
+          await api.deleteStageFile(name);
+          if (editingStageName === name) { setEditingStageName(null); setView('list'); }
+          await load();
+        } catch (err: any) {
+          setConfirmState({ title: 'Error', message: `Delete failed: ${err.message}`, action: () => {}, confirmLabel: 'OK' });
+        }
+      },
+    });
   };
 
   // Determine if editor is showing a stage file
@@ -574,6 +582,15 @@ export default function Workflows() {
         variant="danger"
         onConfirm={confirmDeleteWorkflow}
         onCancel={() => setDeleteWfId(null)}
+      />
+      <ConfirmDialog
+        open={!!confirmState}
+        title={confirmState?.title || ''}
+        message={confirmState?.message || ''}
+        variant={confirmState?.variant || 'default'}
+        confirmLabel={confirmState?.confirmLabel || 'OK'}
+        onConfirm={() => { confirmState?.action(); setConfirmState(null); }}
+        onCancel={() => setConfirmState(null)}
       />
     </div>
   );
@@ -1168,19 +1185,21 @@ function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => 
 function GateApproval({ runId, stepId, message }: { runId: string; stepId: string; message: string }) {
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [alertState, setAlertState] = useState<{title: string, message: string} | null>(null);
 
   const handleGate = async (approved: boolean) => {
     setSubmitting(true);
     try {
       await api.resolveWorkflowGate(runId, stepId, approved, feedback || undefined);
     } catch (e: any) {
-      alert(`Gate resolution failed: ${e.message}`);
+      setAlertState({ title: 'Error', message: `Gate resolution failed: ${e.message}` });
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
+    <>
     <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-3">
       <div className="flex items-center gap-2 mb-2">
         <span className="text-amber-400 text-lg">⏸</span>
@@ -1215,5 +1234,14 @@ function GateApproval({ runId, stepId, message }: { runId: string; stepId: strin
         </button>
       </div>
     </div>
+    <ConfirmDialog
+      open={!!alertState}
+      title={alertState?.title || ''}
+      message={alertState?.message || ''}
+      confirmLabel="OK"
+      onConfirm={() => setAlertState(null)}
+      onCancel={() => setAlertState(null)}
+    />
+    </>
   );
 }
