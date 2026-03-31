@@ -361,3 +361,76 @@ button, [role="button"] {
   to   { transform: scale(2.5); opacity: 0; }
 }
 
+/* ══════════════════════════════════════
+   Chat Prose — markdown in chat messages
+   ══════════════════════════════════════ */
+.prose-chat {
+  word-break: break-word;
+}
+.prose-chat p { margin: 0 0 0.75em; }
+.prose-chat p:last-child { margin-bottom: 0; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3, .prose-chat h4 {
+  font-weight: 600;
+  margin: 1.25em 0 0.5em;
+  color: var(--color-fg);
+}
+.prose-chat h1 { font-size: 1.25em; }
+.prose-chat h2 { font-size: 1.1em; }
+.prose-chat h3 { font-size: 1em; }
+.prose-chat ul, .prose-chat ol { margin: 0.5em 0; padding-left: 1.5em; }
+.prose-chat li { margin: 0.25em 0; }
+.prose-chat code:not(pre code) {
+  font-size: 0.9em;
+  padding: 0.15em 0.4em;
+  border-radius: var(--shape-xs);
+  background: color-mix(in srgb, var(--color-fg-2) 10%, transparent);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+.prose-chat pre {
+  margin: 0.75em 0;
+  padding: 14px 16px;
+  border-radius: var(--shape-md);
+  background: var(--color-bg-1);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+.prose-chat pre code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: transparent;
+  padding: 0;
+}
+.prose-chat blockquote {
+  border-left: 3px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  margin: 0.75em 0;
+  padding: 0.25em 0 0.25em 1em;
+  color: var(--color-fg-2);
+}
+.prose-chat table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75em 0;
+  font-size: 0.9em;
+}
+.prose-chat th, .prose-chat td {
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+.prose-chat th {
+  background: var(--color-bg-2);
+  font-weight: 600;
+}
+.prose-chat a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.prose-chat a:hover { text-decoration: underline; }
+.prose-chat hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 1em 0;
+}
+.prose-chat img { max-width: 100%; border-radius: var(--shape-md); }
+

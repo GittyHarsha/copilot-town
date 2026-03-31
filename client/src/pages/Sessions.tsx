@@ -140,6 +140,8 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [turnSearch, setTurnSearch] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const msgContainerRef = useRef<HTMLDivElement>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [turnPage, setTurnPage] = useState(0);
 
   // Chat input
@@ -575,15 +577,15 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
       </div>
 
       {/* Right panel — chat */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ background: 'var(--color-bg-1)', borderRadius: 'var(--shape-lg)', boxShadow: 'var(--elevation-1)' }}>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ background: 'var(--color-bg)', borderRadius: 'var(--shape-lg)' }}>
         {!selectedId ? (
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center" style={{ maxWidth: 280 }}>
-              <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: 12, opacity: 0.15 }}>💬</span>
-              <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-fg-1)', marginBottom: 4 }}>
+            <div className="text-center" style={{ maxWidth: 320 }}>
+              <div style={{ fontSize: '3rem', marginBottom: 16, opacity: 0.12 }}>💬</div>
+              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-fg)', marginBottom: 6 }}>
                 {liveAgentSessions.length > 0 ? 'Select an agent to chat' : 'No live agents'}
               </p>
-              <p style={{ fontSize: 12, color: 'var(--color-fg-2)', lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13, color: 'var(--color-fg-2)', lineHeight: 1.6 }}>
                 {liveAgentSessions.length > 0
                   ? 'Pick a live agent from the sidebar to start a conversation'
                   : 'Spawn agents from the Dashboard, then come here to chat'}
@@ -592,65 +594,61 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
           </div>
         ) : (
           <div key={selectedId} className="flex-1 flex flex-col min-h-0 animate-fade-in">
-            {/* Header with connection status */}
-            <div className="flex items-center justify-between px-5 py-3 shrink-0" style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <div className="min-w-0 flex-1 mr-3">
-                <div className="flex items-center gap-2">
-                  {/* Live indicator */}
-                  {(() => {
-                    const agent = agents.find(a => a.sessionId === selectedId || a.name === selectedAgentName);
-                    const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
-                    return isLive ? (
-                      <span className="dot-live flex-shrink-0" style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: agent?.status === 'running' ? '#22c55e' : '#eab308',
+            {/* ── Minimal Header ── */}
+            <div className="flex items-center justify-between px-6 shrink-0" style={{ height: 52, borderBottom: '1px solid var(--color-border)' }}>
+              <div className="flex items-center gap-3 min-w-0">
+                {(() => {
+                  const agent = agents.find(a => a.sessionId === selectedId || a.name === selectedAgentName);
+                  const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
+                  const dotColor = !agent ? 'var(--color-fg-2)' : agent.status === 'running' ? '#22c55e' : agent.status === 'idle' ? '#eab308' : 'var(--color-fg-2)';
+                  return (
+                    <>
+                      <span style={{
+                        width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+                        background: dotColor, opacity: isLive ? 1 : 0.25,
+                        boxShadow: isLive ? `0 0 6px ${dotColor}` : 'none',
+                        animation: agent?.status === 'running' ? 'pulse 2s infinite' : 'none',
                       }} />
-                    ) : (
-                      <span className="flex-shrink-0" style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: 'var(--color-fg-2)', opacity: 0.2,
-                      }} />
-                    );
-                  })()}
-                  <h3 className="text-sm font-medium truncate" style={{ letterSpacing: '-0.01em' }}>
-                    {selectedAgentName || (() => {
-                      const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
-                      const cleaned = (raw && raw.length > 3 && !/^[\-|─\s]+$/.test(raw) && raw !== 'Start Conversation') ? raw : '';
-                      return cleaned || selectedId.slice(0, 24);
-                    })()}
-                  </h3>
-                  {selectedType === 'headless' && (
-                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,211,238,0.08)', color: 'rgba(34,211,238,0.7)' }}>⚡ headless</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-0.5 ml-[18px]">
-                  {sessionMeta?.branch && (
-                    <span className="text-[11px] font-mono" style={{ color: 'var(--color-fg-2)' }}>⎇ {sessionMeta.branch}</span>
-                  )}
-                  {(() => {
-                    const agent = agents.find(a => a.sessionId === selectedId || a.name === selectedAgentName);
-                    const isLive = agent && (agent.status === 'running' || agent.status === 'idle');
-                    return isLive
-                      ? <span className="text-[10px]" style={{ color: '#22c55e', opacity: 0.7 }}>Connected</span>
-                      : <span className="text-[10px]" style={{ color: 'var(--color-fg-2)', opacity: 0.4 }}>History only</span>;
-                  })()}
-                </div>
+                      <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-fg)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedAgentName || (() => {
+                          const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
+                          const cleaned = (raw && raw.length > 3 && !/^[\-|─\s]+$/.test(raw) && raw !== 'Start Conversation') ? raw : '';
+                          return cleaned || selectedId.slice(0, 24);
+                        })()}
+                      </h3>
+                      {selectedType === 'headless' && (
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,211,238,0.06)', color: 'rgba(34,211,238,0.6)', fontWeight: 500, flexShrink: 0 }}>headless</span>
+                      )}
+                      {isLive && (
+                        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-full)', background: 'rgba(34,197,94,0.06)', color: 'rgba(34,197,94,0.7)', fontWeight: 500, flexShrink: 0 }}>connected</span>
+                      )}
+                      {sessionMeta?.branch && (
+                        <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--color-fg-2)', opacity: 0.5, flexShrink: 0 }}>⎇ {sessionMeta.branch}</span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <div className="flex bg-bg rounded-md overflow-hidden">
-                  <button className={`text-xs px-3 py-1.5 transition-colors ${detailTab === 'chat' ? 'bg-bg-2 text-fg font-medium' : 'text-fg-2 hover:text-fg'}`}
-                    onClick={() => setDetailTab('chat')}>💬 Chat</button>
-                  <button className={`text-xs px-3 py-1.5 transition-colors ${detailTab === 'plan' ? 'bg-bg-2 text-fg font-medium' : 'text-fg-2 hover:text-fg'}`}
-                    onClick={() => setDetailTab('plan')}>📋 Plan</button>
+                {/* Chat / Plan segmented control */}
+                <div style={{ display: 'inline-flex', borderRadius: 'var(--shape-full)', background: 'var(--color-bg-2)', padding: 2 }}>
+                  {(['chat', 'plan'] as const).map(tab => (
+                    <button key={tab} onClick={() => setDetailTab(tab)} style={{
+                      fontSize: 12, fontWeight: detailTab === tab ? 600 : 400, padding: '5px 14px',
+                      borderRadius: 'var(--shape-full)', border: 'none', cursor: 'pointer',
+                      background: detailTab === tab ? 'var(--color-bg)' : 'transparent',
+                      color: detailTab === tab ? 'var(--color-fg)' : 'var(--color-fg-2)',
+                      boxShadow: detailTab === tab ? 'var(--elevation-1)' : 'none',
+                      transition: 'all var(--duration-short) var(--ease-standard)',
+                    }}>
+                      {tab === 'chat' ? '💬 Chat' : '📋 Plan'}
+                    </button>
+                  ))}
                 </div>
                 {detailTab === 'chat' && (
                   <>
-                    <input type="text" value={turnSearch} onChange={e => setTurnSearch(e.target.value)}
-                      placeholder="Filter…"
-                      className="input-m3 px-3 py-1.5 text-xs text-fg placeholder-fg-2/40 outline-none w-32 transition-colors" />
-                    <span className="text-xs text-fg-2/50 tabular-nums">{turns.length} turns</span>
+                    <span style={{ fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.5 }}>{turns.length} turns</span>
                     <button
-                      className="text-xs px-2.5 py-1.5 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors"
                       onClick={() => {
                         const text = turns.map(t => {
                           const ts = t.timestamp ? ` (${new Date(t.timestamp).toLocaleString()})` : '';
@@ -662,176 +660,320 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                         const blob = new Blob([text], { type: 'text/markdown' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `session-${selectedId}.md`;
-                        a.click();
+                        a.href = url; a.download = `session-${selectedId}.md`; a.click();
                         URL.revokeObjectURL(url);
                       }}
                       title="Export as Markdown"
                       aria-label="Export conversation"
-                    >
-                      📥 Export
-                    </button>
+                      style={{ width: 32, height: 32, borderRadius: 'var(--shape-full)', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-fg-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, transition: 'all var(--duration-short) var(--ease-standard)' }}
+                    >📥</button>
                   </>
                 )}
               </div>
             </div>
 
-            {/* Content */}
+            {/* ── Content ── */}
             {detailLoading ? (
-              <div className="flex-1 p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} style={{
-                    height: 16,
-                    borderRadius: 6,
-                    width: i % 2 === 0 ? '75%' : '100%',
-                    marginLeft: i % 2 === 0 ? 'auto' : undefined,
-                    background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)',
-                    backgroundSize: '200% 100%',
-                    animation: 'shimmer 1.5s ease-in-out infinite',
-                  }} />
+              <div className="flex-1 flex flex-col gap-6 p-8" style={{ maxWidth: 720, margin: '0 auto', width: '100%' }}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ width: '30%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                      <div style={{ width: i % 2 === 0 ? '85%' : '60%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                    </div>
+                  </div>
                 ))}
               </div>
             ) : detailTab === 'chat' ? (
-              /* Chat view — messages + input */
-              <div className="flex-1 flex flex-col min-h-0">
-                {/* Pagination controls */}
+              /* ── Chat View ── */
+              <div className="flex-1 flex flex-col min-h-0" style={{ position: 'relative' }}>
+                {/* Pagination */}
                 {totalPages > 1 && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 16px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
-                    <button className="text-xs px-2.5 py-1 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" disabled={turnPage === 0} onClick={() => setTurnPage(p => p - 1)}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 16px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+                    <button disabled={turnPage === 0} onClick={() => setTurnPage(p => p - 1)}
+                      style={{ fontSize: 12, padding: '4px 12px', borderRadius: 'var(--shape-full)', border: '1px solid var(--color-border)', background: 'var(--color-bg-2)', color: 'var(--color-fg-2)', cursor: turnPage === 0 ? 'not-allowed' : 'pointer', opacity: turnPage === 0 ? 0.3 : 1, transition: 'all var(--duration-short) var(--ease-standard)' }}>
                       ← Prev
                     </button>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)' }}>
-                      Page {turnPage + 1} of {totalPages} ({filteredTurns.length} turns)
+                    <span style={{ fontSize: 12, color: 'var(--color-fg-2)', opacity: 0.6 }}>
+                      {turnPage + 1} / {totalPages}
                     </span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={filteredTurns.length}
-                      placeholder="Jump to #"
-                      style={{ width: 80, fontSize: '0.7rem', padding: '4px 6px', background: 'var(--color-bg-2)', color: 'var(--color-fg)', border: '1px solid var(--color-border)', borderRadius: 4 }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const n = parseInt((e.target as HTMLInputElement).value);
-                          if (n > 0 && n <= filteredTurns.length) {
-                            setTurnPage(Math.floor((n - 1) / TURNS_PER_PAGE));
-                          }
-                        }
-                      }}
-                    />
-                    <button className="text-xs px-2.5 py-1 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" disabled={turnPage >= totalPages - 1} onClick={() => setTurnPage(p => p + 1)}>
+                    <button disabled={turnPage >= totalPages - 1} onClick={() => setTurnPage(p => p + 1)}
+                      style={{ fontSize: 12, padding: '4px 12px', borderRadius: 'var(--shape-full)', border: '1px solid var(--color-border)', background: 'var(--color-bg-2)', color: 'var(--color-fg-2)', cursor: turnPage >= totalPages - 1 ? 'not-allowed' : 'pointer', opacity: turnPage >= totalPages - 1 ? 0.3 : 1, transition: 'all var(--duration-short) var(--ease-standard)' }}>
                       Next →
                     </button>
                   </div>
                 )}
-                <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
-                  {paginatedTurns.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
-                      {loadError ? (
-                        <>
-                          <span style={{ fontSize: '1.5rem', opacity: 0.4 }}>⚠️</span>
-                          <span className="text-xs" style={{ color: 'var(--color-fg-2)' }}>{loadError}</span>
-                          <button className="text-xs px-3 py-1 mt-1" style={{ borderRadius: 'var(--shape-full)', background: 'var(--color-bg-2)', border: '1px solid var(--color-border)', color: 'var(--color-fg-1)', cursor: 'pointer' }}
-                            onClick={() => { setLoadError(null); setDetailLoading(true); /* re-trigger by toggling selectedId */ const id = selectedId; setSelectedId(null); setTimeout(() => setSelectedId(id), 50); }}>
-                            Retry
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs" style={{ color: 'var(--color-fg-2)' }}>
-                          {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    paginatedTurns.map(turn => (
-                      <div key={turn.turn_index} className="space-y-3">
-                        {turn.user_message && (
-                          <div className="flex justify-end">
-                            <div className="max-w-[75%]">
-                              <div className="bg-blue-500/8 border border-blue-500/15 px-4 py-2.5" style={{ borderRadius: '18px 18px 4px 18px' }}>
-                                <pre className="text-xs text-fg whitespace-pre-wrap break-words font-sans leading-relaxed">
+
+                {/* Messages */}
+                <div
+                  ref={msgContainerRef}
+                  className="flex-1 overflow-y-auto"
+                  style={{ scrollBehavior: 'smooth' }}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                    setShowScrollBtn(fromBottom > 200);
+                  }}
+                >
+                  <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 24px 16px' }}>
+                    {paginatedTurns.length === 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 8 }}>
+                        {loadError ? (
+                          <>
+                            <span style={{ fontSize: '2rem', opacity: 0.3 }}>⚠️</span>
+                            <span style={{ fontSize: 13, color: 'var(--color-fg-2)' }}>{loadError}</span>
+                            <button
+                              onClick={() => { setLoadError(null); setDetailLoading(true); const id = selectedId; setSelectedId(null); setTimeout(() => setSelectedId(id), 50); }}
+                              style={{ fontSize: 12, padding: '6px 16px', marginTop: 4, borderRadius: 'var(--shape-full)', background: 'var(--accent-dim)', color: 'var(--accent)', border: 'none', cursor: 'pointer', fontWeight: 500 }}>
+                              Retry
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: '2.5rem', opacity: 0.1 }}>💬</span>
+                            <span style={{ fontSize: 13, color: 'var(--color-fg-2)', opacity: 0.6 }}>
+                              {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      paginatedTurns.map((turn, i) => (
+                        <div key={turn.turn_index}>
+                          {/* ── User message ── */}
+                          {turn.user_message && (
+                            <div style={{
+                              display: 'flex', gap: 14, padding: '20px 0',
+                              borderTop: i > 0 ? '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)' : 'none',
+                            }}>
+                              {/* Avatar */}
+                              <div style={{
+                                width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                                background: 'var(--accent-dim)', color: 'var(--accent)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: 14, fontWeight: 700, marginTop: 2,
+                              }}>Y</div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-fg)' }}>You</span>
+                                  <span style={{ fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.5 }}>
+                                    {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </span>
+                                </div>
+                                <pre style={{
+                                  fontSize: 14, lineHeight: 1.65, color: 'var(--color-fg)',
+                                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                                  fontFamily: 'inherit', margin: 0,
+                                }}>
                                   {truncateUser(turn.user_message)}
                                 </pre>
                               </div>
-                              <p className="text-[10px] text-fg-2/30 mt-1 mb-1 text-right tabular-nums">
-                                #{turn.turn_index} · {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString() : ''}
-                              </p>
                             </div>
-                          </div>
-                        )}
-                        {turn.assistant_response && (
-                          <div className="flex justify-start">
-                            <div className="max-w-[85%]">
-                              <div className="bg-bg-2/60 border border-border px-4 py-2.5" style={{ borderRadius: '4px 18px 18px 18px' }}>
-                                <div className="text-xs text-fg-1 leading-relaxed prose-sm">
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {turn.assistant_response}
-                                  </ReactMarkdown>
+                          )}
+
+                          {/* ── Assistant message ── */}
+                          {turn.assistant_response && (
+                            <div style={{
+                              display: 'flex', gap: 14,
+                              borderTop: turn.user_message ? '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)' : (i > 0 ? '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)' : 'none'),
+                              background: 'color-mix(in srgb, var(--color-bg-2) 30%, transparent)',
+                              margin: '0 -24px', padding: '20px 24px',
+                              borderRadius: 'var(--shape-md)',
+                            }}>
+                              {/* Avatar */}
+                              <div style={{
+                                width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                                background: 'color-mix(in srgb, var(--color-fg-2) 12%, transparent)',
+                                color: 'var(--color-fg-2)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: 14, marginTop: 2,
+                              }}>✦</div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-fg)' }}>
+                                    {selectedAgentName || 'Assistant'}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.5 }}>
+                                    {turn.timestamp ? new Date(turn.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                  </span>
                                 </div>
+                                {/* Thinking section (collapsible) */}
+                                {turn.assistant_response.startsWith('> 💭 **thinking**') && (() => {
+                                  const thinkEnd = turn.assistant_response.indexOf('\n\n---\n\n');
+                                  if (thinkEnd === -1) return null;
+                                  const thinkingRaw = turn.assistant_response.slice(0, thinkEnd).replace(/^> 💭 \*\*thinking\*\*\n>\n/m, '').replace(/^> /gm, '');
+                                  const rest = turn.assistant_response.slice(thinkEnd + 7);
+                                  return (
+                                    <>
+                                      <details style={{ marginBottom: 12 }}>
+                                        <summary style={{
+                                          fontSize: 12, color: 'var(--color-fg-2)', cursor: 'pointer',
+                                          padding: '6px 10px', borderRadius: 'var(--shape-sm)',
+                                          background: 'color-mix(in srgb, var(--color-fg-2) 5%, transparent)',
+                                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                                          userSelect: 'none', listStyle: 'none',
+                                        }}>
+                                          <span style={{ fontSize: 13 }}>🧠</span> Thinking…
+                                        </summary>
+                                        <div style={{
+                                          fontSize: 13, lineHeight: 1.6, color: 'var(--color-fg-2)',
+                                          padding: '10px 12px', marginTop: 6,
+                                          borderLeft: '2px solid color-mix(in srgb, var(--color-fg-2) 15%, transparent)',
+                                          whiteSpace: 'pre-wrap', fontStyle: 'italic',
+                                        }}>
+                                          {thinkingRaw}
+                                        </div>
+                                      </details>
+                                      <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-fg)' }} className="prose-chat">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{rest}</ReactMarkdown>
+                                      </div>
+                                    </>
+                                  );
+                                })() || (
+                                  <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-fg)' }} className="prose-chat">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.assistant_response}</ReactMarkdown>
+                                  </div>
+                                )}
                               </div>
-                              <p className="text-[10px] text-fg-2/30 mt-1 mb-1 tabular-nums">
-                                assistant · #{turn.turn_index}{turn.timestamp ? ` · ${new Date(turn.timestamp).toLocaleTimeString()}` : ''}
-                              </p>
                             </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+
+                    {/* Streaming indicator */}
+                    {sending && (
+                      <div style={{
+                        display: 'flex', gap: 14,
+                        borderTop: '1px solid color-mix(in srgb, var(--color-border) 40%, transparent)',
+                        background: 'color-mix(in srgb, var(--color-bg-2) 30%, transparent)',
+                        margin: '0 -24px', padding: '20px 24px',
+                        borderRadius: 'var(--shape-md)',
+                      }}>
+                        <div style={{
+                          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+                          background: 'color-mix(in srgb, var(--color-fg-2) 12%, transparent)',
+                          color: 'var(--color-fg-2)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 14,
+                        }}>✦</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6 }}>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {[0, 1, 2].map(j => (
+                              <span key={j} style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: 'var(--accent)',
+                                opacity: 0.5,
+                                animation: `pulse 1.4s ease-in-out ${j * 0.2}s infinite`,
+                              }} />
+                            ))}
                           </div>
-                        )}
+                          <span style={{ fontSize: 13, color: 'var(--color-fg-2)' }}>Thinking…</span>
+                        </div>
                       </div>
-                    ))
-                  )}
-                  {sending && (
-                    <div className="flex justify-start">
-                      <div className="bg-bg-2/60 border border-border px-4 py-2.5 flex items-center gap-2" style={{ borderRadius: '4px 18px 18px 18px' }}>
-                        <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
-                        <span className="text-xs text-fg-2">Thinking…</span>
-                      </div>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
                 </div>
 
-                {/* Chat input bar */}
+                {/* Scroll-to-bottom FAB */}
+                {showScrollBtn && (
+                  <button
+                    onClick={() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })}
+                    aria-label="Scroll to bottom"
+                    style={{
+                      position: 'absolute', bottom: selectedAgentName ? 100 : 20, right: 24,
+                      width: 36, height: 36, borderRadius: '50%',
+                      background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                      boxShadow: 'var(--elevation-2)', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16, color: 'var(--color-fg-2)',
+                      transition: 'all var(--duration-medium) var(--ease-emphasized-decel)',
+                      zIndex: 10,
+                    }}
+                  >↓</button>
+                )}
+
+                {/* ── Chat Input ── */}
                 {selectedAgentName && (
-                  <div className="flex-shrink-0 border-t border-border/30 px-5 py-4">
-                    <div className="flex items-end gap-2">
-                      <textarea
-                        ref={chatInputRef}
-                        className="flex-1 input-m3 px-4 py-2.5 text-xs text-fg resize-none focus:outline-none min-h-[40px] max-h-[120px] transition-all placeholder-fg-2/40"
-                        placeholder={sending ? 'Waiting for response…' : `Message ${selectedAgentName}…`}
-                        rows={1}
-                        value={chatInput}
-                        onChange={e => setChatInput(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); }
-                        }}
-                        disabled={sending}
-                        onInput={e => {
-                          const t = e.currentTarget;
-                          t.style.height = 'auto';
-                          t.style.height = Math.min(t.scrollHeight, 120) + 'px';
-                        }}
-                      />
-                      <button
-                        className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 disabled:opacity-20"
-                        onClick={handleSendChat}
-                        disabled={sending || !chatInput.trim()}>
-                        {sending ? '⏳' : '↑'}
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <span className="text-[10px] text-fg-2/30">Enter to send · Shift+Enter for newline</span>
-                      <span className="text-[10px] text-fg-2/30">
-                        {selectedType === 'headless' ? '⚡ SDK headless' : '📺 psmux relay'}
-                      </span>
+                  <div style={{
+                    flexShrink: 0, padding: '12px 24px 16px',
+                    background: 'var(--color-bg)',
+                  }}>
+                    <div style={{ maxWidth: 720, margin: '0 auto' }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'flex-end', gap: 0,
+                        background: 'var(--color-bg-2)', border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--shape-xl)',
+                        padding: '4px 4px 4px 16px',
+                        boxShadow: 'var(--elevation-1)',
+                        transition: 'border-color var(--duration-short) var(--ease-standard), box-shadow var(--duration-short) var(--ease-standard)',
+                      }}>
+                        <textarea
+                          ref={chatInputRef}
+                          style={{
+                            flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                            fontSize: 14, lineHeight: 1.5, color: 'var(--color-fg)',
+                            resize: 'none', minHeight: 24, maxHeight: 140,
+                            padding: '8px 0', fontFamily: 'inherit',
+                          }}
+                          placeholder={sending ? 'Waiting for response…' : `Message ${selectedAgentName}…`}
+                          rows={1}
+                          value={chatInput}
+                          onChange={e => setChatInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendChat(); }
+                          }}
+                          disabled={sending}
+                          onInput={e => {
+                            const t = e.currentTarget;
+                            t.style.height = 'auto';
+                            t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+                          }}
+                          onFocus={() => {
+                            const container = chatInputRef.current?.parentElement;
+                            if (container) container.style.borderColor = 'var(--accent)';
+                          }}
+                          onBlur={() => {
+                            const container = chatInputRef.current?.parentElement;
+                            if (container) container.style.borderColor = 'var(--color-border)';
+                          }}
+                        />
+                        <button
+                          onClick={handleSendChat}
+                          disabled={sending || !chatInput.trim()}
+                          aria-label="Send message"
+                          style={{
+                            width: 36, height: 36, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                            flexShrink: 0,
+                            background: chatInput.trim() ? 'var(--accent)' : 'transparent',
+                            color: chatInput.trim() ? '#fff' : 'var(--color-fg-2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 16, fontWeight: 700,
+                            opacity: sending ? 0.4 : 1,
+                            transition: 'all var(--duration-medium) var(--ease-emphasized-decel)',
+                          }}
+                        >
+                          {sending ? '⏳' : '↑'}
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px 0', fontSize: 11, color: 'var(--color-fg-2)', opacity: 0.35 }}>
+                        <span>Enter to send · Shift+Enter for newline</span>
+                        <span>{selectedType === 'headless' ? '⚡ headless' : '📺 relay'}</span>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
             ) : (
               /* Plan view */
-              <div className="flex-1 overflow-auto p-4">
-                <pre className="text-xs font-mono text-fg-2 leading-relaxed whitespace-pre-wrap">
-                  {planContent || '(No plan found)'}
-                </pre>
+              <div className="flex-1 overflow-auto" style={{ padding: '24px 32px' }}>
+                <div style={{ maxWidth: 720, margin: '0 auto' }}>
+                  <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--color-fg-1)' }} className="prose-chat">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{planContent || '(No plan found)'}</ReactMarkdown>
+                  </div>
+                </div>
               </div>
             )}
           </div>
