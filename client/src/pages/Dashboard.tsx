@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import type { AgentData } from '../lib/api';
 import { api } from '../lib/api';
 import { AgentCardMemo as AgentCard } from '../components/AgentCard';
@@ -53,6 +53,11 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['__workflow']));
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [templates, setTemplates] = useState<any[]>([]);
+
+  useEffect(() => {
+    api.getTemplates().then(setTemplates).catch(() => {});
+  }, []);
 
   // Batch selection state
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
@@ -199,6 +204,26 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
           className="bg-bg-1 border border-border rounded-lg px-3 py-1.5 text-[12px] text-fg w-48 focus:outline-none focus:border-border-1 placeholder:text-fg-2/40"
         />
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>+ New</button>
+        {templates.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {templates.slice(0, 5).map(t => (
+              <button
+                key={t.name}
+                className="btn"
+                style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                onClick={async () => {
+                  try {
+                    await api.spawnAgent({ name: `${t.name}-${Date.now() % 10000}`, template: t.name, headless: true });
+                    onRefresh();
+                  } catch {}
+                }}
+                title={t.description || t.name}
+              >
+                ⚡ {t.name}
+              </button>
+            ))}
+          </div>
+        )}
         {pins.size > 0 && (
           <span className="text-[10px] text-fg-2 font-medium">⭐ {pins.size} pinned</span>
         )}

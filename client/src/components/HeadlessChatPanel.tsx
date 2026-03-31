@@ -11,6 +11,8 @@ interface ToolCall {
   status: 'running' | 'done';
   timestamp: number;
   endTimestamp?: number;
+  input?: string;
+  output?: string;
 }
 
 interface UsageInfo {
@@ -92,38 +94,65 @@ function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string; isStr
   );
 }
 
-/** Tool timeline — vertical list with status dots and duration */
-function ToolTimeline({ tools }: { tools: ToolCall[] }) {
+/** Inline expandable tool call card */
+function InlineToolCall({ tool }: { tool: ToolCall }) {
+  const [expanded, setExpanded] = useState(false);
   const now = Date.now();
+  const elapsed = (tool.endTimestamp || now) - tool.timestamp;
+  const hasDetails = !!(tool.input || tool.output);
+
   return (
-    <div className="mb-2 pl-1">
-      <div className="flex flex-col gap-0.5">
-        {tools.map((t, i) => {
-          const elapsed = (t.endTimestamp || now) - t.timestamp;
-          return (
-            <div key={`${t.tool}-${i}`} className="flex items-center gap-2 py-0.5 group/tool">
-              {/* Status indicator */}
-              <div className="flex-shrink-0 w-4 flex justify-center">
-                {t.status === 'running' ? (
-                  <span className="w-2 h-2 rounded-full bg-amber-400/80 animate-pulse" />
-                ) : (
-                  <svg className="w-3 h-3 text-emerald-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-              </div>
-              {/* Tool name */}
-              <span className={`text-[11px] font-mono truncate ${
-                t.status === 'running' ? 'text-amber-400/80' : 'text-fg-2/50'
-              }`}>{t.tool}</span>
-              {/* Duration */}
-              <span className="text-[10px] text-fg-2/25 tabular-nums ml-auto opacity-0 group-hover/tool:opacity-100 transition-opacity">
-                {formatDuration(elapsed)}
-              </span>
-            </div>
-          );
-        })}
+    <div
+      style={{
+        background: 'var(--color-bg-2)',
+        border: '1px solid var(--color-border)',
+        borderRadius: 6,
+        padding: '4px 8px',
+        fontSize: '0.75rem',
+        fontFamily: 'monospace',
+        cursor: hasDetails ? 'pointer' : 'default',
+      }}
+      onClick={() => hasDetails && setExpanded(!expanded)}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: tool.status === 'done' ? '#22c55e' : '#3b82f6' }}>
+          {tool.status === 'done' ? '✓' : '⏳'}
+        </span>
+        <span style={{ color: '#60a5fa' }}>{tool.tool}</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--color-fg-2)', fontSize: '0.7rem' }}>
+          {formatDuration(elapsed)}
+        </span>
+        {hasDetails && (
+          <span style={{ color: 'var(--color-fg-2)' }}>{expanded ? '▾' : '▸'}</span>
+        )}
       </div>
+      {expanded && (
+        <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--color-border)' }}>
+          {tool.input && (
+            <div style={{ color: 'var(--color-fg-2)', marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 100, overflow: 'auto' }}>
+              <span style={{ color: 'var(--color-fg-1)' }}>→ </span>
+              {typeof tool.input === 'string' ? tool.input.slice(0, 300) : JSON.stringify(tool.input).slice(0, 300)}
+            </div>
+          )}
+          {tool.output && (
+            <div style={{ color: 'var(--color-fg-1)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 150, overflow: 'auto' }}>
+              <span style={{ color: '#22c55e' }}>← </span>
+              {typeof tool.output === 'string' ? tool.output.slice(0, 500) : JSON.stringify(tool.output).slice(0, 500)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tool timeline — vertical stack of inline tool cards */
+function ToolTimeline({ tools }: { tools: ToolCall[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0' }}>
+      {tools.map((t, i) => (
+        <InlineToolCall key={`${t.tool}-${i}`} tool={t} />
+      ))}
     </div>
   );
 }
@@ -415,11 +444,13 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
             setMessages(prev => prev.map(m => m.id === sid ? { ...m, thinking, streaming: true } : m));
           }
         } else if (msg.type === 'tool_start') {
-          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, status: 'running', timestamp: Date.now() }];
+          const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
+          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, status: 'running', timestamp: Date.now(), input }];
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'tool_complete') {
+          const output = (msg.output || msg.result) ? (typeof (msg.output || msg.result) === 'string' ? (msg.output || msg.result) : JSON.stringify(msg.output || msg.result)) : undefined;
           toolsBuf.current = toolsBuf.current.map(t =>
-            t.tool === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now() } : t
+            t.tool === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output } : t
           );
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'intent') {

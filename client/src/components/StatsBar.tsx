@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api, type AgentData } from '../lib/api';
 
 interface Props {
@@ -8,6 +8,7 @@ interface Props {
 export default function StatsBar({ agents }: Props) {
   const [relayCount, setRelayCount] = useState(0);
   const [sessionCount, setSessionCount] = useState(0);
+  const [activeWorkflows, setActiveWorkflows] = useState(0);
 
   useEffect(() => {
     const load = () => {
@@ -29,9 +30,26 @@ export default function StatsBar({ agents }: Props) {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const fetch = () => api.getWorkflowRuns().then(runs => {
+      setActiveWorkflows(runs.filter((r: any) => r.status === 'running').length);
+    }).catch(() => {});
+    fetch();
+    const id = setInterval(fetch, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   const running = agents.filter(a => a.status === 'running').length;
   const idle = agents.filter(a => a.status === 'idle').length;
   const stopped = agents.filter(a => a.status === 'stopped').length;
+  const headlessCount = agents.filter(a => a.type === 'headless').length;
+
+  const topModel = useMemo(() => {
+    const counts: Record<string, number> = {};
+    agents.forEach(a => { if (a.model) counts[a.model] = (counts[a.model] || 0) + 1; });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    return entries[0] ? `${entries[0][0].split('-').pop()} ×${entries[0][1]}` : null;
+  }, [agents]);
 
   const stats = [
     { label: 'active', value: running, color: 'bg-emerald-500', textColor: 'text-emerald-400', bgTint: 'rgba(34, 197, 94, 0.04)' },
@@ -56,6 +74,16 @@ export default function StatsBar({ agents }: Props) {
         <span>{relayCount} relay{relayCount !== 1 ? 's' : ''} today</span>
         <span className="w-px h-3.5 bg-border" />
         <span>{sessionCount} pane{sessionCount !== 1 ? 's' : ''}</span>
+        <span className="w-px h-3.5 bg-border" />
+        <span>{headlessCount} headless</span>
+        <span className="w-px h-3.5 bg-border" />
+        <span>{activeWorkflows} workflow{activeWorkflows !== 1 ? 's' : ''}</span>
+        {topModel && (
+          <>
+            <span className="w-px h-3.5 bg-border" />
+            <span>🤖 {topModel}</span>
+          </>
+        )}
       </div>
     </div>
   );

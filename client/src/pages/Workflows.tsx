@@ -53,6 +53,20 @@ function elapsed(start: string, end?: string): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const min = Math.floor(ms / 60000);
+  const sec = Math.floor((ms % 60000) / 1000);
+  return `${min}m ${sec}s`;
+}
+
+const DURATION_BAR_COLORS: Record<string, string> = {
+  pending: '#71717a', running: '#3b82f6', complete: '#10b981',
+  failed: '#ef4444', skipped: '#71717a', cancelled: '#f59e0b',
+  reviewing: '#a855f7', waiting: '#f59e0b',
+};
+
 /* ─── 3. Main Workflows Component ───────────────────────────────── */
 
 export default function Workflows() {
@@ -957,9 +971,22 @@ function RunMonitor({
                     )}
                   </div>
                   {step.startedAt && (
-                    <div className="text-xs text-fg-2">
-                      {elapsed(step.startedAt, step.finishedAt)}
-                      {step.tokens ? ` · ${step.tokens} tokens` : ''}
+                    <div className="text-xs text-fg-2 flex items-center gap-2">
+                      {step.startedAt && step.finishedAt && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)', fontFamily: 'monospace' }}>
+                          ⏱ {formatDuration(new Date(step.finishedAt).getTime() - new Date(step.startedAt).getTime())}
+                        </span>
+                      )}
+                      {step.startedAt && !step.finishedAt && step.status === 'running' && (
+                        <span style={{ fontSize: '0.75rem', color: '#3b82f6', fontFamily: 'monospace' }}>
+                          ⏱ {formatDuration(Date.now() - new Date(step.startedAt).getTime())}
+                        </span>
+                      )}
+                      {step.tokens && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--color-fg-2)' }}>
+                          {step.tokens.toLocaleString()} tok
+                        </span>
+                      )}
                       {step.error ? ` · Error: ${step.error}` : ''}
                     </div>
                   )}
@@ -1071,6 +1098,42 @@ function RunMonitor({
           );
         })}
       </div>
+
+      {/* Step Duration Bars */}
+      {run.steps.some(s => s.startedAt && s.finishedAt) && (
+        <div style={{ marginTop: 16, padding: 12, background: 'var(--color-bg-2)', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+          <div style={{ fontSize: '0.8rem', color: 'var(--color-fg-1)', fontWeight: 500, marginBottom: 8 }}>Step Durations</div>
+          {run.steps.filter(s => s.startedAt).map(step => {
+            const dur = step.finishedAt
+              ? new Date(step.finishedAt).getTime() - new Date(step.startedAt!).getTime()
+              : Date.now() - new Date(step.startedAt!).getTime();
+            const maxDur = Math.max(...run.steps.filter(s => s.startedAt).map(s => {
+              const d = s.finishedAt ? new Date(s.finishedAt).getTime() - new Date(s.startedAt!).getTime() : Date.now() - new Date(s.startedAt!).getTime();
+              return d;
+            }));
+            const pct = maxDur > 0 ? (dur / maxDur) * 100 : 0;
+            return (
+              <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ width: 80, fontSize: '0.7rem', color: 'var(--color-fg-2)', fontFamily: 'monospace', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {step.name || step.id}
+                </span>
+                <div style={{ flex: 1, height: 14, background: 'var(--color-bg-3)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${pct}%`,
+                    height: '100%',
+                    background: DURATION_BAR_COLORS[step.status] || '#71717a',
+                    borderRadius: 3,
+                    transition: 'width 0.3s ease',
+                  }} />
+                </div>
+                <span style={{ width: 50, fontSize: '0.7rem', color: 'var(--color-fg-2)', fontFamily: 'monospace', flexShrink: 0 }}>
+                  {formatDuration(dur)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Error */}
       {run.error && (

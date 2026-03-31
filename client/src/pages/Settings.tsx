@@ -172,10 +172,61 @@ function SessionsSection() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmState, setConfirmState] = useState<{action: () => void, title: string, message: string} | null>(null);
+  const [importResult, setImportResult] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchAgents = useCallback(() => {
     api.getAgents().then(a => { setAgents(a); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => { fetchAgents(); }, [fetchAgents]);
+
+  const handleExport = () => {
+    const exportData = agents.map(a => ({
+      name: a.name,
+      description: a.description,
+      model: a.model,
+      type: a.type,
+      flags: a.flags,
+      reasoningEffort: a.reasoningEffort,
+      agentMode: a.agentMode,
+      task: a.task,
+    }));
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `copilot-town-agents-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const imported = JSON.parse(text) as Array<{ name: string; model?: string; [k: string]: any }>;
+      if (!Array.isArray(imported)) throw new Error('Invalid format');
+
+      let spawned = 0;
+      for (const agent of imported) {
+        try {
+          await api.spawnAgent({
+            name: agent.name,
+            model: agent.model,
+            headless: true,
+            reasoningEffort: agent.reasoningEffort,
+          });
+          spawned++;
+        } catch { /* skip duplicates */ }
+      }
+
+      setImportResult(`Spawned ${spawned} of ${imported.length} agents`);
+      setTimeout(() => setImportResult(null), 5000);
+      fetchAgents();
+    } catch (e: any) {
+      setImportResult(`Import failed: ${e.message}`);
+      setTimeout(() => setImportResult(null), 5000);
+    }
+  };
 
   const updateAgent = useCallback(async (id: string, settings: { name?: string; description?: string }) => {
     try {
@@ -240,7 +291,30 @@ function SessionsSection() {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">Sessions</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider" style={{ flex: 1, margin: 0 }}>Sessions</h2>
+        <button className="btn" onClick={handleExport} title="Export agent configs as JSON">
+          📥 Export
+        </button>
+        <label className="btn" style={{ cursor: 'pointer' }} title="Import agents from JSON">
+          📤 Import
+          <input
+            type="file"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={(e) => { if (e.target.files?.[0]) handleImport(e.target.files[0]); e.target.value = ''; }}
+          />
+        </label>
+      </div>
+      {importResult && (
+        <div style={{ padding: '8px 12px', marginBottom: 12, borderRadius: 6, fontSize: '0.85rem',
+          background: importResult.includes('failed') ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+          color: importResult.includes('failed') ? '#ef4444' : '#22c55e',
+          border: `1px solid ${importResult.includes('failed') ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'}`,
+        }}>
+          {importResult}
+        </div>
+      )}
       {agents.length === 0 ? (
         <p className="text-xs text-fg-2">No agents found in agent-sessions.json</p>
       ) : (
