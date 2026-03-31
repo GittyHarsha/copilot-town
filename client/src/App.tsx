@@ -11,6 +11,10 @@ import ToastContainer from './components/ToastContainer';
 import HeadlessChatPanel from './components/HeadlessChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
 import ShortcutsModal from './components/ShortcutsModal';
+import { fetchModels } from './lib/models';
+
+// Preload models so the New dialog opens instantly
+fetchModels();
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));

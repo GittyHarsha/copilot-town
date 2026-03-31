@@ -42,13 +42,14 @@ export async function fetchModels(): Promise<ModelInfo[]> {
         label: m.name || m.id,
         tier: classifyTier(m),
       }));
+      _fetchPromise = null;
       return _dynamicModels;
     })
     .catch(() => {
+      _fetchPromise = null;
       _dynamicModels = FALLBACK_MODELS;
       return FALLBACK_MODELS;
-    })
-    .finally(() => { _fetchPromise = null; });
+    });
 
   return _fetchPromise;
 }

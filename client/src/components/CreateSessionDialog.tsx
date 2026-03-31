@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api, type AgentData, type AgentTemplate } from '../lib/api';
-import { fetchModels, type ModelInfo } from '../lib/models';
+import { fetchModels, getCachedModels, type ModelInfo } from '../lib/models';
 
 interface Props {
   open: boolean;
@@ -35,6 +35,8 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
     api.getAgents().then(agents => {
       setStoppedAgents(agents.filter(a => a.status === 'stopped'));
     }).catch(() => {});
+    // Show cached/fallback models instantly, upgrade when API responds
+    setModels(getCachedModels());
     fetchModels().then(setModels).catch(() => {});
   }, [open]);
 

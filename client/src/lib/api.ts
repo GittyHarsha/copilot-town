@@ -377,6 +377,12 @@ export const api = {
     fetchJson<{ agents: string[] }>(`/workflows/runs/${encodeURIComponent(runId)}/agents`),
   cleanupRunAgents: (runId: string) =>
     deleteJson<{ ok: boolean }>(`/workflows/runs/${encodeURIComponent(runId)}/agents`),
+  promoteStepAgent: (runId: string, stepId: string, name?: string) =>
+    postJson<{ agentName: string; promoted: boolean }>(`/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/promote`, { name }),
+  getWorkflowAnalytics: (id: string) =>
+    fetchJson<any>(`/workflows/${encodeURIComponent(id)}/analytics`),
+  getArtifactUrl: (runId: string, stepId: string, name: string) =>
+    `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/artifacts/${encodeURIComponent(name)}`,
 
   // Stage files
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),

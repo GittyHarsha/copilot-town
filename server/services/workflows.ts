@@ -1,9 +1,13 @@
-import { readdir, readFile, writeFile, mkdir, unlink } from 'fs/promises';
+import { readdir, readFile, writeFile, mkdir, unlink, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, basename, resolve, sep } from 'path';
 import { parse as parseYaml } from 'yaml';
+import { exec as execCb } from 'child_process';
+import { promisify } from 'util';
 import { createHeadlessAgent, sendToHeadless, destroyHeadlessAgent } from './headless.js';
 import { pushEvent } from './events.js';
+
+const execAsync = promisify(execCb);
 
 // ─── Types ───────────────────────────────────────────────────────────
 //
@@ -25,7 +29,7 @@ export interface StepDef {
   id: string;
   name?: string;
   needs?: string[];
-  type?: 'step' | 'gate';  // gate = pause for human approval
+  type?: 'step' | 'gate' | 'http' | 'shell' | 'file-read' | 'file-write' | 'workflow' | 'foreach';
   agent?: { model?: string; systemPrompt?: string };
   prompt: string;
   prompt_file?: string;     // reference a .md file in data/stages/ instead of inline prompt
@@ -50,6 +54,24 @@ export interface StepDef {
   review?: {
     criteria: string;       // what "good" looks like
     max_iterations?: number; // default 3
+  };
+  // ── Tool step fields ──
+  // HTTP step: url, method, headers, body (all interpolated)
+  http?: { url: string; method?: string; headers?: Record<string, string>; body?: string };
+  // Shell step: command to run (interpolated). stdout becomes output.
+  shell?: { command: string; cwd?: string };
+  // File-read: path to read (interpolated). Contents become output.
+  file_read?: { path: string };
+  // File-write: path and content (both interpolated). Writes file, output = path.
+  file_write?: { path: string; content: string };
+  // Sub-workflow: workflow ID to call, inputs mapped from template vars
+  workflow?: { id: string; inputs?: Record<string, string> };
+  // Foreach: iterate over items array. Each item runs the body step template.
+  foreach?: {
+    items: string;          // expression resolving to JSON array, e.g. "${{ steps.X.outputs.list }}"
+    as?: string;            // variable name for current item (default: "item")
+    step: StepDef;          // body step template (executed once per item)
+    max_items?: number;     // safety cap (default: 50)
   };
 }
 
@@ -77,6 +99,13 @@ export interface StepResult {
   iterations: Iteration[];
   outputs?: Record<string, any>;  // parsed structured data from agent output
   retries?: number;               // retry attempts made
+  artifacts?: Artifact[];         // files produced by this step
+}
+
+export interface Artifact {
+  name: string;
+  path: string;
+  size: number;
 }
 
 export interface WorkflowRun {
@@ -98,6 +127,7 @@ type RunListener = (run: WorkflowRun) => void;
 const WORKFLOWS_DIR = join(process.cwd(), 'data', 'workflows');
 const STAGES_DIR = join(process.cwd(), 'data', 'stages');
 const RUNS_DIR = join(process.cwd(), 'data', 'runs');
+const ARTIFACTS_DIR = join(process.cwd(), 'data', 'artifacts');
 const workflows = new Map<string, WorkflowDef>();
 const runs = new Map<string, WorkflowRun>();
 const runListeners = new Set<RunListener>();
@@ -509,6 +539,202 @@ async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void
     stepResult.finishedAt = new Date().toISOString();
     stepResults[stepDef.id] = stepResult;
     run.status = 'running';
+    broadcast(run);
+    return;
+  }
+
+  // ── HTTP step: make an HTTP request ──
+  if (stepDef.type === 'http' && stepDef.http) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const cfg = stepDef.http;
+      const url = interpolate(cfg.url, interpCtx);
+      const method = (cfg.method || 'GET').toUpperCase();
+      const headers: Record<string, string> = {};
+      if (cfg.headers) {
+        for (const [k, v] of Object.entries(cfg.headers)) headers[k] = interpolate(v, interpCtx);
+      }
+      const body = cfg.body ? interpolate(cfg.body, interpCtx) : undefined;
+      const res = await fetch(url, { method, headers, body, signal: AbortSignal.timeout((stepDef.timeout || 30) * 1000) });
+      const text = await res.text();
+      stepResult.output = text;
+      if (stepDef.outputs) stepResult.outputs = parseStepOutputs(text);
+      stepResult.status = res.ok ? 'complete' : 'failed';
+      if (!res.ok) stepResult.error = `HTTP ${res.status} ${res.statusText}`;
+    } catch (e: any) {
+      stepResult.status = 'failed';
+      stepResult.error = e.message;
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+    return;
+  }
+
+  // ── Shell step: run a command ──
+  if (stepDef.type === 'shell' && stepDef.shell) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const command = interpolate(stepDef.shell.command, interpCtx);
+      const cwd = stepDef.shell.cwd ? interpolate(stepDef.shell.cwd, interpCtx) : process.cwd();
+      const { stdout, stderr } = await execAsync(command, {
+        cwd,
+        timeout: (stepDef.timeout || 120) * 1000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      stepResult.output = stdout + (stderr ? `\n--- stderr ---\n${stderr}` : '');
+      if (stepDef.outputs) stepResult.outputs = parseStepOutputs(stepResult.output);
+      stepResult.status = 'complete';
+    } catch (e: any) {
+      stepResult.output = e.stdout || '';
+      stepResult.error = e.stderr || e.message;
+      stepResult.status = 'failed';
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+    return;
+  }
+
+  // ── File-read step ──
+  if (stepDef.type === 'file-read' && stepDef.file_read) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const filePath = interpolate(stepDef.file_read.path, interpCtx);
+      stepResult.output = await readFile(filePath, 'utf-8');
+      if (stepDef.outputs) stepResult.outputs = parseStepOutputs(stepResult.output);
+      stepResult.status = 'complete';
+    } catch (e: any) {
+      stepResult.status = 'failed';
+      stepResult.error = e.message;
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+    return;
+  }
+
+  // ── File-write step (produces artifact) ──
+  if (stepDef.type === 'file-write' && stepDef.file_write) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const filePath = interpolate(stepDef.file_write.path, interpCtx);
+      const content = interpolate(stepDef.file_write.content, interpCtx);
+      const artifactDir = join(ARTIFACTS_DIR, run.runId, stepDef.id);
+      await mkdir(artifactDir, { recursive: true });
+      const destPath = join(artifactDir, basename(filePath));
+      await writeFile(destPath, content, 'utf-8');
+      const fileStat = await stat(destPath);
+      stepResult.artifacts = [{ name: basename(filePath), path: destPath, size: fileStat.size }];
+      stepResult.output = `Wrote ${fileStat.size} bytes to ${basename(filePath)}`;
+      stepResult.status = 'complete';
+    } catch (e: any) {
+      stepResult.status = 'failed';
+      stepResult.error = e.message;
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+    return;
+  }
+
+  // ── Sub-workflow step ──
+  if (stepDef.type === 'workflow' && stepDef.workflow) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const subInputs: Record<string, string> = {};
+      if (stepDef.workflow.inputs) {
+        for (const [k, v] of Object.entries(stepDef.workflow.inputs)) {
+          subInputs[k] = interpolate(v, interpCtx);
+        }
+      }
+      const subRun = await executeWorkflow(stepDef.workflow.id, subInputs);
+      // Collect all sub-workflow step outputs into this step's output
+      const subOutputs: Record<string, any> = {};
+      for (const s of subRun.steps) {
+        if (s.outputs) Object.assign(subOutputs, s.outputs);
+      }
+      stepResult.output = subRun.steps.map(s => `[${s.id}] ${s.output}`).join('\n\n');
+      stepResult.outputs = subOutputs;
+      stepResult.status = subRun.status === 'complete' ? 'complete' : 'failed';
+      if (subRun.status !== 'complete') stepResult.error = subRun.error || 'Sub-workflow failed';
+    } catch (e: any) {
+      stepResult.status = 'failed';
+      stepResult.error = e.message;
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
+    broadcast(run);
+    return;
+  }
+
+  // ── Foreach step: iterate over items ──
+  if (stepDef.type === 'foreach' && stepDef.foreach) {
+    stepResult.status = 'running';
+    stepResult.startedAt = new Date().toISOString();
+    broadcast(run);
+    try {
+      const itemsRaw = interpolate(stepDef.foreach.items, interpCtx);
+      let items: any[];
+      try { items = JSON.parse(itemsRaw); } catch { items = itemsRaw.split('\n').filter(Boolean); }
+      const maxItems = stepDef.foreach.max_items || 50;
+      items = items.slice(0, maxItems);
+      const varName = stepDef.foreach.as || 'item';
+      const allOutputs: string[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = typeof items[i] === 'string' ? items[i] : JSON.stringify(items[i]);
+        // Create a sub-context with the loop variable injected as an input
+        const loopInputs = { ...inputs, [varName]: item, [`${varName}_index`]: String(i) };
+        const loopInterpCtx = { inputs: loopInputs, steps: stepResults };
+        const bodyDef = { ...stepDef.foreach.step, id: `${stepDef.id}-${i}` };
+
+        // Create a synthetic step result for the body
+        const bodyResult: StepResult = {
+          id: bodyDef.id, name: `${stepDef.name || stepDef.id} [${i}]`,
+          status: 'pending', output: '', iteration: 0, iterations: [],
+        };
+        run.steps.push(bodyResult);
+        broadcast(run);
+
+        // Execute the body step
+        const bodyCtx: StepExecContext = {
+          run, def, inputs: loopInputs, stepResults, runAgents, sharedSessions, targetedAgents,
+        };
+        // Override the prompt with loop context
+        const origPrompt = bodyDef.prompt;
+        bodyDef.prompt = interpolate(origPrompt, loopInterpCtx);
+        await executeStep(bodyDef, bodyCtx);
+
+        const executed = run.steps.find(s => s.id === bodyDef.id);
+        if (executed) allOutputs.push(executed.output);
+      }
+
+      stepResult.output = allOutputs.join('\n---\n');
+      if (stepDef.outputs) stepResult.outputs = parseStepOutputs(stepResult.output);
+      stepResult.status = 'complete';
+    } catch (e: any) {
+      stepResult.status = 'failed';
+      stepResult.error = e.message;
+      if (!stepDef.continue_on_fail) throw e;
+    }
+    stepResult.finishedAt = new Date().toISOString();
+    stepResults[stepDef.id] = stepResult;
     broadcast(run);
     return;
   }
@@ -981,6 +1207,39 @@ export function resumeRun(runId: string): boolean {
   if (resolver) { resolver(); pauseResolvers.delete(runId); }
   pushEvent('workflow', `Run ${runId} resumed`, 'info', run.workflowId);
   return true;
+}
+
+// ─── Agent Promotion ────────────────────────────────────────────────
+
+export async function promoteStepAgent(
+  runId: string,
+  stepId: string,
+  newName?: string,
+): Promise<{ agentName: string; promoted: boolean }> {
+  const run = runs.get(runId);
+  if (!run) throw new Error(`Run "${runId}" not found`);
+  const step = run.steps.find(s => s.id === stepId);
+  if (!step) throw new Error(`Step "${stepId}" not found`);
+  if (!step.agentName) throw new Error(`Step "${stepId}" has no agent`);
+
+  const alive = persistentAgents.get(runId);
+  if (!alive?.has(step.agentName)) {
+    throw new Error(`Agent "${step.agentName}" is no longer alive`);
+  }
+
+  // Remove from workflow cleanup — agent now lives independently
+  alive.delete(step.agentName);
+  if (alive.size === 0) {
+    persistentAgents.delete(runId);
+    const timer = cleanupTimers.get(runId);
+    if (timer) clearTimeout(timer);
+    cleanupTimers.delete(runId);
+  }
+
+  // Rename if requested (the headless agent system tracks by name)
+  const finalName = newName || step.agentName;
+  pushEvent('workflow', `Agent ${step.agentName} promoted to permanent agent "${finalName}"`, 'info', run.workflowId);
+  return { agentName: finalName, promoted: true };
 }
 
 // ─── Chat With Step Agent ───────────────────────────────────────────

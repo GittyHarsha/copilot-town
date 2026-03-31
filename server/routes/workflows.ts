@@ -3,10 +3,13 @@ import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate, rerunFromStep,
   pauseRun, resumeRun, chatWithStepAgent, rerunSingleStep, getAliveAgents, cleanupAgentsNow,
+  promoteStepAgent,
   getStageFiles, getStageFile, saveStageFile, deleteStageFile,
+  type WorkflowRun,
 } from '../services/workflows.js';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { join } from 'path';
+import { createReadStream } from 'fs';
 
 const router = Router();
 const WORKFLOWS_DIR = join(process.cwd(), 'data', 'workflows');
@@ -188,6 +191,62 @@ router.get('/runs/:runId/agents', (req, res) => {
 router.delete('/runs/:runId/agents', async (req, res) => {
   await cleanupAgentsNow(req.params.runId);
   res.json({ ok: true });
+});
+
+// Promote a step's agent to a permanent town agent
+router.post('/runs/:runId/steps/:stepId/promote', async (req, res) => {
+  try {
+    const { name } = req.body || {};
+    const result = await promoteStepAgent(req.params.runId, req.params.stepId, name);
+    res.json(result);
+  } catch (e: any) {
+    const status = e.message.includes('not found') ? 404 : 400;
+    res.status(status).json({ error: e.message });
+  }
+});
+
+// Download a step artifact
+router.get('/runs/:runId/steps/:stepId/artifacts/:name', async (req, res) => {
+  const run = getRun(req.params.runId);
+  if (!run) return res.status(404).json({ error: 'Run not found' });
+  const step = run.steps.find(s => s.id === req.params.stepId);
+  if (!step) return res.status(404).json({ error: 'Step not found' });
+  const artifact = step.artifacts?.find(a => a.name === req.params.name);
+  if (!artifact) return res.status(404).json({ error: 'Artifact not found' });
+  try {
+    const fileStat = await stat(artifact.path);
+    res.setHeader('Content-Disposition', `attachment; filename="${artifact.name}"`);
+    res.setHeader('Content-Length', fileStat.size);
+    createReadStream(artifact.path).pipe(res);
+  } catch {
+    res.status(404).json({ error: 'Artifact file missing from disk' });
+  }
+});
+
+// Run analytics — aggregate stats for a workflow
+router.get('/:id/analytics', (_req, res) => {
+  const allRuns = getRuns().filter(r => r.workflowId === _req.params.id);
+  if (allRuns.length === 0) return res.json({ runs: 0 });
+  const completed = allRuns.filter(r => r.status === 'complete');
+  const failed = allRuns.filter(r => r.status === 'failed');
+  const totalTokens = allRuns.reduce((sum, r) =>
+    sum + r.steps.reduce((s, step) => s + (step.tokens || 0), 0), 0);
+  const durations = allRuns
+    .filter(r => r.finishedAt)
+    .map(r => new Date(r.finishedAt!).getTime() - new Date(r.startedAt).getTime());
+  const avgDuration = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+  res.json({
+    runs: allRuns.length,
+    completed: completed.length,
+    failed: failed.length,
+    successRate: allRuns.length > 0 ? Math.round((completed.length / allRuns.length) * 100) : 0,
+    totalTokens,
+    avgDurationMs: Math.round(avgDuration),
+    recentRuns: allRuns.slice(0, 10).map(r => ({
+      runId: r.runId, status: r.status, startedAt: r.startedAt, finishedAt: r.finishedAt,
+      tokens: r.steps.reduce((s, step) => s + (step.tokens || 0), 0),
+    })),
+  });
 });
 
 // ─── Stage Files ────────────────────────────────────────────────────
