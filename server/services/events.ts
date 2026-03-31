@@ -15,7 +15,13 @@ export type EventType =
   | 'mode_switch'
   | 'model_change'
   | 'tool_use'
-  | 'user_prompt';
+  | 'user_prompt'
+  | 'workflow'
+  | 'auto_revive'
+  | 'enqueue'
+  | 'steer'
+  | 'abort'
+  | 'compact';
 
 export type Severity = 'info' | 'warn' | 'error';
 

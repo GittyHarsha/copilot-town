@@ -412,6 +412,8 @@ export async function compactHeadless(name: string): Promise<void> {
 
 /**
  * Get structured conversation history for a headless agent.
+ */
+export async function getHeadlessMessages(name: string) {
   let agent = _headlessAgents.get(name);
   if (!agent) {
     // Try auto-revive from session file

@@ -682,7 +682,7 @@ export async function executeWorkflow(
   };
   runs.set(runId, run);
   broadcast(run);
-  pushEvent({ type: 'workflow', action: 'started', agent: workflowId, detail: `Run ${runId}` });
+  pushEvent('workflow', `Run ${runId} started`, 'info', workflowId);
 
   const layers = topologicalOrder(def.steps);
   const execCtx: StepExecContext = { run, def, inputs, stepResults, runAgents, sharedSessions, targetedAgents };
@@ -714,7 +714,7 @@ export async function executeWorkflow(
   }
 
   broadcast(run);
-  pushEvent({ type: 'workflow', action: run.status, agent: workflowId, detail: `Run ${runId} ${run.status}` });
+  pushEvent('workflow', `Run ${runId} ${run.status}`, 'info', workflowId);
   return run;
 }
 
@@ -808,7 +808,7 @@ export async function rerunFromStep(
   run.error = undefined;
   run.finishedAt = undefined;
   broadcast(run);
-  pushEvent({ type: 'workflow', action: 'rerun', agent: run.workflowId, detail: `Rerun ${runId} from ${stepId}` });
+  pushEvent('workflow', `Rerun ${runId} from ${stepId}`, 'info', run.workflowId);
 
   // ── Re-execute from the target step forward ──
   const runAgents: string[] = [];
@@ -820,14 +820,14 @@ export async function rerunFromStep(
 
   try {
     for (const layer of layers) {
-      if (run.status === 'cancelled') break;
+      if ((run.status as string) === 'cancelled') break;
 
       // Only run steps that are pending (i.e. in the reset set)
       const pendingInLayer = layer.filter(s => resetSet.has(s.id));
       if (pendingInLayer.length === 0) continue;
 
       await Promise.all(pendingInLayer.map(async (stepDef) => {
-        if (run.status === 'cancelled') return;
+        if ((run.status as string) === 'cancelled') return;
         await executeStep(stepDef, execCtx);
       }));
     }
@@ -847,7 +847,7 @@ export async function rerunFromStep(
   }
 
   broadcast(run);
-  pushEvent({ type: 'workflow', action: run.status, agent: run.workflowId, detail: `Rerun ${runId} ${run.status}` });
+  pushEvent('workflow', `Rerun ${runId} ${run.status}`, 'info', run.workflowId);
   return run;
 }
 

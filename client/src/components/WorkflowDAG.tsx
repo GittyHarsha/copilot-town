@@ -10,6 +10,7 @@ interface StepResult {
 
 interface StepDef {
   id: string; name?: string; needs?: string[]; prompt?: string;
+  review?: { criteria: string; max_iterations?: number };
 }
 
 interface WorkflowDAGProps {
@@ -23,12 +24,12 @@ interface WorkflowDAGProps {
 const STATUS_COLORS: Record<string, string> = {
   pending: '#71717a', running: '#3b82f6', complete: '#22c55e',
   failed: '#ef4444', skipped: '#71717a', cancelled: '#71717a',
-  reviewing: '#a855f7', waiting: '#f59e0b',
+  reviewing: '#a855f7', waiting: '#f59e0b', rewinding: '#fbbf24',
 };
 
 const STATUS_ICONS: Record<string, string> = {
   pending: '○', running: '◉', complete: '✓', failed: '✗',
-  skipped: '—', cancelled: '⊘', reviewing: '🔍', waiting: '⏸',
+  skipped: '—', cancelled: '⊘', reviewing: '🔍', waiting: '⏸', rewinding: '↩',
 };
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
@@ -239,6 +240,7 @@ export default function WorkflowDAG({ steps, stepResults, onStepClick }: Workflo
           const label = step?.name || pos.id;
           const isRunning = status === 'running' || status === 'reviewing';
           const isFailed = status === 'failed';
+          const hasCriteria = !!step?.review?.criteria;
 
           return (
             <g
@@ -293,6 +295,20 @@ export default function WorkflowDAG({ steps, stepResults, onStepClick }: Workflo
                 opacity={status === 'complete' ? 0.1 : status === 'running' ? 0.08 : status === 'failed' ? 0.12 : 0.05}
                 style={{ transition: 'fill 0.4s ease, opacity 0.4s ease', pointerEvents: 'none' }}
               />
+
+              {/* Criteria indicator — dashed inner border */}
+              {hasCriteria && (
+                <rect
+                  x={3} y={3} rx={5} ry={5}
+                  width={NODE_W - 6} height={NODE_H - 6}
+                  fill="none"
+                  stroke="#22c55e"
+                  strokeWidth={1}
+                  strokeDasharray="3,2"
+                  opacity={0.45}
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
 
               {/* Status icon */}
               <text

@@ -6,10 +6,21 @@ import WorkflowDAG from '../components/WorkflowDAG';
 
 /* ─── 1. Types ──────────────────────────────────────────────────── */
 
+interface StepDefReview {
+  criteria: string;
+  max_iterations?: number;
+}
+
+interface WorkflowStepDef {
+  id: string; name?: string; needs?: string[]; prompt: string;
+  agent?: { model?: string };
+  review?: StepDefReview;
+}
+
 interface WorkflowDef {
   id: string; name: string; description?: string; icon?: string;
   inputs?: Record<string, { description?: string; required?: boolean; default?: string }>;
-  steps: { id: string; name?: string; needs?: string[]; prompt: string; agent?: { model?: string } }[];
+  steps: WorkflowStepDef[];
   yaml?: string;
 }
 
@@ -22,6 +33,7 @@ interface StepResult {
   id: string; name?: string; status: string; output: string;
   error?: string; startedAt?: string; finishedAt?: string; tokens?: number; agentName?: string;
   iteration?: number; iterations?: Iteration[];
+  review?: { criteria: string; max_iterations?: number };
 }
 
 interface WorkflowRun {
@@ -89,6 +101,12 @@ export default function Workflows() {
   const [editorYaml, setEditorYaml] = useState('');
   const [editorIsNew, setEditorIsNew] = useState(true);
   const [editorSaving, setEditorSaving] = useState(false);
+
+  // Step criteria editing state
+  const [editingCriteriaStep, setEditingCriteriaStep] = useState<string | null>(null);
+  const [criteriaText, setCriteriaText] = useState('');
+  const [criteriaMaxIter, setCriteriaMaxIter] = useState(3);
+  const [criteriaSaving, setCriteriaSaving] = useState(false);
 
   // Stage files state
   const [stageFiles, setStageFiles] = useState<string[]>([]);
@@ -162,6 +180,7 @@ export default function Workflows() {
     setSelectedWf(wf);
     setExpandedStep(null);
     setSteerStep(null);
+    setEditingCriteriaStep(null);
     const defaultInputs: Record<string, string> = {};
     if (wf.inputs) {
       for (const [key, spec] of Object.entries(wf.inputs)) {
@@ -169,6 +188,59 @@ export default function Workflows() {
       }
     }
     setInputs(defaultInputs);
+  };
+
+  // Save step review criteria by updating the YAML
+  const saveStepCriteria = async (stepId: string, criteria: string, maxIterations: number) => {
+    if (!selectedWf?.yaml && !selectedWf) return;
+    setCriteriaSaving(true);
+    try {
+      const full = await api.getWorkflow(selectedWf.id);
+      let yaml = full.yaml || '';
+      // Find the step block and add/update the review field
+      const lines = yaml.split('\n');
+      const stepIdx = lines.findIndex((l: string) => /^\s+-\s+id:\s*/.test(l) && l.trim().replace(/^-\s+id:\s*/, '').replace(/["']/g, '') === stepId);
+      if (stepIdx === -1) throw new Error(`Step "${stepId}" not found in YAML`);
+      // Determine indentation of the step
+      const stepLine = lines[stepIdx];
+      const baseIndent = stepLine.match(/^(\s*)/)?.[1] || '';
+      const fieldIndent = baseIndent + '  ';
+      // Find extent of this step (next step or end)
+      let stepEnd = lines.length;
+      for (let j = stepIdx + 1; j < lines.length; j++) {
+        if (/^\s+-\s+id:\s*/.test(lines[j])) { stepEnd = j; break; }
+      }
+      // Remove existing review block within this step
+      const reviewIdx = lines.findIndex((l: string, i: number) => i > stepIdx && i < stepEnd && l.trim().startsWith('review:'));
+      if (reviewIdx !== -1) {
+        let end = reviewIdx + 1;
+        const reviewIndent = (lines[reviewIdx].match(/^(\s*)/)?.[1] || '').length;
+        while (end < stepEnd && lines[end].match(/^(\s*)/)?.[1]?.length! > reviewIndent) end++;
+        lines.splice(reviewIdx, end - reviewIdx);
+        stepEnd -= (end - reviewIdx);
+      }
+      // Insert review block before end of step
+      const reviewLines = [
+        `${fieldIndent}review:`,
+        `${fieldIndent}  criteria: "${criteria.replace(/"/g, '\\"')}"`,
+        `${fieldIndent}  max_iterations: ${maxIterations}`,
+      ];
+      if (!criteria.trim()) {
+        // No criteria — skip insertion (effectively removes review)
+      } else {
+        lines.splice(stepEnd, 0, ...reviewLines);
+      }
+      const updatedYaml = lines.join('\n');
+      await api.createWorkflow(selectedWf.id, updatedYaml);
+      await load();
+      // Refresh selected workflow
+      const updated = (await api.getWorkflows()) as WorkflowDef[];
+      const refreshed = updated.find(w => w.id === selectedWf.id);
+      if (refreshed) setSelectedWf(refreshed);
+      setEditingCriteriaStep(null);
+    } catch (e: any) {
+      setConfirmState({ title: 'Error', message: `Failed to save criteria: ${e.message}`, action: () => {}, confirmLabel: 'OK' });
+    } finally { setCriteriaSaving(false); }
   };
 
   // Open editor for new workflow
@@ -541,20 +613,85 @@ export default function Workflows() {
                   onStepClick={(id) => setExpandedStep(expandedStep === id ? null : id)}
                 />
               ) : (
-                <div className="flex flex-wrap gap-2 items-center">
-                  {selectedWf.steps.map((step, i) => (
-                    <div key={step.id} className="flex items-center gap-2">
-                      <div className="bg-bg-2 border border-border-1 rounded-lg px-3 py-2">
-                        <div className="text-sm font-medium">{step.name || step.id}</div>
-                        {step.agent?.model && (
-                          <div className="text-xs text-fg-2">{step.agent.model}</div>
-                        )}
-                        {step.needs?.length ? (
-                          <div className="text-xs text-fg-2 mt-1">← {step.needs.join(', ')}</div>
-                        ) : null}
+                <div className="space-y-2">
+                  {selectedWf.steps.map((step) => (
+                    <div key={step.id} className={`bg-bg-2 border rounded-lg px-3 py-2 ${step.review?.criteria ? 'border-emerald-500/20' : 'border-border-1'}`}>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium flex items-center gap-2">
+                            {step.name || step.id}
+                            {step.review?.criteria && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                                ✓ criteria
+                              </span>
+                            )}
+                          </div>
+                          {step.agent?.model && (
+                            <div className="text-xs text-fg-2">{step.agent.model}</div>
+                          )}
+                          {step.needs?.length ? (
+                            <div className="text-xs text-fg-2 mt-1">← {step.needs.join(', ')}</div>
+                          ) : null}
+                        </div>
+                        <button
+                          onClick={() => {
+                            if (editingCriteriaStep === step.id) {
+                              setEditingCriteriaStep(null);
+                            } else {
+                              setEditingCriteriaStep(step.id);
+                              setCriteriaText(step.review?.criteria || '');
+                              setCriteriaMaxIter(step.review?.max_iterations || 3);
+                            }
+                          }}
+                          className="text-[11px] text-fg-2 hover:text-fg-1 transition-colors px-1"
+                        >
+                          {editingCriteriaStep === step.id ? 'Close' : step.review?.criteria ? 'Edit' : '+ Criteria'}
+                        </button>
                       </div>
-                      {i < selectedWf.steps.length - 1 && (
-                        <span className="text-fg-2">→</span>
+                      {step.review?.criteria && editingCriteriaStep !== step.id && (
+                        <div className="text-xs text-fg-2 mt-1.5 font-mono bg-bg-1/60 px-2 py-1 rounded truncate">
+                          {step.review.criteria}
+                        </div>
+                      )}
+                      {editingCriteriaStep === step.id && (
+                        <div className="mt-2 animate-slide-down">
+                          <textarea
+                            value={criteriaText}
+                            onChange={e => setCriteriaText(e.target.value)}
+                            placeholder="Describe what makes this step's output successful..."
+                            className="w-full input-m3 px-3 py-2 text-xs text-fg placeholder-fg-2/40 outline-none resize-y transition-colors"
+                            style={{ borderRadius: 'var(--shape-md)' }}
+                            rows={3}
+                          />
+                          <div className="flex items-center gap-3 mt-2">
+                            <label className="text-[11px] text-fg-2 flex items-center gap-1.5">
+                              Max iterations:
+                              <input
+                                type="number"
+                                value={criteriaMaxIter}
+                                onChange={e => setCriteriaMaxIter(Math.max(1, Math.min(10, Number(e.target.value))))}
+                                min={1} max={10}
+                                className="w-12 bg-bg-1 border border-border-1 rounded px-1.5 py-0.5 text-xs text-fg text-center focus:outline-none focus:border-emerald-500"
+                              />
+                            </label>
+                            <div className="flex-1" />
+                            <button
+                              onClick={() => setEditingCriteriaStep(null)}
+                              disabled={criteriaSaving}
+                              className="px-3 py-1 text-[11px] text-fg-2 hover:text-fg-1 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => saveStepCriteria(step.id, criteriaText, criteriaMaxIter)}
+                              disabled={criteriaSaving}
+                              className="px-3 py-1 text-[11px] font-medium text-white transition-colors disabled:opacity-50"
+                              style={{ borderRadius: 'var(--shape-full)', background: 'var(--color-accent)' }}
+                            >
+                              {criteriaSaving ? 'Saving...' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -1082,6 +1219,48 @@ function RunMonitor({
                   ) : step.status !== 'waiting' && (
                     <div className="text-sm text-fg-2">No output</div>
                   )}
+
+                  {/* Success Criteria */}
+                  {(() => {
+                    const defStep = workflowDef?.steps.find(s => s.id === step.id);
+                    const criteria = step.review?.criteria || defStep?.review?.criteria;
+                    if (!criteria) return null;
+                    const maxIter = step.review?.max_iterations || defStep?.review?.max_iterations || 3;
+                    const lastIter = step.iterations?.[step.iterations.length - 1];
+                    const passed = lastIter?.review?.pass;
+                    return (
+                      <div
+                        className={`mt-3 border p-3 ${
+                          passed === true ? 'bg-emerald-500/5 border-emerald-500/20' :
+                          passed === false ? 'bg-red-500/5 border-red-500/20' :
+                          'bg-bg-2/50 border-border'
+                        }`}
+                        style={{ borderRadius: 'var(--shape-md)' }}
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-sm">{passed === true ? '✅' : passed === false ? '❌' : '📋'}</span>
+                          <span className="text-xs font-medium text-fg-1 uppercase tracking-wider">Success Criteria</span>
+                          {step.iteration && (
+                            <span className="text-[10px] text-fg-2 ml-auto">
+                              Attempt {step.iteration} of {maxIter}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-fg-1 whitespace-pre-wrap font-mono bg-bg-1/60 px-3 py-2 rounded">
+                          {criteria}
+                        </div>
+                        {lastIter?.review?.feedback && (
+                          <div className={`mt-2 text-xs px-3 py-1.5 rounded ${
+                            lastIter.review.pass
+                              ? 'bg-emerald-500/10 text-emerald-300/90'
+                              : 'bg-red-500/10 text-red-300/90'
+                          }`}>
+                            💬 {lastIter.review.feedback}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Live stream for running/reviewing steps */}
                   {isActive && step.agentName && (
