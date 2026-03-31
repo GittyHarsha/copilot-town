@@ -147,7 +147,7 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
           <button
             key={s.label}
             onClick={() => onSend(s.prompt)}
-            className="text-[11px] text-left px-3 py-2 rounded-lg bg-bg-2/40 text-fg-2/60 hover:text-fg hover:bg-bg-2 border border-border/30 hover:border-border/50 transition-all"
+            className="text-[11px] text-left px-3 py-2 rounded-lg bg-bg-1 text-fg-2 hover:text-fg hover:bg-bg-2 border border-border hover:border-border-1 transition-all"
           >{s.label}</button>
         ))}
       </div>
@@ -467,7 +467,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="h-full bg-bg-1 border-l border-border/50 flex flex-col">
+    <div className="h-full bg-bg border-l border-border/50 flex flex-col">
 
       {/* ── Header ── */}
         <div className="flex-shrink-0 border-b border-border/40">
@@ -487,7 +487,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           <div className="flex items-center justify-between px-5 pb-2.5">
             <div className="flex items-center gap-2">
               {/* Mode segmented control — no "interactive" */}
-              <div className="flex items-center bg-bg-2/60 rounded-lg border border-border/30 p-0.5">
+              <div className="flex items-center bg-bg-1 rounded-lg border border-border p-0.5">
                 {(['plan', 'autopilot'] as const).map(m => (
                   <button
                     key={m}
@@ -670,7 +670,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
         )}
 
         {/* ── Input ── */}
-        <div className="border-t border-border/40 p-4 flex-shrink-0 bg-bg-1">
+        <div className="border-t border-border p-4 flex-shrink-0 bg-bg-1/80">
           {!connected && (
             <div className="text-[11px] text-amber-400/60 bg-amber-400/[0.04] rounded-lg px-3 py-2 mb-2.5 border border-amber-400/[0.08] flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
@@ -680,7 +680,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           <div className="flex items-end gap-2.5">
             <textarea
               ref={inputRef}
-              className="flex-1 bg-bg-2/40 border border-border/40 rounded-xl px-4 py-3 text-[13px] text-fg resize-none focus:outline-none focus:border-blue-500/25 focus:bg-bg-2/60 min-h-[44px] max-h-[140px] transition-all placeholder-fg-2/25"
+              className="flex-1 bg-bg-1 border border-border rounded-xl px-4 py-3 text-[13px] text-fg resize-none focus:outline-none focus:border-border-1 focus:bg-bg-2 min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40"
               placeholder={sending ? 'Type to steer or Ctrl+Q to queue…' : `Message ${agentName}…`}
               rows={1}
               value={input}

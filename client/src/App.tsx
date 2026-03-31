@@ -217,7 +217,7 @@ function AppInner() {
 
         {/* ── Chat Sidebar ── */}
         {activeChat && (
-          <aside className="w-[480px] max-w-[45vw] flex-shrink-0 border-l border-border/30 animate-slide-in-right">
+          <aside className="w-[480px] max-w-[45vw] flex-shrink-0 animate-slide-in-right bg-bg">
             <HeadlessChatPanel
               key={activeChat}
               agentName={activeChat}
