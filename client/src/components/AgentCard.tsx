@@ -34,6 +34,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
   const [showEdit, setShowEdit] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [modelInput, setModelInput] = useState('');
   const [effortInput, setEffortInput] = useState('');
   const prevStatus = useRef(agent.status);
@@ -63,7 +64,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
   const handleStop = async () => {
     setPendingAction('stopping');
     try { await api.stopAgent(agent.id); setTimeout(() => onRefresh?.(), 2000); }
-    catch { setPendingAction(null); }
+    catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
   const handleResume = async (cmdOverride?: string) => {
@@ -86,13 +87,13 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
   const handleMoveToPane = async () => {
     setPendingAction('movingToPane');
     try { await api.moveToPaneAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
-    catch { setPendingAction(null); }
+    catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
   const handleMoveToHeadless = async () => {
     setPendingAction('movingToHeadless');
     try { await api.moveToHeadlessAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
-    catch { setPendingAction(null); }
+    catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
   const handleModelSwitch = async () => {
@@ -237,6 +238,23 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                       <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                         style={{ width: 'calc(100% - 4px)' }}
                         onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setShowEdit(true); }}>✏️ Edit</button>
+                      <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
+                        style={{ width: 'calc(100% - 4px)' }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setShowMoreMenu(false);
+                          try {
+                            await api.spawnAgent({
+                              name: `${agent.name}-copy`,
+                              model: agent.model,
+                              flags: agent.flags,
+                              headless: agent.type === 'headless',
+                            });
+                            setTimeout(() => onRefresh?.(), 1500);
+                          } catch (e: any) {
+                            console.error('Clone failed:', e);
+                          }
+                        }}>📋 Clone agent</button>
                     </div>
                   )}
                 </div>
@@ -291,6 +309,12 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
           )}
 
           {/* Resume error */}
+          {error && (
+            <div className="text-[11px] text-red-400 bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/15 mt-2">
+              ⚠ {error}
+            </div>
+          )}
+
           {resumeError && (
             <div className="text-xs text-red-400 bg-red-400/[0.05] rounded-lg px-3 py-2.5 border border-red-400/[0.08]">
               ⚠ {resumeError}
@@ -334,6 +358,10 @@ export const AgentCardMemo = memo(AgentCard, (prev, next) =>
   prev.agent.sessionId === next.agent.sessionId &&
   prev.agent.task === next.agent.task &&
   prev.agent.agentMode === next.agent.agentMode &&
+  prev.agent.model === next.agent.model &&
+  prev.agent.description === next.agent.description &&
+  prev.agent.type === next.agent.type &&
+  prev.agent.reasoningEffort === next.agent.reasoningEffort &&
   prev.pinned === next.pinned
 );
 

@@ -162,7 +162,7 @@ router.post('/register', (_req, res) => {
   //    MCP bridge sends ppid (= copilot CLI PID)
   //    Walk up: copilot CLI → shell → pane_pid
   let foundPane: string | null = null;
-  if (ppid) {
+  if (ppid && /^\d+$/.test(String(ppid))) {
     try {
       const allPanes = listPanes();
       const panePids = new Map(allPanes.map(p => [String(p.pid), p.target]));
@@ -694,7 +694,8 @@ router.post('/:id/resume', async (req, res) => {
     parts.push(`--resume=${agent.sessionId}`);
     const model = req.body.model || meta.model;
     if (model) parts.push(`--model=${model}`);
-    const flags = req.body.flags || meta.flags || [];
+    const SAFE_FLAG_RE = /^--?[a-zA-Z][a-zA-Z0-9-]*(=[\w.,\/-]+)?$/;
+    const flags = (req.body.flags || meta.flags || []).filter((f: string) => SAFE_FLAG_RE.test(f));
     for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
     cmd = parts.join(' ');
   }
@@ -757,7 +758,8 @@ router.post('/:id/start', async (req, res) => {
     if (agentTemplate) parts.push(`--agent=${agentTemplate}`);
     const model = req.body.model || meta.model;
     if (model) parts.push(`--model=${model}`);
-    const flags = req.body.flags || meta.flags || [];
+    const SAFE_FLAG_RE = /^--?[a-zA-Z][a-zA-Z0-9-]*(=[\w.,\/-]+)?$/;
+    const flags = (req.body.flags || meta.flags || []).filter((f: string) => SAFE_FLAG_RE.test(f));
     for (const f of flags) parts.push(f.startsWith('--') ? f : `--${f}`);
     cmd = parts.join(' ');
   }

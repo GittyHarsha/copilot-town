@@ -141,22 +141,24 @@ export default function Graph() {
   const [relays, setRelays] = useState<RelayEntry[]>([]);
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     Promise.all([api.getRelays(200), api.getAgents()])
-      .then(([r, a]) => { setRelays(r); setAgents(a); })
-      .catch(() => {})
+      .then(([r, a]) => { setRelays(r); setAgents(a); setError(null); })
+      .catch((e: any) => { setError(e?.message || 'Failed to load graph data'); })
       .finally(() => setLoading(false));
   }, []);
 
   const refresh = useCallback(() => {
     setLoading(true);
+    setError(null);
     Promise.all([api.getRelays(200), api.getAgents()])
-      .then(([r, a]) => { setRelays(r); setAgents(a); })
-      .catch(() => {})
+      .then(([r, a]) => { setRelays(r); setAgents(a); setError(null); })
+      .catch((e: any) => { setError(e?.message || 'Failed to load graph data'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -193,6 +195,21 @@ export default function Graph() {
 
   if (loading) {
     return <div className="flex items-center justify-center h-60"><span className="spinner" /></div>;
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 gap-3">
+        <span className="text-3xl opacity-30">⚠</span>
+        <div className="text-sm text-red-400">{error}</div>
+        <button
+          className="text-[11px] px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/15"
+          onClick={refresh}
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
 
   const idleCount = agents.filter(a => a.status === 'idle').length;

@@ -697,6 +697,10 @@ function registerAgentTools(session: CopilotSession, agentName: string) {
         message: { type: 'string', description: 'Message to send' },
       },
       handler: async (params: any) => {
+        const SAFE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+        if (!SAFE_NAME_RE.test(params.to)) {
+          return 'Invalid agent name';
+        }
         const http = await import('http');
         return new Promise<string>((resolve) => {
           const body = JSON.stringify({ from: agentName, to: params.to, message: params.message });

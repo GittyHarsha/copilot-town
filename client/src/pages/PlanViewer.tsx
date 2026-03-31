@@ -37,6 +37,8 @@ export default function PlanViewer() {
   const [details, setDetails] = useState<SessionDetails | null>(null);
   const [loading, setLoading] = useState(false);
   const [listLoading, setListLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [planExpanded, setPlanExpanded] = useState(true);
   const [expandedCps, setExpandedCps] = useState<Set<number>>(new Set());
@@ -48,11 +50,12 @@ export default function PlanViewer() {
     api.getSessions(100)
       .then(list => {
         setSessions(list);
+        setListError(null);
         // Auto-select first session with a plan
         const first = list.find(s => s.hasPlan);
         if (first) setSelectedId(first.id);
       })
-      .catch(() => {})
+      .catch((e: any) => { setListError(e?.message || 'Failed to load sessions'); })
       .finally(() => setListLoading(false));
   }, []);
 
@@ -63,11 +66,12 @@ export default function PlanViewer() {
     api.getSessionDetails(selectedId)
       .then((d: SessionDetails) => {
         setDetails(d);
+        setDetailError(null);
         setExpandedCps(new Set());
         setAllExpanded(false);
         setPlanExpanded(true);
       })
-      .catch(() => setDetails(null))
+      .catch((e: any) => { setDetails(null); setDetailError(e?.message || 'Failed to load session details'); })
       .finally(() => setLoading(false));
   }, [selectedId]);
 
@@ -128,6 +132,17 @@ export default function PlanViewer() {
             <div className="flex items-center justify-center py-12 text-fg-2 text-[11px]">
               Loading sessions…
             </div>
+          ) : listError ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-2">
+              <span className="text-2xl opacity-30">⚠</span>
+              <div className="text-[11px] text-red-400">{listError}</div>
+              <button
+                className="text-[10px] px-2.5 py-1 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/15"
+                onClick={() => { setListError(null); setListLoading(true); api.getSessions(100).then(list => { setSessions(list); setListError(null); const first = list.find(s => s.hasPlan); if (first) setSelectedId(first.id); }).catch((e: any) => { setListError(e?.message || 'Failed to load sessions'); }).finally(() => setListLoading(false)); }}
+              >
+                Retry
+              </button>
+            </div>
           ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center py-12 text-fg-2 text-[11px]">
               {search ? 'No matching sessions' : 'No sessions found'}
@@ -177,6 +192,19 @@ export default function PlanViewer() {
             <div className="flex flex-col items-center gap-2">
               <div className="w-5 h-5 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
               <span className="text-[11px]">Loading session…</span>
+            </div>
+          </div>
+        ) : detailError ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-3">
+              <span className="text-3xl opacity-30">⚠</span>
+              <div className="text-sm text-red-400">{detailError}</div>
+              <button
+                className="text-[11px] px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/15"
+                onClick={() => { setDetailError(null); if (selectedId) { setLoading(true); api.getSessionDetails(selectedId).then((d: SessionDetails) => { setDetails(d); setDetailError(null); setExpandedCps(new Set()); setAllExpanded(false); setPlanExpanded(true); }).catch((e: any) => { setDetails(null); setDetailError(e?.message || 'Failed to load session details'); }).finally(() => setLoading(false)); } }}
+              >
+                Retry
+              </button>
             </div>
           </div>
         ) : !selectedId || !details ? (

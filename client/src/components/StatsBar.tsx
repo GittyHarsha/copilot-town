@@ -10,19 +10,24 @@ export default function StatsBar({ agents }: Props) {
   const [sessionCount, setSessionCount] = useState(0);
 
   useEffect(() => {
-    api.getRelays(200).then(relays => {
-      const today = new Date().toDateString();
-      const todayRelays = relays.filter(r => {
-        try { return new Date(r.timestamp).toDateString() === today; }
-        catch { return false; }
-      });
-      setRelayCount(todayRelays.length);
-    }).catch(() => {});
+    const load = () => {
+      api.getRelays(200).then(relays => {
+        const today = new Date().toDateString();
+        const todayRelays = relays.filter(r => {
+          try { return new Date(r.timestamp).toDateString() === today; }
+          catch { return false; }
+        });
+        setRelayCount(todayRelays.length);
+      }).catch(() => {});
 
-    api.getPsmuxSessions().then(sessions => {
-      setSessionCount(sessions.length);
-    }).catch(() => {});
-  }, [agents]);
+      api.getPsmuxSessions().then(sessions => {
+        setSessionCount(sessions.length);
+      }).catch(() => {});
+    };
+    load();
+    const interval = setInterval(load, 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const running = agents.filter(a => a.status === 'running').length;
   const idle = agents.filter(a => a.status === 'idle').length;

@@ -51,6 +51,7 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
   const [groupMode, setGroupMode] = useState<GroupMode>('flat');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['__workflow']));
   const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   const togglePin = useCallback((id: string) => {
     setPins(prev => {
@@ -85,9 +86,20 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
     [pins]
   );
 
+  const filtered = useMemo(() => {
+    if (!search) return agents;
+    const q = search.toLowerCase();
+    return agents.filter(a =>
+      a.name.toLowerCase().includes(q) ||
+      (a.description || '').toLowerCase().includes(q) ||
+      (a.model || '').toLowerCase().includes(q) ||
+      (a.task || '').toLowerCase().includes(q)
+    );
+  }, [agents, search]);
+
   // Separate workflow agents from user agents
-  const userAgents = useMemo(() => agents.filter(a => !isWorkflowAgent(a)), [agents]);
-  const workflowAgents = useMemo(() => agents.filter(a => isWorkflowAgent(a)), [agents]);
+  const userAgents = useMemo(() => filtered.filter(a => !isWorkflowAgent(a)), [filtered]);
+  const workflowAgents = useMemo(() => filtered.filter(a => isWorkflowAgent(a)), [filtered]);
 
   const groups = useMemo(() => {
     if (groupMode === 'flat') return [{ name: '', agents: sortAgents(userAgents) }];
@@ -149,6 +161,13 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
             </button>
           ))}
         </div>
+        <input
+          type="text"
+          placeholder="Search agents…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="bg-bg-1 border border-border rounded-lg px-3 py-1.5 text-[12px] text-fg w-48 focus:outline-none focus:border-border-1 placeholder:text-fg-2/40"
+        />
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>+ New</button>
         {pins.size > 0 && (
           <span className="text-[10px] text-fg-2 font-medium">⭐ {pins.size} pinned</span>
@@ -158,7 +177,7 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
       <CreateSessionDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onLaunched={() => { setCreateOpen(false); setTimeout(() => onRefresh(), 1500); onRefresh(); }}
+        onLaunched={() => { setCreateOpen(false); setTimeout(() => onRefresh(), 1500); }}
       />
 
       {/* Agent list */}
@@ -194,6 +213,12 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
             )}
           </div>
         ))}
+        {search && userAgents.length === 0 && workflowAgents.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <span className="text-xl mb-2 opacity-30">🔍</span>
+            <p className="text-xs text-fg-2">No agents match "{search}"</p>
+          </div>
+        )}
       </div>
 
       {/* Workflow agents — separate collapsible section */}

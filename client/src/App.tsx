@@ -9,6 +9,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { TerminalPanelProvider, useTerminalPanel } from './components/TerminalPanel';
 import ToastContainer from './components/ToastContainer';
 import HeadlessChatPanel from './components/HeadlessChatPanel';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));
@@ -207,21 +208,25 @@ function AppInner() {
         <main className="flex-1 overflow-y-auto px-4 md:px-6 py-5" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
           <div className="max-w-[1400px] mx-auto">
             {page === 'dashboard' && (
-              <Dashboard
-                agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
-                onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
-                onOpenChat={openChat}
-              />
+              <ErrorBoundary>
+                <Dashboard
+                  agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
+                  onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
+                  onOpenChat={openChat}
+                />
+              </ErrorBoundary>
             )}
             <Suspense fallback={LazyFallback}>
-              {page === 'live' && <LiveGrid onOpenChat={openChat} />}
-              {page === 'panes' && <Towns />}
-              {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
-              {page === 'graph' && <Graph />}
-              {page === 'workflows' && <Workflows />}
-              {page === 'tools' && <MCPTools />}
-              {page === 'plans' && <PlanViewer />}
-              {page === 'settings' && <Settings />}
+              <ErrorBoundary>
+                {page === 'live' && <LiveGrid onOpenChat={openChat} />}
+                {page === 'panes' && <Towns />}
+                {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
+                {page === 'graph' && <Graph />}
+                {page === 'workflows' && <Workflows />}
+                {page === 'tools' && <MCPTools />}
+                {page === 'plans' && <PlanViewer />}
+                {page === 'settings' && <Settings />}
+              </ErrorBoundary>
             </Suspense>
           </div>
         </main>

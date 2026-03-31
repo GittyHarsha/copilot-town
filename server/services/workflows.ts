@@ -1,5 +1,5 @@
 import { readdir, readFile, writeFile, mkdir, unlink } from 'fs/promises';
-import { join, basename } from 'path';
+import { join, basename, resolve, sep } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { createHeadlessAgent, sendToHeadless, destroyHeadlessAgent } from './headless.js';
 import { pushEvent } from './events.js';
@@ -291,6 +291,11 @@ async function resolvePrompt(stepDef: StepDef): Promise<string> {
   if (stepDef.prompt_file) {
     try {
       const filePath = join(STAGES_DIR, stepDef.prompt_file);
+      const resolvedPath = resolve(filePath);
+      const resolvedDir = resolve(STAGES_DIR);
+      if (!resolvedPath.startsWith(resolvedDir + sep)) {
+        throw new Error('Invalid stage file path');
+      }
       return await readFile(filePath, 'utf-8');
     } catch (e: any) {
       console.error(`Failed to load stage file "${stepDef.prompt_file}":`, e.message);
