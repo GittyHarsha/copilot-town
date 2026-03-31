@@ -721,8 +721,8 @@ function WorkflowEditor(props:
         <textarea
           value={props.stageContent}
           onChange={e => props.onStageContentChange(e.target.value)}
-          className="w-full h-[calc(100vh-240px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
-          style={{ transition: 'border-color 0.2s, box-shadow 0.2s' }}
+          className="w-full h-[calc(100vh-240px)] bg-bg-1 border border-border-1 px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
+          style={{ borderRadius: 'var(--shape-lg)', transition: 'border-color 0.2s, box-shadow 0.2s' }}
           placeholder="# Stage content (Markdown)..."
           spellCheck={false}
         />
@@ -779,15 +779,15 @@ function WorkflowEditor(props:
           </button>
         </div>
         {previewMode ? (
-          <div className="font-mono text-[12px] overflow-auto p-4 bg-bg-1 rounded-lg border border-border min-h-[300px] h-[calc(100vh-380px)]">
+          <div className="font-mono text-[12px] overflow-auto p-4 bg-bg-1 border border-border min-h-[300px] h-[calc(100vh-380px)]" style={{ borderRadius: 'var(--shape-lg)' }}>
             <MarkdownContent content={'```yaml\n' + props.yaml + '\n```'} />
           </div>
         ) : (
           <textarea
             value={props.yaml}
             onChange={e => props.onYamlChange(e.target.value)}
-            className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
-            style={{ transition: 'border-color 0.2s, box-shadow 0.2s' }}
+            className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.1)] resize-none leading-relaxed"
+            style={{ borderRadius: 'var(--shape-lg)', transition: 'border-color 0.2s, box-shadow 0.2s' }}
             placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
             spellCheck={false}
           />
@@ -795,7 +795,7 @@ function WorkflowEditor(props:
       </div>
 
       {/* Inline YAML Reference */}
-      <details className="mt-3 bg-bg-1 border border-border rounded-lg">
+      <details className="mt-3 bg-bg-1 border border-border" style={{ borderRadius: 'var(--shape-lg)' }}>
         <summary className="px-4 py-2.5 cursor-pointer text-sm text-fg-1 hover:text-fg select-none flex items-center gap-2">
           <span>📖</span> YAML Reference — step fields, expressions, examples
         </summary>
@@ -892,20 +892,20 @@ function RunMonitor({
           <span>{completedSteps}/{run.steps.length} steps</span>
           <span>{Math.round(progress)}%</span>
         </div>
-        <div className="h-2 bg-bg-2 rounded-full overflow-hidden">
+        <div className="h-2 bg-bg-2 overflow-hidden" style={{ borderRadius: 'var(--shape-xl)' }}>
           <div
-            className={`h-full rounded-full transition-all duration-500 ${
+            className={`h-full transition-all duration-500 ${
               run.status === 'failed' ? 'bg-red-500' :
               run.status === 'complete' ? 'bg-emerald-500' : 'bg-blue-500'
             }`}
-            style={{ width: `${progress}%` }}
+            style={{ width: `${progress}%`, borderRadius: 'var(--shape-xl)' }}
           />
         </div>
       </div>
 
       {/* Inputs summary */}
       {Object.keys(run.inputs).length > 0 && (
-        <div className="mb-6 bg-bg-1 rounded-lg border border-border p-4">
+        <div className="mb-6 bg-bg-1 border border-border p-4" style={{ borderRadius: 'var(--shape-md)' }}>
           <div className="text-xs font-medium text-fg-2 mb-2 uppercase tracking-wider">Inputs</div>
           {Object.entries(run.inputs).map(([k, v]) => (
             <div key={k} className="text-sm">
@@ -947,11 +947,12 @@ function RunMonitor({
           return (
             <div
               key={step.id}
-              className={`bg-bg-1 border rounded-lg overflow-hidden transition-colors ${
+              className={`bg-bg-1 border overflow-hidden ${
                 step.status === 'running' ? 'border-blue-500/50' :
                 step.status === 'failed' ? 'border-red-500/30' :
                 step.status === 'complete' ? 'border-emerald-500/20' : 'border-border'
               }`}
+              style={{ borderRadius: 'var(--shape-md)', transition: 'border-color var(--duration-short) var(--ease-standard)' }}
             >
               {/* Step header */}
               <button
@@ -1104,7 +1105,7 @@ function RunMonitor({
 
       {/* Step Duration Bars */}
       {run.steps.some(s => s.startedAt && s.finishedAt) && (
-        <div style={{ marginTop: 16, padding: 12, background: 'var(--color-bg-2)', borderRadius: 8, border: '1px solid var(--color-border)' }}>
+        <div style={{ marginTop: 16, padding: 12, background: 'var(--color-bg-2)', borderRadius: 'var(--shape-md)', border: '1px solid var(--color-border)' }}>
           <div style={{ fontSize: '0.8rem', color: 'var(--color-fg-1)', fontWeight: 500, marginBottom: 8 }}>Step Durations</div>
           {run.steps.filter(s => s.startedAt).map(step => {
             const dur = step.finishedAt
@@ -1120,12 +1121,12 @@ function RunMonitor({
                 <span style={{ width: 80, fontSize: '0.7rem', color: 'var(--color-fg-2)', fontFamily: 'monospace', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {step.name || step.id}
                 </span>
-                <div style={{ flex: 1, height: 14, background: 'var(--color-bg-3)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ flex: 1, height: 14, background: 'var(--color-bg-3)', borderRadius: 'var(--shape-xl)', overflow: 'hidden' }}>
                   <div style={{
                     width: `${pct}%`,
                     height: '100%',
                     background: DURATION_BAR_COLORS[step.status] || '#71717a',
-                    borderRadius: 3,
+                    borderRadius: 'var(--shape-xl)',
                     transition: 'width 0.3s ease',
                   }} />
                 </div>

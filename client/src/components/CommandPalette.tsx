@@ -175,20 +175,28 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
   return (
     <div
       ref={backdropRef}
-      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-start justify-center pt-[15vh] animate-fade-in"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh]"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
+      style={{
+        background: 'rgba(0, 0, 0, 0.4)',
+        backdropFilter: 'blur(12px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(150%)',
+        animation: 'fade-in-scale var(--duration-medium) var(--ease-emphasized-decel) both',
+      }}
     >
-      <div className="w-full max-w-[520px] mx-4">
+      <div className="w-full max-w-[520px] mx-4 animate-scale-in"
+        style={{ boxShadow: 'var(--elevation-5)' }}>
         {/* Search input */}
         <div className="relative">
-          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-2 text-sm pointer-events-none">⌘</span>
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-2 text-sm pointer-events-none" style={{ opacity: 0.4 }}>⌘</span>
           <input
             ref={inputRef}
             type="text"
-            className="w-full bg-bg-1 border border-border-1 rounded-xl pl-9 pr-4 py-3.5 text-sm text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 transition-colors"
+            className="w-full bg-bg-1 border-none pl-9 pr-4 py-3.5 text-sm text-fg placeholder-fg-2/40 outline-none"
+            style={{ borderRadius: 'var(--shape-lg)', boxShadow: 'var(--elevation-2)' }}
             placeholder="Type a command…"
             aria-label="Search commands"
             value={query}
@@ -202,8 +210,9 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
         {filtered.length > 0 && (
           <div
             ref={listRef}
-            className="mt-1.5 bg-bg-1 border border-border rounded-lg overflow-auto max-h-[60vh] py-1"
+            className="mt-2 bg-bg-1 overflow-auto max-h-[60vh] py-1"
             role="listbox"
+            style={{ borderRadius: 'var(--shape-lg)', boxShadow: 'var(--elevation-2)' }}
           >
             {groupedItems.map(group => (
               <div key={group.label}>
@@ -218,13 +227,20 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
                   return (
                     <button
                       key={entry.cmd.id}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
-                        isActive ? 'bg-bg-3 text-fg' : 'text-fg-1 hover:bg-bg-2'
-                      }`}
+                      className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left text-xs"
                       role="option"
                       aria-selected={isActive}
                       onMouseEnter={() => setActiveIdx(idx)}
                       onClick={() => execute(idx)}
+                      style={{
+                        borderRadius: 'var(--shape-sm)',
+                        margin: '0 4px',
+                        width: 'calc(100% - 8px)',
+                        background: isActive ? 'var(--accent-dim)' : 'transparent',
+                        color: isActive ? 'var(--color-fg)' : 'var(--color-fg-1)',
+                        transition: 'all var(--duration-short) var(--ease-standard)',
+                        border: 'none', cursor: 'pointer',
+                      }}
                     >
                       {entry.cmd.icon && (
                         <span className="w-5 text-center text-sm opacity-60 shrink-0">{entry.cmd.icon}</span>
@@ -249,7 +265,7 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
 
         {/* No results */}
         {query.trim() && filtered.length === 0 && (
-          <div className="mt-1.5 bg-bg-1 border border-border rounded-lg py-8 text-center">
+          <div className="mt-2 bg-bg-1 py-8 text-center" style={{ borderRadius: 'var(--shape-lg)', boxShadow: 'var(--elevation-1)' }}>
             <span className="text-xs text-fg-2">No matching commands</span>
           </div>
         )}

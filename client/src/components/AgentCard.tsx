@@ -23,6 +23,11 @@ const DOT: Record<string, string> = {
   running: 'bg-emerald-500', idle: 'bg-amber-400', stopped: 'bg-fg-2',
   stopping: 'bg-fg-2', starting: 'bg-blue-400',
 };
+const DOT_GLOW: Record<string, string> = {
+  running: '0 0 8px 2px rgba(34, 197, 94, 0.35)',
+  idle: '0 0 8px 2px rgba(234, 179, 8, 0.3)',
+  starting: '0 0 8px 2px rgba(96, 165, 250, 0.3)',
+};
 const GLOW: Record<string, string> = {
   running: 'glow-green', idle: 'glow-yellow',
 };
@@ -124,7 +129,8 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
     <div className={`card-surface overflow-hidden group/card ${GLOW[status] || ''} ${isStopped ? 'saturate-50 hover:saturate-100' : ''}`}>
       {/* Header row */}
       <button
-        className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-fg/[0.02] transition-all duration-200"
+        className="w-full flex items-center gap-4 px-5 py-4 text-left transition-all"
+        style={{ position: 'relative', zIndex: 2 }}
         onClick={() => setExpanded(!expanded)}
       >
         {/* Selection checkbox */}
@@ -139,10 +145,13 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
           />
         )}
 
-        {/* Status dot */}
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ring-2 ring-opacity-20 ${DOT[status] || 'bg-fg-2/30'} ${
-          status === 'running' ? 'dot-live ring-emerald-500/20' : status === 'idle' ? 'ring-amber-400/20' : 'ring-transparent'
-        }`} />
+        {/* Status dot with glow */}
+        <span
+          className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${DOT[status] || 'bg-fg-2/30'} ${
+            status === 'running' ? 'dot-live' : ''
+          }`}
+          style={{ boxShadow: DOT_GLOW[status] || 'none' }}
+        />
 
         {/* Pin */}
         {onTogglePin && (
@@ -155,9 +164,12 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
           </button>
         )}
 
-        {/* Name + badges */}
+        {/* Name + model + badges */}
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <span className="text-[13px] font-semibold truncate tracking-tight">{agent.name}</span>
+          <span className="text-[15px] font-semibold truncate tracking-tight">{agent.name}</span>
+          {displayModel && (
+            <span className="text-[11px] truncate hidden sm:inline" style={{ color: 'var(--color-fg-2)' }}>{displayModel}</span>
+          )}
           {isHeadless && (
             <span className="badge text-cyan-400/80 bg-cyan-400/[0.08] border border-cyan-400/10">⚡ headless</span>
           )}
@@ -177,10 +189,16 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
 
       {/* Expanded panel */}
       <div
-        className="transition-[max-height,opacity] duration-250 ease-out overflow-hidden"
-        style={{ maxHeight: expanded ? 400 : 0, opacity: expanded ? 1 : 0 }}
+        className="overflow-hidden"
+        style={{
+          maxHeight: expanded ? 600 : 0,
+          opacity: expanded ? 1 : 0,
+          transition: `max-height var(--duration-long) var(--ease-emphasized), opacity var(--duration-medium) var(--ease-standard)`,
+          position: 'relative',
+          zIndex: 2,
+        }}
       >
-        <div className="px-4 py-3.5 border-t border-border/60 space-y-3 animate-slide-down">
+        <div className="px-5 py-4 border-t border-border/60 space-y-4 animate-slide-down">
           {/* Description */}
           <p className="text-xs text-fg-2 leading-relaxed">{desc}</p>
 
@@ -225,7 +243,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
           )}
 
           {/* Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-wrap">
             {pendingAction ? (
               <div className="flex items-center gap-2 text-xs text-fg-2">
                 <span className="spinner" />
@@ -352,7 +370,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
           {/* Type switcher: headless ↔ pane — always visible */}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-fg-2/60 mr-1">Type:</span>
-            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--color-border-1)' }}>
+            <div style={{ display: 'flex', borderRadius: 9999, overflow: 'hidden', border: '1px solid var(--color-border-1)' }}>
               <button
                 className={`text-[10px] px-3 py-1.5 transition-all duration-150 ${
                   !isHeadless
@@ -392,9 +410,9 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] text-fg-2/60 mr-1">Mode:</span>
               {['interactive', 'plan', 'autopilot'].map(m => (
-                <button key={m} className={`text-[10px] px-3 py-1.5 rounded-lg border transition-all duration-150 ${
+                <button key={m} className={`text-[10px] px-3 py-1.5 border transition-all duration-150 ${
                   agent.agentMode === m ? 'bg-violet-500/10 text-violet-400 border-violet-500/20 font-medium' : 'border-border text-fg-2 hover:text-fg-1 hover:border-border-1'
-                }`} onClick={(e) => { e.stopPropagation(); handleModeSwitch(m); }}>{m}</button>
+                }`} style={{ borderRadius: 9999 }} onClick={(e) => { e.stopPropagation(); handleModeSwitch(m); }}>{m}</button>
               ))}
             </div>
           )}

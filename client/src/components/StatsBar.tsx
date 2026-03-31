@@ -58,19 +58,20 @@ export default function StatsBar({ agents }: Props) {
   ];
 
   return (
-    <div className="flex items-center gap-3 py-2 mb-1 flex-wrap">
+    <div className="flex items-center gap-4 py-2.5 mb-1 flex-wrap">
       {/* Agent status counts */}
       {stats.map(s => (
-        <div key={s.label} className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-bg-1 border border-border"
-          style={{ boxShadow: 'var(--card-shadow)', background: s.bgTint || undefined }}>
+        <div key={s.label} className="flex items-center gap-3 px-5 py-3 bg-bg-1 border border-border"
+          style={{ borderRadius: 'var(--shape-xl)', boxShadow: 'var(--card-shadow)', background: s.bgTint || undefined, transition: 'box-shadow var(--duration-short) var(--ease-standard)' }}>
           <span className={`w-2 h-2 rounded-full ${s.color} ${s.label === 'active' ? 'dot-live' : ''}`} />
-          <span className={`text-lg font-bold tabular-nums ${s.textColor}`}>{s.value}</span>
+          <span className={`text-xl font-extrabold tabular-nums ${s.textColor}`}>{s.value}</span>
           <span className="text-[11px] text-fg-2 font-medium">{s.label}</span>
         </div>
       ))}
 
       {/* Activity */}
-      <div className="flex items-center gap-4 text-[11px] text-fg-2 font-medium px-3 py-2.5">
+      <div className="flex items-center gap-4 text-[11px] text-fg-2 font-medium px-4 py-3"
+        style={{ borderRadius: 'var(--shape-xl)', background: 'var(--color-bg-1)', border: '1px solid var(--color-border)' }}>
         <span>{relayCount} relay{relayCount !== 1 ? 's' : ''} today</span>
         <span className="w-px h-3.5 bg-border" />
         <span>{sessionCount} pane{sessionCount !== 1 ? 's' : ''}</span>

@@ -464,19 +464,26 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
             })}
             </g>
           </svg>
-          <div className="absolute bottom-3 right-3 flex flex-col gap-1">
-            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) }))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom in">+</button>
-            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.3, prev.scale * 0.8) }))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom out">−</button>
-            <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px]" aria-label="Fit view">Fit</button>
+          <div className="absolute bottom-3 right-3 flex flex-col gap-1.5">
+            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) }))} className="w-8 h-8 bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm flex items-center justify-center" style={{ borderRadius: '50%', boxShadow: 'var(--elevation-2)', transition: 'all var(--duration-short) var(--ease-standard)' }} aria-label="Zoom in">+</button>
+            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.3, prev.scale * 0.8) }))} className="w-8 h-8 bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm flex items-center justify-center" style={{ borderRadius: '50%', boxShadow: 'var(--elevation-2)', transition: 'all var(--duration-short) var(--ease-standard)' }} aria-label="Zoom out">−</button>
+            <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="w-8 h-8 bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px] flex items-center justify-center" style={{ borderRadius: 'var(--shape-xl)', boxShadow: 'var(--elevation-2)', transition: 'all var(--duration-short) var(--ease-standard)' }} aria-label="Fit view">Fit</button>
           </div>
           {/* Edge detail panel */}
           {selectedEdge && (
             <div style={{
-              position: 'absolute', bottom: 16, left: 16, right: 16, maxWidth: 400,
-              background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
-              borderRadius: 10, padding: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-              zIndex: 20, maxHeight: 300, overflow: 'auto',
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: 400, maxWidth: '90%',
+              background: 'var(--color-bg-1)', borderLeft: '1px solid var(--color-border-1)',
+              borderRadius: '0 0 0 var(--shape-lg)', padding: 16, boxShadow: 'var(--elevation-3)',
+              zIndex: 20, overflowY: 'auto',
+              animation: 'graph-edge-slide-in var(--duration-medium) var(--ease-emphasized-decel) both',
             }}>
+              <style>{`
+                @keyframes graph-edge-slide-in {
+                  from { opacity: 0; transform: translateX(40px); }
+                  to { opacity: 1; transform: translateX(0); }
+                }
+              `}</style>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, color: 'var(--color-fg)' }}>
                   {selectedEdge.from} → {selectedEdge.to}
@@ -506,7 +513,7 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
               </div>
             </div>
           )}
-          <div className="flex items-center gap-4 text-[10px] text-fg-2 mt-3 px-4 pb-2">
+          <div className="flex items-center gap-4 text-[10px] text-fg-2 mt-3 px-4 pb-2" style={{ background: 'var(--color-bg-1)', borderRadius: 'var(--shape-lg)', padding: '10px 16px', margin: '12px 16px 8px', border: '1px solid var(--color-border)' }}>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Running
             </span>

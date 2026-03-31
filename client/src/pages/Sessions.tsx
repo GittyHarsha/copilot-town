@@ -392,7 +392,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
         <div className="mb-3">
           <input type="text" value={search} onChange={e => handleSearchChange(e.target.value)}
             placeholder="Search sessions…"
-            className="w-full bg-bg-1 border border-border rounded-lg px-3 py-2 text-xs text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 transition-colors" />
+            className="w-full input-m3 px-4 py-2.5 text-xs text-fg placeholder-fg-2/40 outline-none transition-colors" />
         </div>
 
         {/* Filter tabs */}
@@ -420,10 +420,9 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
               const displaySummary = s.summary || conv?.summary;
               return (
                 <div key={s.id}
-                  className="card-surface p-3 cursor-pointer"
+                  className="p-3 cursor-pointer rounded-lg transition-all relative hover:bg-bg-1"
                   style={{
-                    borderLeft: selectedId === s.id ? '3px solid #3b82f6' : '3px solid transparent',
-                    background: selectedId === s.id ? 'rgba(59,130,246,0.08)' : 'transparent',
+                    background: selectedId === s.id ? 'rgba(59,130,246,0.08)' : undefined,
                   }}
                   onClick={() => {
                     setSelectedId(s.id);
@@ -434,6 +433,9 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                     setTurnPage(0);
                   }}>
                   <div className="flex items-center justify-between mb-1">
+                    {selectedId === s.id && (
+                      <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', width: 3, height: 20, borderRadius: 99, background: '#3b82f6' }} />
+                    )}
                     <div className="flex items-center gap-1.5 min-w-0">
                       {s.agentName
                         ? <span className="badge text-blue-400/80 bg-blue-400/8 font-medium truncate">{s.agentName}</span>
@@ -478,7 +480,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             </div>
           </div>
         ) : (
-          <>
+          <div key={selectedId} className="flex-1 flex flex-col min-h-0 animate-fade-in">
             {/* Header with chat/plan toggle */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="min-w-0 flex-1 mr-3">
@@ -518,7 +520,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                   <>
                     <input type="text" value={turnSearch} onChange={e => setTurnSearch(e.target.value)}
                       placeholder="Filter…"
-                      className="bg-bg border border-border rounded-md px-2.5 py-1.5 text-xs text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 w-32 transition-colors" />
+                      className="input-m3 px-3 py-1.5 text-xs text-fg placeholder-fg-2/40 outline-none w-32 transition-colors" />
                     <span className="text-xs text-fg-2/50 tabular-nums">{turns.length} turns</span>
                     <button
                       className="text-xs px-2.5 py-1.5 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors"
@@ -606,7 +608,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                         {turn.user_message && (
                           <div className="flex justify-end">
                             <div className="max-w-[75%]">
-                              <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl px-4 py-2.5">
+                              <div className="bg-blue-500/8 border border-blue-500/15 px-4 py-2.5" style={{ borderRadius: '18px 18px 4px 18px' }}>
                                 <pre className="text-xs text-fg whitespace-pre-wrap break-words font-sans leading-relaxed">
                                   {truncateUser(turn.user_message)}
                                 </pre>
@@ -620,7 +622,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                         {turn.assistant_response && (
                           <div className="flex justify-start">
                             <div className="max-w-[85%]">
-                              <div className="bg-bg-2/60 border border-border rounded-xl px-4 py-2.5">
+                              <div className="bg-bg-2/60 border border-border px-4 py-2.5" style={{ borderRadius: '4px 18px 18px 18px' }}>
                                 <div className="text-xs text-fg-1 leading-relaxed prose-sm">
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                     {turn.assistant_response}
@@ -638,7 +640,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                   )}
                   {sending && (
                     <div className="flex justify-start">
-                      <div className="bg-bg-2/60 border border-border rounded-xl px-4 py-2.5 flex items-center gap-2">
+                      <div className="bg-bg-2/60 border border-border px-4 py-2.5 flex items-center gap-2" style={{ borderRadius: '4px 18px 18px 18px' }}>
                         <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
                         <span className="text-xs text-fg-2">Thinking…</span>
                       </div>
@@ -649,11 +651,11 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
                 {/* Chat input bar */}
                 {selectedAgentName && (
-                  <div className="flex-shrink-0 border-t border-border px-4 py-3">
+                  <div className="flex-shrink-0 border-t border-border/30 px-5 py-4">
                     <div className="flex items-end gap-2">
                       <textarea
                         ref={chatInputRef}
-                        className="flex-1 bg-bg border border-border rounded-lg px-3 py-2.5 text-xs text-fg resize-none focus:outline-none focus:border-blue-500/40 min-h-[40px] max-h-[120px] transition-colors placeholder-fg-2/40"
+                        className="flex-1 input-m3 px-4 py-2.5 text-xs text-fg resize-none focus:outline-none min-h-[40px] max-h-[120px] transition-all placeholder-fg-2/40"
                         placeholder={sending ? 'Waiting for response…' : `Message ${selectedAgentName}…`}
                         rows={1}
                         value={chatInput}
@@ -669,10 +671,10 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                         }}
                       />
                       <button
-                        className="btn btn-primary flex-shrink-0"
+                        className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 disabled:opacity-20"
                         onClick={handleSendChat}
                         disabled={sending || !chatInput.trim()}>
-                        {sending ? '⏳' : 'Send'}
+                        {sending ? '⏳' : '↑'}
                       </button>
                     </div>
                     <div className="flex items-center justify-between mt-1.5">
@@ -692,7 +694,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                 </pre>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

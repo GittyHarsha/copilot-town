@@ -208,7 +208,7 @@ const MiniChat = memo(function MiniChat({
   const lastMessages = state.messages.slice(-30);
 
   return (
-    <div className={`flex flex-col rounded-xl border overflow-hidden transition-all duration-300 bg-bg-1 ${borderClass} min-h-0`} style={{ height: '100%' }}>
+    <div className={`flex flex-col border overflow-hidden bg-bg-1 ${borderClass} min-h-0`} style={{ height: '100%', borderRadius: 'var(--shape-lg)', transition: 'all var(--duration-medium) var(--ease-standard)' }}>
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0 relative">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -344,13 +344,14 @@ const MiniChat = memo(function MiniChat({
             {msg.role === 'user' ? (
               /* ── User message: right-aligned bubble ── */
               <div className="flex justify-end">
-                <div className="max-w-[88%] rounded-lg px-3 py-2 bg-blue-500/[0.07] border border-blue-500/[0.1] text-[11px] text-fg leading-relaxed whitespace-pre-wrap break-words">
+                <div className="max-w-[88%] px-3 py-2 bg-blue-500/[0.07] border border-blue-500/[0.1] text-[11px] text-fg leading-relaxed whitespace-pre-wrap break-words"
+                  style={{ borderRadius: '16px 16px 4px 16px' }}>
                   {msg.text}
                 </div>
               </div>
             ) : (
               /* ── Agent message: full-width with markdown ── */
-              <div className="text-fg-1 px-3 py-2 rounded-lg">
+              <div className="text-fg-1 px-3 py-2" style={{ borderRadius: '16px 16px 16px 4px' }}>
                 {/* Tool pills */}
                 {msg.tools && msg.tools.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-1">
@@ -571,14 +572,15 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
         <div className="flex-1" />
 
         {/* Filter toggle */}
-        <div className="flex items-center gap-0.5 bg-bg-1/60 rounded-lg p-0.5 border border-border/50">
+        <div className="flex items-center gap-0.5 bg-bg-1/60 p-0.5 border border-border/50" style={{ borderRadius: 'var(--shape-xl)' }}>
           {(['active', 'all'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-2.5 py-1 text-[10px] rounded-md transition-all duration-150 ${
+              className={`px-2.5 py-1 text-[10px] transition-all duration-150 ${
                 filter === f ? 'bg-bg-3/80 text-fg shadow-sm font-medium' : 'text-fg-2 hover:text-fg-1'
               }`}
+              style={{ borderRadius: 'var(--shape-xl)' }}
             >
               {f === 'active' ? '● Active' : '○ All'}
             </button>
@@ -602,7 +604,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
         </div>
 
         {/* Row height slider */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-1/60 border border-border/50" style={{ borderRadius: 'var(--shape-xl)' }}>
           <span className="text-[9px] text-fg-2/50">↕</span>
           <input
             type="range"
@@ -638,7 +640,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
               style={{
                 outline: focusedIndex === i ? '2px solid #3b82f6' : 'none',
                 outlineOffset: -2,
-                borderRadius: 12,
+                borderRadius: 'var(--shape-lg)',
                 height: '100%',
               }}
               onClick={() => setFocusedIndex(i)}
@@ -685,8 +687,16 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
         return (
           <div style={{
             position: 'fixed', inset: 0, zIndex: 50,
-            background: 'var(--color-bg)', display: 'flex', flexDirection: 'column',
+            background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column',
+            backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+            animation: 'livegrid-fullscreen-in var(--duration-medium) var(--ease-emphasized-decel) both',
           }}>
+            <style>{`
+              @keyframes livegrid-fullscreen-in {
+                from { opacity: 0; transform: scale(0.95); }
+                to { opacity: 1; transform: scale(1); }
+              }
+            `}</style>
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '12px 20px', borderBottom: '1px solid var(--color-border)',

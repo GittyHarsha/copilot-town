@@ -301,7 +301,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
                 style={{
                   width: '100%', padding: '6px 8px 6px 28px', fontSize: 12,
                   background: 'var(--color-bg-1)', border: '1px solid var(--color-border)',
-                  borderRadius: 8, color: 'var(--color-fg)', outline: 'none',
+                  borderRadius: 'var(--shape-xl)', color: 'var(--color-fg)', outline: 'none',
                 }}
               />
             </div>
@@ -361,7 +361,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
       {/* ── Right: Health Sidebar ── */}
       <div style={{
         flex: '0 0 30%', minWidth: 260, maxWidth: 400, display: 'flex', flexDirection: 'column',
-        background: 'var(--color-bg-1)', border: '1px solid var(--color-border)', borderRadius: 12,
+        background: 'var(--color-bg-1)', border: '1px solid var(--color-border)', borderRadius: 'var(--shape-lg)',
         overflow: 'hidden',
       }}>
         <div style={{
@@ -372,7 +372,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-fg)' }}>System Health</span>
           {health && (
             <span style={{
-              marginLeft: 'auto', fontSize: 10, padding: '2px 8px', borderRadius: 10,
+              marginLeft: 'auto', fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-xl)',
               fontWeight: 600,
               background: health.status === 'ok' ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
               color: health.status === 'ok' ? '#22c55e' : '#f59e0b',
@@ -415,10 +415,10 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
                     <div
                       onClick={() => toggleAgent(agent.name)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                        background: 'var(--color-bg-2)', borderRadius: 8, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
+                        background: 'var(--color-bg-2)', borderRadius: 'var(--shape-md)', cursor: 'pointer',
                         border: expandedAgent === agent.name ? '1px solid var(--color-border-1)' : '1px solid var(--color-border)',
-                        transition: 'all 0.15s',
+                        transition: 'all var(--duration-short) var(--ease-standard)',
                       }}
                     >
                       <span style={{
@@ -430,13 +430,13 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
                         {agent.name}
                       </span>
                       <span style={{
-                        fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 500,
+                        fontSize: 10, padding: '2px 8px', borderRadius: 'var(--shape-xl)', fontWeight: 500,
                         background: STATUS_DOT_COLORS[agent.status] ? `${STATUS_DOT_COLORS[agent.status]}22` : 'var(--color-bg-3)',
                         color: STATUS_DOT_COLORS[agent.status] ?? 'var(--color-fg-2)',
                       }}>
                         {agent.status}
                       </span>
-                      <span style={{ fontSize: 10, color: 'var(--color-fg-2)', transform: expandedAgent === agent.name ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
+                      <span style={{ fontSize: 10, color: 'var(--color-fg-2)', transform: expandedAgent === agent.name ? 'rotate(90deg)' : 'none', transition: 'transform var(--duration-short) var(--ease-standard)' }}>
                         ▶
                       </span>
                     </div>
@@ -445,7 +445,7 @@ export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
                     {expandedAgent === agent.name && (
                       <div style={{
                         padding: '8px 10px', marginTop: 4, background: 'var(--color-bg)',
-                        borderRadius: 8, border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--shape-md)', border: '1px solid var(--color-border)',
                       }}>
                         <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--color-fg-2)', marginBottom: 6 }}>
                           Status History
@@ -506,8 +506,13 @@ function EventCard({ event, onNavigate }: { event: ActivityEvent; onNavigate?: (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px',
       background: 'var(--color-bg-1)', border: '1px solid var(--color-border)',
-      borderRadius: 8, borderLeft: `3px solid ${sevColor}`, transition: 'background 0.15s',
-    }}>
+      borderRadius: 'var(--shape-md)', borderLeft: `3px solid ${sevColor}`,
+      transition: 'box-shadow var(--duration-short) var(--ease-standard), transform var(--duration-short) var(--ease-standard)',
+      cursor: 'default',
+    }}
+    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--card-shadow-hover)'; }}
+    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = 'none'; }}
+    >
       {/* Timestamp */}
       <span style={{ fontSize: 10, color: 'var(--color-fg-2)', flexShrink: 0, minWidth: 52, fontVariantNumeric: 'tabular-nums', paddingTop: 2 }}>
         {relativeTime(new Date(event.timestamp).getTime())}
@@ -515,7 +520,7 @@ function EventCard({ event, onNavigate }: { event: ActivityEvent; onNavigate?: (
 
       {/* Type badge */}
       <span style={{
-        fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 600, flexShrink: 0,
+        fontSize: 10, padding: '1px 6px', borderRadius: 'var(--shape-xl)', fontWeight: 600, flexShrink: 0,
         background: badge.bg, color: badge.fg, whiteSpace: 'nowrap',
       }}>
         {event.type}
@@ -526,7 +531,7 @@ function EventCard({ event, onNavigate }: { event: ActivityEvent; onNavigate?: (
         <button
           onClick={() => onNavigate?.('dashboard', { agent: event.agent! })}
           style={{
-            fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 600, flexShrink: 0,
+            fontSize: 10, padding: '1px 6px', borderRadius: 'var(--shape-xl)', fontWeight: 600, flexShrink: 0,
             background: 'var(--color-bg-3)',
             color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline',
             fontFamily: 'monospace', border: 'none',
@@ -547,7 +552,7 @@ function StatusBadge({ status }: { status: string }) {
   const color = STATUS_DOT_COLORS[status] ?? '#94a3b8';
   return (
     <span style={{
-      fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 500,
+      fontSize: 10, padding: '1px 6px', borderRadius: 'var(--shape-xl)', fontWeight: 500,
       background: `${color}22`, color,
       animation: status === 'crashed' ? 'pulse 1.5s infinite' : undefined,
     }}>
@@ -559,7 +564,7 @@ function StatusBadge({ status }: { status: string }) {
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={{
-      background: 'var(--color-bg-2)', borderRadius: 8, padding: '8px 10px',
+      background: 'var(--color-bg-2)', borderRadius: 'var(--shape-md)', padding: '8px 10px',
       border: '1px solid var(--color-border)',
     }}>
       <div style={{ fontSize: 10, color: 'var(--color-fg-2)' }}>{label}</div>
@@ -580,7 +585,7 @@ function FilterSelect({ label, value, onChange, options }: {
       onChange={e => onChange(e.target.value)}
       aria-label={label}
       style={{
-        fontSize: 11, padding: '6px 8px', borderRadius: 8,
+        fontSize: 11, padding: '6px 12px', borderRadius: 'var(--shape-xl)',
         background: 'var(--color-bg-1)', border: '1px solid var(--color-border)',
         color: 'var(--color-fg)', outline: 'none', cursor: 'pointer',
       }}

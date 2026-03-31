@@ -240,36 +240,44 @@ function AppInner() {
         <CommandPalette commands={commands} onExecute={handlePaletteExecute} onClose={() => setPaletteOpen(false)} />
       )}
 
-      {/* Header — 48px */}
-      <header className="border-b border-border sticky top-0 z-50 bg-bg/80 backdrop-blur-xl">
-        <div className="max-w-[1400px] mx-auto px-4 md:px-6 h-12 flex items-center justify-between">
-          <div className="flex items-center gap-5 md:gap-7">
+      {/* Header — glass surface, no hard border */}
+      <header className="glass sticky top-0 z-50" style={{
+        borderBottom: '1px solid var(--color-border)',
+      }}>
+        <div className="max-w-[1400px] mx-auto px-4 md:px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-6 md:gap-8">
             <div className="flex items-center gap-2.5">
               <span className="text-base" aria-hidden>🏘️</span>
-              <span className="text-sm font-bold tracking-tight hidden sm:inline">Copilot Town</span>
+              <span className="text-sm font-semibold tracking-tight hidden sm:inline" style={{ letterSpacing: '-0.02em' }}>Copilot Town</span>
             </div>
-            <nav className="flex items-center gap-0.5 bg-bg-1/50 rounded-xl p-0.5 border border-border/50" role="navigation" aria-label="Main navigation">
+            <nav className="flex items-center gap-1 p-1" role="navigation" aria-label="Main navigation">
               {NAV.map(item => (
                 <button
                   key={item.id}
-                  className={`relative px-3 md:px-3.5 py-1.5 text-[11px] font-medium transition-all duration-200 rounded-lg ${
-                    page === item.id ? 'text-fg bg-bg-3/80 shadow-sm' : 'text-fg-2 hover:text-fg-1'
-                  }`}
+                  className="relative px-3.5 py-1.5 text-[11.5px] font-medium"
                   onClick={() => setPage(item.id)}
                   title={item.label}
                   aria-current={page === item.id ? 'page' : undefined}
-                  style={{ position: 'relative' }}
+                  style={{
+                    borderRadius: 'var(--shape-full)',
+                    background: page === item.id ? 'var(--accent-dim)' : 'transparent',
+                    color: page === item.id ? 'var(--accent)' : 'var(--color-fg-2)',
+                    transition: 'all var(--duration-medium) var(--ease-standard)',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
                 >
                   <span className="md:hidden">{item.icon}</span>
                   <span className="hidden md:inline">{item.label}</span>
                   {navBadges[item.id] && (
                     <span style={{
                       position: 'absolute', top: -4, right: -6,
-                      minWidth: 16, height: 16, borderRadius: 8,
-                      background: item.id === 'activity' ? '#ef4444' : '#3b82f6',
-                      color: '#fff', fontSize: '0.65rem', fontWeight: 700,
+                      minWidth: 16, height: 16, borderRadius: 'var(--shape-full)',
+                      background: item.id === 'activity' ? '#ef4444' : 'var(--accent)',
+                      color: '#fff', fontSize: '0.6rem', fontWeight: 700,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       padding: '0 4px', lineHeight: 1,
+                      boxShadow: `0 0 0 2px var(--color-bg)`,
                     }}>
                       {navBadges[item.id] > 99 ? '99+' : navBadges[item.id]}
                     </span>
@@ -279,6 +287,12 @@ function AppInner() {
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              className="btn"
+              style={{ fontSize: 11, padding: '5px 12px', opacity: 0.6 }}
+              title="Command palette (⌘K)"
+            >⌘K</button>
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 dot-live' : 'bg-red-500'}`}
               role="status"
@@ -288,9 +302,9 @@ function AppInner() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 49px)' }}>
-        <main className="flex-1 overflow-y-auto px-4 md:px-6 py-5" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
-          <div className="max-w-[1400px] mx-auto">
+      <div className="flex flex-1 overflow-hidden" style={{ height: 'calc(100vh - 57px)' }}>
+        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6 md:py-8" style={{ paddingBottom: isCollapsed ? undefined : panelHeight + 16 }}>
+          <div className="max-w-[1400px] mx-auto animate-fade-in" key={page}>
             {page === 'dashboard' && (
               <ErrorBoundary>
                 <Dashboard

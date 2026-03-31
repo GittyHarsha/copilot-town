@@ -104,9 +104,9 @@ function InlineToolCall({ tool }: { tool: ToolCall }) {
   return (
     <div
       style={{
-        background: 'var(--color-bg-2)',
-        border: '1px solid var(--color-border)',
-        borderRadius: 6,
+        background: 'transparent',
+        border: '1px solid var(--color-border-1)',
+        borderRadius: 'var(--shape-md)',
         padding: '4px 8px',
         fontSize: '0.75rem',
         fontFamily: 'monospace',
@@ -678,7 +678,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
 
       {/* ── Resize handle ── */}
       <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors z-10"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/30 active:bg-blue-500/40 z-10"
+        style={{ transition: 'all var(--duration-medium) var(--ease-standard)' }}
         onMouseDown={startDrag}
       />
 
@@ -827,7 +828,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                 /* ── User message ── */
                 if (m.role === 'user') {
                   return (
-                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-fade-in transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
+                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
                       onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
                       <div className={`max-w-[85%] relative group/user ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
                         {/* Relay sender */}
@@ -844,11 +845,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                             }`}>{m.action === 'enqueue' ? '📋 queued' : '↯ steer'}</span>
                           </div>
                         )}
-                        <div className="rounded-2xl rounded-br-sm px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words">
+                        <div className="px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words" style={{ borderRadius: '18px 18px 4px 18px' }}>
                           {renderHighlightedText(m.text)}
                         </div>
                         {/* Hover actions + timestamp */}
-                        <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-50'}`}>
+                        <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`} style={{ transitionDuration: 'var(--duration-short)' }}>
                           <span className="text-[10px] text-fg-2/25 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
                           <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
@@ -860,11 +861,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
 
                 /* ── Agent message (full-width) ── */
                 return (
-                  <div key={m.id} id={`msg-${m.id}`} className={`animate-fade-in transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-3' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
+                  <div key={m.id} id={`msg-${m.id}`} className={`animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-3' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
                     onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
                     <div style={{
                       background: 'var(--color-bg-2)',
-                      borderRadius: 12,
+                      borderRadius: '4px 18px 18px 18px',
                       padding: '12px 14px',
                       border: '1px solid var(--color-border)',
                     }}>
@@ -916,7 +917,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                         {m.tokens && <span className="text-fg-2/20 tabular-nums">{m.tokens.toLocaleString()} out</span>}
                         {m.usage?.inputTokens && <span className="text-fg-2/20 tabular-nums">{m.usage.inputTokens.toLocaleString()} in</span>}
                         {m.usage?.duration && <span className="text-fg-2/20 tabular-nums">{(m.usage.duration / 1000).toFixed(1)}s</span>}
-                        <div className={`ml-auto flex items-center gap-1.5 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-50'}`}>
+                        <div className={`ml-auto flex items-center gap-1.5 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`} style={{ transitionDuration: 'var(--duration-short)' }}>
                           <span className="text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
                           <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
@@ -933,16 +934,17 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
             <button
               onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
               style={{
-                position: 'sticky', bottom: 8, alignSelf: 'center',
-                padding: '6px 16px', borderRadius: 20,
-                background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
-                color: 'var(--color-fg-1)', fontSize: '0.75rem', cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)', zIndex: 10,
-                display: 'flex', alignItems: 'center', gap: 4,
+                position: 'sticky', bottom: 12, alignSelf: 'center',
+                width: 40, height: 40, borderRadius: '50%',
+                background: 'var(--color-bg-2)', border: 'none',
+                color: 'var(--color-fg-1)', fontSize: '1rem', cursor: 'pointer',
+                boxShadow: 'var(--elevation-2)', zIndex: 10,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'box-shadow var(--duration-short) var(--ease-standard), transform var(--duration-short) var(--ease-standard)',
               }}
               aria-label="Scroll to latest message"
             >
-              ↓ Latest
+              ↓
             </button>
           )}
         </div>
@@ -972,7 +974,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
         )}
 
         {/* ── Input ── */}
-        <div className="border-t border-border p-4 flex-shrink-0 bg-bg-1/80">
+        <div className="border-t border-border/30 p-5 flex-shrink-0 bg-bg-1/80">
           {!connected && (
             <div className="text-[11px] text-amber-400/60 bg-amber-400/[0.04] rounded-lg px-3 py-2 mb-2.5 border border-amber-400/[0.08] flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
@@ -982,7 +984,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
           <div className="flex items-end gap-2.5">
             <textarea
               ref={inputRef}
-              className="flex-1 bg-bg-1 border border-border rounded-xl px-4 py-3 text-[13px] text-fg resize-none focus:outline-none focus:border-border-1 focus:bg-bg-2 min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40"
+              className="flex-1 input-m3 px-4 py-3 text-[13px] text-fg resize-none focus:outline-none min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40"
               placeholder={sending ? 'Type to steer or Ctrl+Q to queue…' : `Message ${agentName}…`}
               rows={1}
               value={input}
@@ -995,12 +997,12 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
               }}
             />
             <button
-              className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+              className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 ${
                 sending
                   ? input.trim()
                     ? 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/20'
                     : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/15'
-                  : 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border border-blue-500/15'
+                  : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-none'
               } disabled:opacity-20`}
               onClick={() => sending ? (input.trim() ? sendMessage('steer') : abortAgent()) : sendMessage()}
               disabled={!input.trim() && !sending}
