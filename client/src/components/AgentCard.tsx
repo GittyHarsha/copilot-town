@@ -41,6 +41,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
   const [showEdit, setShowEdit] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [menuFlip, setMenuFlip] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modelInput, setModelInput] = useState('');
   const [effortInput, setEffortInput] = useState('');
@@ -259,10 +260,23 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
 
                 {/* Overflow menu for secondary actions */}
                 <div className="relative" ref={moreRef}>
-                  <button className="btn" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setShowMoreMenu(!showMoreMenu); }}>⋯</button>
+                  <button className="btn" aria-label="More actions" onClick={(e) => {
+                    e.stopPropagation();
+                    if (!showMoreMenu && moreRef.current) {
+                      const rect = moreRef.current.getBoundingClientRect();
+                      setMenuFlip(rect.bottom + 300 > window.innerHeight);
+                    }
+                    setShowMoreMenu(!showMoreMenu);
+                  }}>⋯</button>
                   {showMoreMenu && (
-                    <div className="absolute top-full left-0 mt-1.5 z-50 bg-bg-1 border border-border-1 rounded-xl py-1.5 min-w-[170px] animate-slide-down"
-                      style={{ boxShadow: 'var(--card-shadow-hover)' }}>
+                    <div className="animate-slide-down"
+                      style={{
+                        position: 'absolute', [menuFlip ? 'bottom' : 'top']: '100%', right: 0,
+                        marginTop: menuFlip ? 0 : 6, marginBottom: menuFlip ? 6 : 0,
+                        zIndex: 50, background: 'var(--color-bg-1)', border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--shape-lg)', padding: '6px 0', minWidth: 180,
+                        boxShadow: 'var(--elevation-3)',
+                      }}>
                       {isHeadless ? (
                         <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                           style={{ width: 'calc(100% - 4px)' }}
