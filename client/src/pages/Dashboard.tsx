@@ -132,9 +132,10 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
 
   if (userAgents.length === 0 && workflowAgents.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <span className="text-2xl mb-3 opacity-30">⊘</span>
-        <p className="text-xs text-fg-2">No agents found. Check your agent definitions.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem' }}>
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🏘️</div>
+        <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>No agents running</div>
+        <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>Spawn an agent from the command palette (Ctrl+K) or use psmux to start agent panes.</div>
       </div>
     );
   }

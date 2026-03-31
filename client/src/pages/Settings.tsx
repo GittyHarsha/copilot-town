@@ -197,7 +197,46 @@ function SessionsSection() {
     });
   }, []);
 
-  if (loading) return <div className="text-xs text-fg-2">Loading sessions…</div>;
+  if (loading) {
+    const Skeleton = ({ width = '100%', height = 14, style = {} }: { width?: string | number; height?: number; style?: React.CSSProperties }) => (
+      <div style={{
+        width, height, borderRadius: 6,
+        background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.5s ease-in-out infinite',
+        ...style,
+      }} />
+    );
+    return (
+      <section className="space-y-3">
+        <h2 className="text-xs font-semibold text-fg-1 uppercase tracking-wider">Sessions</h2>
+        <div className="border border-border rounded overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-bg-2 text-fg-2">
+                <th className="text-left px-3 py-1.5 font-medium">Name</th>
+                <th className="text-left px-3 py-1.5 font-medium">Session ID</th>
+                <th className="text-left px-3 py-1.5 font-medium">Status</th>
+                <th className="text-left px-3 py-1.5 font-medium">Template</th>
+                <th className="text-right px-3 py-1.5 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <tr key={i} className="border-t border-border">
+                  <td className="px-3 py-2"><Skeleton width="70%" /></td>
+                  <td className="px-3 py-2"><Skeleton width="60%" /></td>
+                  <td className="px-3 py-2"><Skeleton width="50%" /></td>
+                  <td className="px-3 py-2"><Skeleton width="40%" /></td>
+                  <td className="px-3 py-2"><Skeleton width={32} style={{ marginLeft: 'auto' }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-3">

@@ -382,9 +382,15 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
         </div>
 
         {loading ? (
-          <div className="space-y-2">{Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-16 bg-bg-1 rounded-lg animate-pulse" />
-          ))}</div>
+          <div className="space-y-2 px-1">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="card-surface p-3" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ width: '50%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                <div style={{ width: '80%', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                <div style={{ width: '35%', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="flex-1 overflow-y-auto space-y-1">
             {displaySessions.map(s => {
@@ -450,6 +456,12 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             {/* Header with chat/plan toggle */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="min-w-0 flex-1 mr-3">
+                <button
+                  onClick={() => { setSelectedId(null); setSelectedType(null); setSelectedAgentName(null); }}
+                  style={{ background: 'none', border: 'none', color: 'var(--color-fg-1)', cursor: 'pointer', fontSize: '0.75rem', padding: '0 0 0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                  ← Back to sessions
+                </button>
                 <h3 className="text-sm font-medium truncate">
                   {(() => {
                     const raw = sessionMeta?.summary || sessionLookup.get(selectedId)?.summary || '';
@@ -491,7 +503,15 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             {detailLoading ? (
               <div className="flex-1 p-4 space-y-3">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className={`h-16 rounded-lg animate-pulse ${i % 2 === 0 ? 'bg-blue-500/5 ml-auto w-3/4' : 'bg-bg-2 w-3/4'}`} />
+                  <div key={i} style={{
+                    height: 16,
+                    borderRadius: 6,
+                    width: i % 2 === 0 ? '75%' : '100%',
+                    marginLeft: i % 2 === 0 ? 'auto' : undefined,
+                    background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)',
+                    backgroundSize: '200% 100%',
+                    animation: 'shimmer 1.5s ease-in-out infinite',
+                  }} />
                 ))}
               </div>
             ) : detailTab === 'chat' ? (

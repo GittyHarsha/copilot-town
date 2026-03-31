@@ -57,6 +57,21 @@ function AppInner() {
   const { toast } = useToast();
   const prevEventRef = useRef<string | null>(null);
 
+  // Dynamic page title
+  useEffect(() => {
+    const pageName = NAV.find(n => n.id === page)?.label || 'Dashboard';
+    document.title = `Copilot Town — ${pageName}`;
+  }, [page]);
+
+  // Cross-page navigation handler
+  const handleNavigate = useCallback((target: string, context?: { agent?: string; session?: string }) => {
+    setPage(target as Page);
+    // If navigating to chat with a specific agent, open the chat
+    if (context?.agent && target === 'dashboard') {
+      // just navigate, the agent name is for future use
+    }
+  }, []);
+
   const [chatWidth, setChatWidth] = useState(() => {
     const saved = parseInt(localStorage.getItem('chat-panel-width') || '480');
     return Math.max(320, Math.min(saved, window.innerWidth * 0.6));
@@ -287,11 +302,11 @@ function AppInner() {
                 {page === 'live' && <LiveGrid onOpenChat={openChat} />}
                 {page === 'panes' && <Towns />}
                 {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
-                {page === 'graph' && <Graph />}
-                {page === 'activity' && <ActivityFeed />}
+                {page === 'graph' && <Graph onNavigate={handleNavigate} />}
+                {page === 'activity' && <ActivityFeed onNavigate={handleNavigate} />}
                 {page === 'workflows' && <Workflows />}
-                {page === 'tools' && <MCPTools />}
-                {page === 'plans' && <PlanViewer />}
+                {page === 'tools' && <MCPTools onNavigate={handleNavigate} />}
+                {page === 'plans' && <PlanViewer onNavigate={handleNavigate} />}
                 {page === 'settings' && <Settings />}
               </ErrorBoundary>
             </Suspense>

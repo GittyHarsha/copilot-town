@@ -5,7 +5,11 @@ import { relativeTime } from '../components/ChatMarkdown';
 type SortKey = 'name' | 'calls' | 'lastUsed';
 type CategoryFilter = 'all' | 'mcp' | 'sdk';
 
-export default function MCPTools() {
+interface MCPToolsProps {
+  onNavigate?: (page: string, context?: { agent?: string }) => void;
+}
+
+export default function MCPTools({ onNavigate }: MCPToolsProps) {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,9 +78,28 @@ export default function MCPTools() {
   }, []);
 
   if (loading) {
+    const Skeleton = ({ width = '100%', height = 14, style = {} }: { width?: string | number; height?: number; style?: React.CSSProperties }) => (
+      <div style={{
+        width, height, borderRadius: 6,
+        background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.5s ease-in-out infinite',
+        ...style,
+      }} />
+    );
     return (
-      <div className="flex items-center justify-center h-64 text-fg-2 text-sm">
-        <span className="animate-pulse">Loading tools…</span>
+      <div className="space-y-5 p-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="bg-bg-1 border border-border rounded-xl p-4" style={{ height: 120 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Skeleton width="50%" height={14} />
+                <Skeleton width="80%" height={12} />
+                <Skeleton width="60%" height={12} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -182,9 +205,10 @@ export default function MCPTools() {
 
       {/* Tools grid */}
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 gap-2">
-          <span className="text-3xl opacity-40">🔧</span>
-          <span className="text-fg-2 text-sm">No tools found</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem' }}>
+          <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🔧</div>
+          <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>No tools registered</div>
+          <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>MCP and SDK tools will appear here once agents are running. Start a headless agent to see its available tools.</div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -197,6 +221,7 @@ export default function MCPTools() {
               onAgentClick={(name) => {
                 loadAgentDetail(name);
               }}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
@@ -219,11 +244,13 @@ function ToolCard({
   expanded,
   onToggle,
   onAgentClick,
+  onNavigate,
 }: {
   tool: ToolInfo;
   expanded: boolean;
   onToggle: () => void;
   onAgentClick: (name: string) => void;
+  onNavigate?: (page: string, context?: { agent?: string }) => void;
 }) {
   const lastUsed = tool.stats.lastUsed
     ? relativeTime(new Date(tool.stats.lastUsed).getTime())
@@ -281,6 +308,18 @@ function ToolCard({
               className="w-6 h-6 rounded-full bg-bg-3 border border-border text-[9px] font-bold text-fg-1 flex items-center justify-center hover:border-border-1 hover:bg-bg-2 transition-all uppercase"
             >
               {agent.slice(0, 2)}
+            </button>
+          ))}
+          {onNavigate && tool.stats.agentsUsed.map(agentName => (
+            <button
+              key={`nav-${agentName}`}
+              onClick={e => {
+                e.stopPropagation();
+                onNavigate('dashboard', { agent: agentName });
+              }}
+              style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline', font: 'inherit', padding: 0 }}
+            >
+              {agentName}
             </button>
           ))}
         </div>

@@ -35,7 +35,11 @@ function getTypeBadge(type: string) {
   return TYPE_BADGE_COLORS[type] ?? { bg: 'rgba(148,163,184,0.15)', fg: '#94a3b8' };
 }
 
-export default function ActivityFeed() {
+interface ActivityFeedProps {
+  onNavigate?: (page: string, context?: { agent?: string }) => void;
+}
+
+export default function ActivityFeed({ onNavigate }: ActivityFeedProps) {
   // Events state
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -232,9 +236,27 @@ export default function ActivityFeed() {
   }, [health]);
 
   if (eventsLoading && healthLoading) {
+    const Skeleton = ({ width = '100%', height = 14, style = {} }: { width?: string | number; height?: number; style?: React.CSSProperties }) => (
+      <div style={{
+        width, height, borderRadius: 6,
+        background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'shimmer 1.5s ease-in-out infinite',
+        ...style,
+      }} />
+    );
     return (
-      <div className="flex items-center justify-center h-64 text-fg-2 text-sm">
-        <span className="animate-pulse">Loading activity feed…</span>
+      <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 130px)', minHeight: 0 }}>
+        <div style={{ flex: '1 1 70%', display: 'flex', flexDirection: 'column', gap: 12, padding: 12 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} height={60} style={{ borderRadius: 12 }} />
+          ))}
+        </div>
+        <div style={{ flex: '0 0 280px', display: 'flex', flexDirection: 'column', gap: 10, padding: 12 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} height={80} style={{ borderRadius: 12 }} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -300,9 +322,10 @@ export default function ActivityFeed() {
             <button onClick={fetchEvents} style={{ fontSize: 11, color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 8 }}>
-            <span style={{ fontSize: 32, opacity: 0.3 }}>📡</span>
-            <span style={{ fontSize: 12, color: 'var(--color-fg-2)' }}>No events found</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem', flex: 1 }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📡</div>
+            <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>No activity yet</div>
+            <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>Agent events, health alerts, and relay messages will stream here in real-time once agents are running.</div>
           </div>
         ) : (
           <div
@@ -314,7 +337,7 @@ export default function ActivityFeed() {
             }}
           >
             {filtered.map(event => (
-              <EventCard key={event.id} event={event} />
+              <EventCard key={event.id} event={event} onNavigate={onNavigate} />
             ))}
           </div>
         )}
@@ -361,8 +384,10 @@ export default function ActivityFeed() {
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {healthLoading && !health ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, fontSize: 12, color: 'var(--color-fg-2)' }}>
-              <span className="animate-pulse">Loading health…</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{ height: 80, borderRadius: 12, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+              ))}
             </div>
           ) : health ? (
             <>
@@ -473,7 +498,7 @@ export default function ActivityFeed() {
 
 /* ── Sub-components ── */
 
-function EventCard({ event }: { event: ActivityEvent }) {
+function EventCard({ event, onNavigate }: { event: ActivityEvent; onNavigate?: (page: string, context?: { agent?: string }) => void }) {
   const badge = getTypeBadge(event.type);
   const sevColor = SEVERITY_COLORS[event.severity] ?? SEVERITY_COLORS.info;
 
@@ -498,13 +523,16 @@ function EventCard({ event }: { event: ActivityEvent }) {
 
       {/* Agent name */}
       {event.agent && (
-        <span style={{
-          fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 600, flexShrink: 0,
-          background: 'var(--color-bg-3)', color: 'var(--color-fg-1)',
-          fontFamily: 'monospace',
-        }}>
+        <button
+          onClick={() => onNavigate?.('dashboard', { agent: event.agent! })}
+          style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 6, fontWeight: 600, flexShrink: 0,
+            background: 'var(--color-bg-3)',
+            color: '#3b82f6', cursor: 'pointer', textDecoration: 'underline',
+            fontFamily: 'monospace', border: 'none',
+          }}>
           {event.agent}
-        </span>
+        </button>
       )}
 
       {/* Message */}

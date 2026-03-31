@@ -137,7 +137,11 @@ function timeAgo(ts: string) {
   return `${Math.floor(d / 86400000)}d ago`;
 }
 
-export default function Graph() {
+interface GraphProps {
+  onNavigate?: (page: string, context?: { agent?: string; session?: string }) => void;
+}
+
+export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
   const [relays, setRelays] = useState<RelayEntry[]>([]);
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -254,10 +258,10 @@ export default function Graph() {
         {/* SVG canvas */}
         <div className="flex-1 relative bg-bg-1">
           {edges.length === 0 ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-fg-2">
-              <div className="text-4xl opacity-10 mb-4">⊙</div>
-              <p className="text-sm">No relay connections yet</p>
-              <p className="text-[11px] text-fg-2/50 mt-1">{agents.length} agents loaded — send a relay to see the graph</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem', position: 'absolute', inset: 0 }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🕸️</div>
+              <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>No relay connections yet</div>
+              <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>Send messages between agents using the relay system. Connections will appear here as an interactive graph.</div>
             </div>
           ) : null}
           <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" role="img" aria-label="Agent relay graph" onClick={() => { setSelected(null); setFocusedNode(null); }}>

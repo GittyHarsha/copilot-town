@@ -31,7 +31,11 @@ function truncate(text: string, max: number): string {
 
 /* ─── Component ───────────────────────────────────────────── */
 
-export default function PlanViewer() {
+interface PlanViewerProps {
+  onNavigate?: (page: string, context?: { agent?: string; session?: string }) => void;
+}
+
+export default function PlanViewer({ onNavigate: _onNavigate }: PlanViewerProps) {
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [details, setDetails] = useState<SessionDetails | null>(null);
@@ -129,8 +133,10 @@ export default function PlanViewer() {
         {/* Session list */}
         <div className="flex-1 overflow-y-auto">
           {listLoading ? (
-            <div className="flex items-center justify-center py-12 text-fg-2 text-[11px]">
-              Loading sessions…
+            <div className="px-3 py-2 space-y-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{ height: 48, borderRadius: 8, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+              ))}
             </div>
           ) : listError ? (
             <div className="flex flex-col items-center justify-center py-12 gap-2">
@@ -144,8 +150,10 @@ export default function PlanViewer() {
               </button>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-fg-2 text-[11px]">
-              {search ? 'No matching sessions' : 'No sessions found'}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📋</div>
+              <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>{search ? 'No matching sessions' : 'No sessions with plans'}</div>
+              <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>{search ? 'Try a different search term.' : 'Plans and checkpoints from agent sessions will appear here. Start a session with planning enabled to get started.'}</div>
             </div>
           ) : (
             filtered.map(s => (
@@ -188,11 +196,11 @@ export default function PlanViewer() {
       {/* ── Right Panel: Detail View ── */}
       <div className="flex-1 overflow-y-auto bg-bg">
         {loading ? (
-          <div className="flex items-center justify-center h-full text-fg-2 text-sm">
-            <div className="flex flex-col items-center gap-2">
-              <div className="w-5 h-5 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-              <span className="text-[11px]">Loading session…</span>
-            </div>
+          <div className="max-w-[900px] mx-auto px-6 py-5 space-y-4">
+            <div style={{ width: '60%', height: 16, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+            <div style={{ width: '100%', height: 14, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+            <div style={{ width: '100%', height: 14, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+            <div style={{ width: '100%', height: 14, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
           </div>
         ) : detailError ? (
           <div className="flex items-center justify-center h-full">
@@ -219,6 +227,14 @@ export default function PlanViewer() {
           </div>
         ) : (
           <div className="max-w-[900px] mx-auto px-6 py-5 space-y-6">
+            {/* Breadcrumb */}
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-fg-2)', marginBottom: '0.75rem' }}>
+              <button onClick={() => setSelectedId(null)} style={{ background: 'none', border: 'none', color: 'var(--color-fg-1)', cursor: 'pointer' }}>
+                ← Plans
+              </button>
+              <span style={{ margin: '0 0.5rem' }}>›</span>
+              <span>{details.session.agentName || details.session.id.slice(0, 12)}</span>
+            </div>
             {/* Header */}
             <div className="space-y-1">
               <h1 className="text-sm font-semibold text-fg">

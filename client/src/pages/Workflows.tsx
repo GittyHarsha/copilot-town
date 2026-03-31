@@ -62,6 +62,7 @@ export default function Workflows() {
   const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
+  const [wfLoading, setWfLoading] = useState(true);
   const [view, setView] = useState<'list' | 'run-monitor' | 'editor'>('list');
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const [steerStep, setSteerStep] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export default function Workflows() {
       setRuns(rns);
       setStageFiles(stages);
     } catch {}
+    setWfLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -331,12 +333,25 @@ export default function Workflows() {
             </button>
           ))}
 
-          {workflows.length === 0 && (
-            <div className="px-4 py-8 text-center text-fg-2 text-sm">
-              No workflows found.<br/>
-              <span className="text-xs">Add YAML files to data/workflows/</span>
+          {wfLoading ? (
+            <div className="px-3 py-2 space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px' }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, flexShrink: 0, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ width: '60%', height: 12, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                    <div style={{ width: '40%', height: 10, borderRadius: 6, background: 'linear-gradient(90deg, var(--color-bg-2) 25%, var(--color-bg-3) 50%, var(--color-bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s ease-in-out infinite' }} />
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
+          ) : workflows.length === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', color: 'var(--color-fg-2)', textAlign: 'center', gap: '0.75rem' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>⛓</div>
+              <div style={{ fontSize: '1.1rem', color: 'var(--color-fg-1)', fontWeight: 500 }}>No workflows defined</div>
+              <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>Create workflow YAML files in data/workflows/ to define multi-step agent pipelines. Click 'New' to get started.</div>
+            </div>
+          ) : null}
 
           {/* Run history */}
           {runs.length > 0 && (
@@ -402,7 +417,15 @@ export default function Workflows() {
       {/* Right: Detail panel */}
       <div className="flex-1 overflow-y-auto">
         {view === 'editor' ? (
-          isStageEditor ? (
+          <div>
+            <button
+              onClick={() => { setView('list'); setEditingStageName(null); }}
+              style={{ background: 'none', border: 'none', color: 'var(--color-fg-1)', cursor: 'pointer', fontSize: '0.85rem', padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              aria-label="Back to workflow list"
+            >
+              ← Back to list
+            </button>
+          {isStageEditor ? (
             <WorkflowEditor
               mode="stage"
               stageFileName={editingStageName || ''}
@@ -426,7 +449,8 @@ export default function Workflows() {
               saving={editorSaving}
               onCancel={() => setView('list')}
             />
-          )
+          )}
+          </div>
         ) : !selectedWf && !selectedRun ? (
           <div className="flex items-center justify-center h-full text-fg-2">
             <div className="text-center">
@@ -442,7 +466,15 @@ export default function Workflows() {
             </div>
           </div>
         ) : selectedRun ? (
-          <RunMonitor
+          <div>
+            <button
+              onClick={() => { setSelectedRun(null); setView('list'); }}
+              style={{ background: 'none', border: 'none', color: 'var(--color-fg-1)', cursor: 'pointer', fontSize: '0.85rem', padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+              aria-label="Back to workflow list"
+            >
+              ← Back to list
+            </button>
+            <RunMonitor
             run={selectedRun}
             expandedStep={expandedStep}
             setExpandedStep={setExpandedStep}
@@ -455,7 +487,8 @@ export default function Workflows() {
               await api.cancelWorkflowRun(selectedRun.runId);
               load();
             }}
-          />
+            />
+          </div>
         ) : selectedWf ? (
           <div className="p-6 max-w-3xl">
             {/* Header */}
