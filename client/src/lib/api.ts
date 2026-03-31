@@ -83,6 +83,26 @@ export interface ActivityEvent {
   severity: 'info' | 'warn' | 'error';
 }
 
+export interface HealthStatus {
+  status: string;
+  timestamp: string;
+  port: number;
+  agents: Record<string, { status: string; lastCheck: string; details?: any }>;
+  mux: { available: boolean; binary: string };
+}
+
+export interface StatusChange {
+  agent: string;
+  oldStatus: string;
+  newStatus: string;
+  timestamp: string;
+}
+
+export interface StatusTimeline {
+  agent: string;
+  entries: { timestamp: string; status: string }[];
+}
+
 export interface ToolInfo {
   name: string;
   description: string;
@@ -278,6 +298,11 @@ export const api = {
     postJson<{ result: string }>('/psmux/display-message', { target, format }),
   setPsmuxOption: (key: string, value: string, global = true) =>
     postJson<{ ok: boolean }>('/psmux/options', { key, value, global }),
+
+  // Health & Status
+  getHealth: () => fetchJson<HealthStatus>('/health'),
+  getStatusHistory: (agent: string, limit = 100) => fetchJson<StatusChange[]>(`/status-history/${encodeURIComponent(agent)}?limit=${limit}`),
+  getStatusTimeline: (agent: string, since?: string) => fetchJson<any>(`/status-history/${encodeURIComponent(agent)}/timeline${since ? `?since=${since}` : ''}`),
 
   // Events
   getEvents: (limit = 200) => fetchJson<ActivityEvent[]>(`/events?limit=${limit}`),

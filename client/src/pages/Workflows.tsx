@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
 import { MarkdownContent } from '../components/ChatMarkdown';
 import ConfirmDialog from '../components/ConfirmDialog';
+import WorkflowDAG from '../components/WorkflowDAG';
 
 /* ─── 1. Types ──────────────────────────────────────────────────── */
 
@@ -64,6 +65,7 @@ export default function Workflows() {
   const [view, setView] = useState<'list' | 'run-monitor' | 'editor'>('list');
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const [steerStep, setSteerStep] = useState<string | null>(null);
+  const [dagView, setDagView] = useState<'dag' | 'list'>('dag');
   const wsRef = useRef<WebSocket | null>(null);
 
   // Editor state
@@ -446,6 +448,9 @@ export default function Workflows() {
             setExpandedStep={setExpandedStep}
             steerStep={steerStep}
             setSteerStep={setSteerStep}
+            dagView={dagView}
+            setDagView={setDagView}
+            workflowDef={workflows.find(w => w.id === selectedRun.workflowId)}
             onCancel={async () => {
               await api.cancelWorkflowRun(selectedRun.runId);
               load();
@@ -473,25 +478,40 @@ export default function Workflows() {
 
             {/* Pipeline visualization */}
             <div className="mb-6">
-              <h3 className="text-sm font-medium text-fg-1 mb-3 uppercase tracking-wider">Pipeline</h3>
-              <div className="flex flex-wrap gap-2 items-center">
-                {selectedWf.steps.map((step, i) => (
-                  <div key={step.id} className="flex items-center gap-2">
-                    <div className="bg-bg-2 border border-border-1 rounded-lg px-3 py-2">
-                      <div className="text-sm font-medium">{step.name || step.id}</div>
-                      {step.agent?.model && (
-                        <div className="text-xs text-fg-2">{step.agent.model}</div>
-                      )}
-                      {step.needs?.length ? (
-                        <div className="text-xs text-fg-2 mt-1">← {step.needs.join(', ')}</div>
-                      ) : null}
-                    </div>
-                    {i < selectedWf.steps.length - 1 && (
-                      <span className="text-fg-2">→</span>
-                    )}
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-fg-1 uppercase tracking-wider">Pipeline</h3>
+                <button
+                  onClick={() => setDagView(dagView === 'dag' ? 'list' : 'dag')}
+                  className="text-[11px] px-2 py-1 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40 transition-colors"
+                >
+                  {dagView === 'dag' ? '📝 List' : '📊 DAG'}
+                </button>
               </div>
+              {dagView === 'dag' ? (
+                <WorkflowDAG
+                  steps={selectedWf.steps}
+                  onStepClick={(id) => setExpandedStep(expandedStep === id ? null : id)}
+                />
+              ) : (
+                <div className="flex flex-wrap gap-2 items-center">
+                  {selectedWf.steps.map((step, i) => (
+                    <div key={step.id} className="flex items-center gap-2">
+                      <div className="bg-bg-2 border border-border-1 rounded-lg px-3 py-2">
+                        <div className="text-sm font-medium">{step.name || step.id}</div>
+                        {step.agent?.model && (
+                          <div className="text-xs text-fg-2">{step.agent.model}</div>
+                        )}
+                        {step.needs?.length ? (
+                          <div className="text-xs text-fg-2 mt-1">← {step.needs.join(', ')}</div>
+                        ) : null}
+                      </div>
+                      {i < selectedWf.steps.length - 1 && (
+                        <span className="text-fg-2">→</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Input form */}
@@ -778,13 +798,16 @@ Example: "\${{ steps.x.outputs.level }} == 'high' || \${{ inputs.force }} == 'tr
 /* ─── 5. RunMonitor Component ───────────────────────────────────── */
 
 function RunMonitor({
-  run, expandedStep, setExpandedStep, steerStep, setSteerStep, onCancel,
+  run, expandedStep, setExpandedStep, steerStep, setSteerStep, dagView, setDagView, workflowDef, onCancel,
 }: {
   run: WorkflowRun;
   expandedStep: string | null;
   setExpandedStep: (id: string | null) => void;
   steerStep: string | null;
   setSteerStep: (id: string | null) => void;
+  dagView: 'dag' | 'list';
+  setDagView: (v: 'dag' | 'list') => void;
+  workflowDef?: WorkflowDef;
   onCancel: () => void;
 }) {
   const completedSteps = run.steps.filter(s => s.status === 'complete').length;
@@ -841,6 +864,30 @@ function RunMonitor({
               <span className="text-fg-1">{v.length > 100 ? v.slice(0, 100) + '...' : v}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* DAG / List toggle + DAG view */}
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-fg-1 uppercase tracking-wider">Steps</h3>
+        <button
+          onClick={() => setDagView(dagView === 'dag' ? 'list' : 'dag')}
+          className="text-[11px] px-2 py-1 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40 transition-colors"
+        >
+          {dagView === 'dag' ? '📝 List' : '📊 DAG'}
+        </button>
+      </div>
+
+      {dagView === 'dag' && (
+        <div className="mb-6">
+          <WorkflowDAG
+            steps={workflowDef?.steps ?? run.steps.map(s => ({ id: s.id, name: s.name }))}
+            stepResults={run.steps}
+            onStepClick={(id) => {
+              setExpandedStep(expandedStep === id ? null : id);
+              if (dagView === 'dag') setDagView('list');
+            }}
+          />
         </div>
       )}
 

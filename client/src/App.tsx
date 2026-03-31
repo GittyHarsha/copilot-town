@@ -10,6 +10,7 @@ import { TerminalPanelProvider, useTerminalPanel } from './components/TerminalPa
 import ToastContainer from './components/ToastContainer';
 import HeadlessChatPanel from './components/HeadlessChatPanel';
 import ErrorBoundary from './components/ErrorBoundary';
+import ShortcutsModal from './components/ShortcutsModal';
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));
@@ -19,8 +20,9 @@ const Workflows = lazy(() => import('./pages/Workflows'));
 const LiveGrid = lazy(() => import('./pages/LiveGrid'));
 const MCPTools = lazy(() => import('./pages/MCPTools'));
 const PlanViewer = lazy(() => import('./pages/PlanViewer'));
+const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
-type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'tools' | 'plans' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'activity' | 'workflows' | 'tools' | 'plans' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
@@ -28,6 +30,7 @@ const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'panes', label: 'Panes', icon: '▦' },
   { id: 'sessions', label: 'Sessions', icon: '💬' },
   { id: 'graph', label: 'Graph', icon: '⊙' },
+  { id: 'activity', label: 'Activity', icon: '📡' },
   { id: 'workflows', label: 'Workflows', icon: '⛓' },
   { id: 'tools', label: 'Tools', icon: '🔧' },
   { id: 'plans', label: 'Plans', icon: '📋' },
@@ -45,6 +48,7 @@ function AppInner() {
   const [page, setPage] = useState<Page>('dashboard');
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [conversationAgent, setConversationAgent] = useState<string | null>(null);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const { status: wsStatus, connected, latestEvent } = useAgentStatus();
@@ -110,7 +114,12 @@ function AppInner() {
         return;
       }
       if (isInputFocused()) return;
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'tools', '8': 'plans', '9': 'settings' };
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        setShowShortcuts(true);
+        return;
+      }
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'tools', '8': 'plans', '9': 'settings', '0': 'activity' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -207,7 +216,7 @@ function AppInner() {
       label: 'Keyboard shortcuts: 1-9 pages, R refresh, ⌘K palette',
       icon: '⌨️',
       category: 'Help',
-      action: () => {},
+      action: () => setShowShortcuts(true),
     });
 
     return cmds;
@@ -279,6 +288,7 @@ function AppInner() {
                 {page === 'panes' && <Towns />}
                 {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
                 {page === 'graph' && <Graph />}
+                {page === 'activity' && <ActivityFeed />}
                 {page === 'workflows' && <Workflows />}
                 {page === 'tools' && <MCPTools />}
                 {page === 'plans' && <PlanViewer />}
@@ -307,6 +317,7 @@ function AppInner() {
         <span className="text-[10px] text-fg-2/40">⌘K for commands · ? for help</span>
       </div>
 
+      <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <ToastContainer />
     </div>
   );
