@@ -363,7 +363,45 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
             </div>
           )}
 
-          {/* Mode switcher (headless only) */}
+          {/* Type switcher: headless ↔ pane — always visible */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-fg-2/60 mr-1">Type:</span>
+            <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--color-border-1)' }}>
+              <button
+                className={`text-[10px] px-3 py-1.5 transition-all duration-150 ${
+                  !isHeadless
+                    ? 'bg-emerald-500/15 text-emerald-400 font-medium'
+                    : 'text-fg-2 hover:text-fg-1 hover:bg-bg-3'
+                }`}
+                style={{ border: 'none', cursor: isHeadless ? 'pointer' : 'default', background: !isHeadless ? 'rgba(34,197,94,0.12)' : 'transparent' }}
+                disabled={!isHeadless || !!pendingAction}
+                onClick={(e) => { e.stopPropagation(); if (isHeadless) handleMoveToPane(); }}
+                title={isHeadless ? 'Switch to terminal pane mode' : 'Currently in pane mode'}
+              >
+                📺 Pane
+              </button>
+              <button
+                className={`text-[10px] px-3 py-1.5 transition-all duration-150 ${
+                  isHeadless
+                    ? 'bg-cyan-500/15 text-cyan-400 font-medium'
+                    : agent.sessionId ? 'text-fg-2 hover:text-fg-1 hover:bg-bg-3' : 'text-fg-2/40'
+                }`}
+                style={{ border: 'none', borderLeft: '1px solid var(--color-border)', cursor: !isHeadless && agent.sessionId ? 'pointer' : isHeadless ? 'default' : 'not-allowed', background: isHeadless ? 'rgba(34,211,238,0.12)' : 'transparent' }}
+                disabled={isHeadless || !agent.sessionId || !!pendingAction}
+                onClick={(e) => { e.stopPropagation(); if (!isHeadless && agent.sessionId) handleMoveToHeadless(); }}
+                title={isHeadless ? 'Currently in headless mode' : agent.sessionId ? 'Switch to headless SDK mode' : 'No session ID — cannot switch to headless (agent needs an active Copilot session)'}
+              >
+                ⚡ Headless
+              </button>
+            </div>
+            {!isHeadless && !agent.sessionId && (
+              <span className="text-[9px] text-amber-400/70" title="This agent has no Copilot session attached. Start a Copilot session in the pane first to enable headless mode.">
+                ⚠ no session
+              </span>
+            )}
+          </div>
+
+          {/* Agent mode switcher (headless only) */}
           {isHeadless && isAlive && (
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] text-fg-2/60 mr-1">Mode:</span>
