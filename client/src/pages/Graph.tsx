@@ -149,7 +149,10 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(1);
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const didPan = useRef(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -195,6 +198,43 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
     edges.forEach(e => { if (e.from === focusedNode) s.add(e.to); if (e.to === focusedNode) s.add(e.from); });
     return s;
   }, [focusedNode, edges]);
+
+  // Pan/zoom mouse handlers
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    setTransform(prev => {
+      const newScale = Math.max(0.3, Math.min(3, prev.scale * delta));
+      return {
+        scale: newScale,
+        x: mx - (mx - prev.x) * (newScale / prev.scale),
+        y: my - (my - prev.y) * (newScale / prev.scale),
+      };
+    });
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as Element).tagName === 'circle' || (e.target as Element).tagName === 'text') return;
+    isPanning.current = true;
+    didPan.current = false;
+    setTransform(prev => {
+      panStart.current = { x: e.clientX - prev.x, y: e.clientY - prev.y };
+      return prev;
+    });
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning.current) return;
+    didPan.current = true;
+    setTransform(prev => ({ ...prev, x: e.clientX - panStart.current.x, y: e.clientY - panStart.current.y }));
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isPanning.current = false;
+  }, []);
 
   // Selected node detail
   const selectedAgent = agents.find(a => a.name === selected);
@@ -264,7 +304,20 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
               <div style={{ fontSize: '0.85rem', maxWidth: 400, lineHeight: 1.5 }}>Send messages between agents using the relay system. Connections will appear here as an interactive graph.</div>
             </div>
           ) : null}
-          <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" role="img" aria-label="Agent relay graph" onClick={() => { setSelected(null); setFocusedNode(null); }}>
+          <svg
+            ref={svgRef}
+            viewBox={viewBox}
+            className="w-full h-full"
+            role="img"
+            aria-label="Agent relay graph"
+            style={{ cursor: isPanning.current ? 'grabbing' : 'grab' }}
+            onClick={() => { if (!didPan.current) { setSelected(null); setFocusedNode(null); } didPan.current = false; }}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
             <defs>
               <marker id="arrow" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto">
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="var(--color-fg-2, #71717a)" strokeWidth="1" opacity="0.5" />
@@ -273,7 +326,7 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="#3b82f6" strokeWidth="1.2" />
               </marker>
             </defs>
-            <g transform={`scale(${zoom})`}>
+            <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
 
             {/* Edges */}
             {edges.map(e => {
@@ -355,9 +408,10 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
                     {node.isVirtual ? '👤' : node.type === 'headless' ? '⚡' : '📺'}
                   </text>
                   {/* Label below */}
-                  <text x={node.x} y={node.y + R + 12} textAnchor="middle"
-                    fill="var(--color-fg, #fafafa)" style={{ fontSize: 10, fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
-                    {node.id.length > 16 ? node.id.slice(0, 14) + '…' : node.id}
+                  <text x={node.x} y={node.y + 22} textAnchor="middle"
+                    fill="var(--color-fg-1)" fontSize={11} fontFamily="monospace"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                    {node.id.length > 12 ? node.id.slice(0, 12) + '…' : node.id}
                   </text>
                   {/* Edge count badge */}
                   {nodeEdgeCount > 0 && (
@@ -376,9 +430,9 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
             </g>
           </svg>
           <div className="absolute bottom-3 right-3 flex flex-col gap-1">
-            <button onClick={() => setZoom(z => Math.min(z + 0.2, 3))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom in">+</button>
-            <button onClick={() => setZoom(z => Math.max(z - 0.2, 0.4))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom out">−</button>
-            <button onClick={() => setZoom(1)} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px]" aria-label="Reset zoom">1:1</button>
+            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.min(3, prev.scale * 1.2) }))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom in">+</button>
+            <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.3, prev.scale * 0.8) }))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom out">−</button>
+            <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px]" aria-label="Fit view">Fit</button>
           </div>
           <div className="flex items-center gap-4 text-[10px] text-fg-2 mt-3 px-4 pb-2">
             <span className="flex items-center gap-1.5">

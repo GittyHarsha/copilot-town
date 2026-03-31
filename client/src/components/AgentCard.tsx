@@ -15,6 +15,8 @@ interface Props {
   onOpenChat?: (agentName: string) => void;
   pinned?: boolean;
   onTogglePin?: () => void;
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
 const DOT: Record<string, string> = {
@@ -25,7 +27,7 @@ const GLOW: Record<string, string> = {
   running: 'glow-green', idle: 'glow-yellow',
 };
 
-function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin }: Props) {
+function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin, selected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | 'restarting' | null>(null);
   const [resumeError, setResumeError] = useState('');
@@ -125,6 +127,18 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
         className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-fg/[0.02] transition-all duration-200"
         onClick={() => setExpanded(!expanded)}
       >
+        {/* Selection checkbox */}
+        {onSelect && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onSelect}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${agent.name}`}
+            style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#3b82f6' }}
+          />
+        )}
+
         {/* Status dot */}
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ring-2 ring-opacity-20 ${DOT[status] || 'bg-fg-2/30'} ${
           status === 'running' ? 'dot-live ring-emerald-500/20' : status === 'idle' ? 'ring-amber-400/20' : 'ring-transparent'
@@ -381,7 +395,8 @@ export const AgentCardMemo = memo(AgentCard, (prev, next) =>
   prev.agent.description === next.agent.description &&
   prev.agent.type === next.agent.type &&
   prev.agent.reasoningEffort === next.agent.reasoningEffort &&
-  prev.pinned === next.pinned
+  prev.pinned === next.pinned &&
+  prev.selected === next.selected
 );
 
 export default AgentCard;

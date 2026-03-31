@@ -38,6 +38,8 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+const TURNS_PER_PAGE = 50;
+
 // ── Register / rename button ──────────────────────────────────────
 function RegisterButton({ session, onRegistered }: { session: CopilotSession; onRegistered: () => void }) {
   const [open, setOpen] = useState(false);
@@ -104,6 +106,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [turnSearch, setTurnSearch] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [turnPage, setTurnPage] = useState(0);
 
   // Chat input
   const [chatInput, setChatInput] = useState('');
@@ -250,7 +253,8 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
   // Load detail when selection changes
   useEffect(() => {
-    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); return; }
+    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); return; }
+    setTurnPage(0);
     setDetailLoading(true);
 
     if (detailTab === 'chat') {
@@ -315,11 +319,29 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
+  // Auto-advance to last page when streaming (headless agent)
+  useEffect(() => {
+    if (selectedType === 'headless' && sending) {
+      const lastPage = Math.max(0, Math.ceil(turns.length / TURNS_PER_PAGE) - 1);
+      setTurnPage(lastPage);
+    }
+  }, [turns.length, selectedType, sending]);
+
   const filteredTurns = useMemo(() => turnSearch
     ? turns.filter(t =>
         t.user_message?.toLowerCase().includes(turnSearch.toLowerCase()) ||
         t.assistant_response?.toLowerCase().includes(turnSearch.toLowerCase()))
     : turns, [turns, turnSearch]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredTurns.length / TURNS_PER_PAGE);
+  const paginatedTurns = useMemo(() => {
+    const start = turnPage * TURNS_PER_PAGE;
+    return filteredTurns.slice(start, start + TURNS_PER_PAGE);
+  }, [filteredTurns, turnPage]);
+
+  // Reset page when search filter changes
+  useEffect(() => { setTurnPage(0); }, [turnSearch]);
 
   const truncateUser = (text: string, max = 3000) =>
     text && text.length > max ? text.slice(0, max) + '…' : text;
@@ -406,6 +428,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                     setSelectedType(matchAgent?.type === 'headless' || s.type === 'headless' ? 'headless' : 'pane');
                     setSelectedAgentName(matchAgent?.name || s.agentName || null);
                     setDetailTab('chat');
+                    setTurnPage(0);
                   }}>
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -493,7 +516,30 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                     <input type="text" value={turnSearch} onChange={e => setTurnSearch(e.target.value)}
                       placeholder="Filter…"
                       className="bg-bg border border-border rounded-md px-2.5 py-1.5 text-xs text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 w-32 transition-colors" />
-                    <span className="text-xs text-fg-2/50 tabular-nums">{filteredTurns.length}t</span>
+                    <span className="text-xs text-fg-2/50 tabular-nums">{turns.length} turns</span>
+                    <button
+                      className="text-xs px-2.5 py-1.5 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors"
+                      onClick={() => {
+                        const text = turns.map(t => {
+                          const ts = t.timestamp ? ` (${new Date(t.timestamp).toLocaleString()})` : '';
+                          const parts: string[] = [];
+                          if (t.user_message) parts.push(`## User${ts}\n\n${t.user_message}`);
+                          if (t.assistant_response) parts.push(`## Assistant${ts}\n\n${t.assistant_response}`);
+                          return parts.join('\n\n---\n\n');
+                        }).join('\n\n---\n\n');
+                        const blob = new Blob([text], { type: 'text/markdown' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `session-${selectedId}.md`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      title="Export as Markdown"
+                      aria-label="Export conversation"
+                    >
+                      📥 Export
+                    </button>
                   </>
                 )}
               </div>
@@ -517,13 +563,42 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             ) : detailTab === 'chat' ? (
               /* Chat view — messages + input */
               <div className="flex-1 flex flex-col min-h-0">
+                {/* Pagination controls */}
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '8px 16px', borderBottom: '1px solid var(--color-border)', flexShrink: 0 }}>
+                    <button className="text-xs px-2.5 py-1 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" disabled={turnPage === 0} onClick={() => setTurnPage(p => p - 1)}>
+                      ← Prev
+                    </button>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)' }}>
+                      Page {turnPage + 1} of {totalPages} ({filteredTurns.length} turns)
+                    </span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={filteredTurns.length}
+                      placeholder="Jump to #"
+                      style={{ width: 80, fontSize: '0.7rem', padding: '4px 6px', background: 'var(--color-bg-2)', color: 'var(--color-fg)', border: '1px solid var(--color-border)', borderRadius: 4 }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const n = parseInt((e.target as HTMLInputElement).value);
+                          if (n > 0 && n <= filteredTurns.length) {
+                            setTurnPage(Math.floor((n - 1) / TURNS_PER_PAGE));
+                          }
+                        }
+                      }}
+                    />
+                    <button className="text-xs px-2.5 py-1 rounded-md bg-bg border border-border text-fg-2 hover:text-fg hover:border-blue-500/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed" disabled={turnPage >= totalPages - 1} onClick={() => setTurnPage(p => p + 1)}>
+                      Next →
+                    </button>
+                  </div>
+                )}
                 <div className="flex-1 overflow-auto px-4 py-4 space-y-4">
-                  {filteredTurns.length === 0 ? (
+                  {paginatedTurns.length === 0 ? (
                     <div className="flex items-center justify-center h-full text-xs text-fg-2">
                       {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
                     </div>
                   ) : (
-                    filteredTurns.map(turn => (
+                    paginatedTurns.map(turn => (
                       <div key={turn.turn_index} className="space-y-3">
                         {turn.user_message && (
                           <div className="flex justify-end">
@@ -550,7 +625,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                                 </div>
                               </div>
                               <p className="text-[10px] text-fg-2/30 mt-1 tabular-nums">
-                                assistant · #{turn.turn_index}
+                                assistant · #{turn.turn_index}{turn.timestamp ? ` · ${new Date(turn.timestamp).toLocaleTimeString()}` : ''}
                               </p>
                             </div>
                           </div>

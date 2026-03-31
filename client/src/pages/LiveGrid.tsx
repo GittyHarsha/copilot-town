@@ -373,6 +373,8 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
     try { return parseInt(localStorage.getItem('copilot-town:grid-row-h') || '340') || 340; } catch { return 340; }
   });
   const [filter, setFilter] = useState<'active' | 'all'>('all');
+  const [focusedIndex, setFocusedIndex] = useState<number>(-1);
+  const [fullscreenAgent, setFullscreenAgent] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -393,9 +395,67 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
     try { localStorage.setItem('copilot-town:grid-row-h', String(h)); } catch {}
   };
 
+  // Keyboard navigation for grid cells
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't intercept when an input/textarea is focused
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'Escape') {
+        if (fullscreenAgent) {
+          setFullscreenAgent(null);
+        } else {
+          setFocusedIndex(-1);
+        }
+        e.preventDefault();
+        return;
+      }
+
+      const count = filteredRef.current.length;
+      if (count === 0) return;
+
+      const columns = Math.min(cols, Math.max(count, 1));
+
+      switch (e.key) {
+        case 'ArrowLeft':
+          e.preventDefault();
+          setFocusedIndex(prev => (prev > 0 ? prev - 1 : 0));
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          setFocusedIndex(prev => (prev < count - 1 ? prev + 1 : prev));
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setFocusedIndex(prev => (prev >= columns ? prev - columns : prev));
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setFocusedIndex(prev => (prev < count - columns ? prev + columns : prev));
+          break;
+        case 'Enter':
+          setFocusedIndex(prev => {
+            if (prev >= 0 && prev < count) {
+              setFullscreenAgent(filteredRef.current[prev].name);
+            }
+            return prev;
+          });
+          e.preventDefault();
+          break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [cols, fullscreenAgent]);
+
   const filtered = filter === 'active'
     ? agents.filter(a => a.status === 'running' || a.status === 'idle')
     : agents;
+
+  // Keep a ref to filtered so the keyboard handler can access current list without re-subscribing
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
 
   const activeCount = agents.filter(a => a.status === 'running' || a.status === 'idle').length;
   const effectiveCols = Math.min(cols, Math.max(filtered.length, 1));
@@ -409,6 +469,9 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
         </h2>
         <span className="text-[10px] text-fg-2 tabular-nums">
           {activeCount} active · {agents.length} total
+        </span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)' }}>
+          Use arrow keys to navigate • Enter for fullscreen
         </span>
         <div className="flex-1" />
 
@@ -474,12 +537,21 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
             alignContent: 'start',
           }}
         >
-          {filtered.map(agent => (
-            <MiniChat
+          {filtered.map((agent, i) => (
+            <div
               key={agent.name}
-              agent={agent}
-              onExpand={() => onOpenChat?.(agent.name)}
-            />
+              style={{
+                outline: focusedIndex === i ? '2px solid #3b82f6' : 'none',
+                outlineOffset: -2,
+                borderRadius: 12,
+              }}
+              onClick={() => setFocusedIndex(i)}
+            >
+              <MiniChat
+                agent={agent}
+                onExpand={() => setFullscreenAgent(agent.name)}
+              />
+            </div>
           ))}
         </div>
       ) : (
@@ -501,6 +573,44 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
           </div>
         </div>
       )}
+
+      {/* ── Fullscreen Agent Overlay ── */}
+      {fullscreenAgent && (() => {
+        const agent = agents.find(a => a.name === fullscreenAgent);
+        if (!agent) return null;
+        const isAlive = agent.status === 'running' || agent.status === 'idle';
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'var(--color-bg)', display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 20px', borderBottom: '1px solid var(--color-border)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                    isAlive ? 'bg-emerald-500 dot-live' : 'bg-fg-2/30'
+                  }`}
+                />
+                <span style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--color-fg)' }}>
+                  {fullscreenAgent}
+                </span>
+              </div>
+              <button className="btn" onClick={() => setFullscreenAgent(null)} aria-label="Close fullscreen">
+                ✕ Close
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <MiniChat
+                agent={agent}
+                onExpand={() => setFullscreenAgent(null)}
+              />
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

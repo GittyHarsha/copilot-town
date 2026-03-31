@@ -18,11 +18,9 @@ const Graph = lazy(() => import('./pages/Graph'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Workflows = lazy(() => import('./pages/Workflows'));
 const LiveGrid = lazy(() => import('./pages/LiveGrid'));
-const MCPTools = lazy(() => import('./pages/MCPTools'));
-const PlanViewer = lazy(() => import('./pages/PlanViewer'));
 const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
 
-type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'activity' | 'workflows' | 'tools' | 'plans' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'activity' | 'workflows' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
@@ -32,8 +30,6 @@ const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'graph', label: 'Graph', icon: '⊙' },
   { id: 'activity', label: 'Activity', icon: '📡' },
   { id: 'workflows', label: 'Workflows', icon: '⛓' },
-  { id: 'tools', label: 'Tools', icon: '🔧' },
-  { id: 'plans', label: 'Plans', icon: '📋' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
@@ -134,7 +130,7 @@ function AppInner() {
         setShowShortcuts(true);
         return;
       }
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'tools', '8': 'plans', '9': 'settings', '0': 'activity' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'activity', '7': 'workflows', '8': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -197,22 +193,6 @@ function AppInner() {
     cmds.push({ id: 'relay', label: 'Relay message between agents', icon: '↗', category: 'Agents', action: () => setPage('dashboard') });
 
     // Quick navigation with context
-    cmds.push({
-      id: 'view-tools',
-      label: 'View MCP Tools Registry',
-      icon: '🔧',
-      category: 'Navigation',
-      action: () => setPage('tools'),
-    });
-
-    cmds.push({
-      id: 'view-plans',
-      label: 'View Session Plans',
-      icon: '📋',
-      category: 'Navigation',
-      action: () => setPage('plans'),
-    });
-
     cmds.push({
       id: 'new-agent',
       label: 'Create new agent',
@@ -305,8 +285,7 @@ function AppInner() {
                 {page === 'graph' && <Graph onNavigate={handleNavigate} />}
                 {page === 'activity' && <ActivityFeed onNavigate={handleNavigate} />}
                 {page === 'workflows' && <Workflows />}
-                {page === 'tools' && <MCPTools onNavigate={handleNavigate} />}
-                {page === 'plans' && <PlanViewer onNavigate={handleNavigate} />}
+
                 {page === 'settings' && <Settings />}
               </ErrorBoundary>
             </Suspense>

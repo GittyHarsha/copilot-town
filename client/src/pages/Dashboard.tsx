@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { AgentData } from '../lib/api';
+import { api } from '../lib/api';
 import { AgentCardMemo as AgentCard } from '../components/AgentCard';
 import StatsBar from '../components/StatsBar';
 import RelayPanel from '../components/RelayPanel';
@@ -53,6 +54,14 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
 
+  // Batch selection state
+  const [selectedAgents, setSelectedAgents] = useState<Set<string>>(new Set());
+  const toggleSelect = useCallback((id: string) => setSelectedAgents(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  }), []);
+  const clearSelection = useCallback(() => setSelectedAgents(new Set()), []);
   const togglePin = useCallback((id: string) => {
     setPins(prev => {
       const next = new Set(prev);
@@ -129,6 +138,26 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
     }
     return result;
   }, [userAgents, groupMode, sortAgents]);
+
+  const selectAll = useCallback(() => {
+    setSelectedAgents(new Set(filtered.map(a => a.id)));
+  }, [filtered]);
+
+  const handleBatchStop = useCallback(async () => {
+    const targets = agents.filter(a => selectedAgents.has(a.id) && a.status !== 'stopped');
+    if (!targets.length) return;
+    await Promise.allSettled(targets.map(a => api.stopAgent(a.id)));
+    clearSelection();
+    onRefresh();
+  }, [agents, selectedAgents, clearSelection, onRefresh]);
+
+  const handleBatchRestart = useCallback(async () => {
+    const targets = agents.filter(a => selectedAgents.has(a.id) && a.status === 'stopped');
+    if (!targets.length) return;
+    await Promise.allSettled(targets.map(a => api.resumeAgent(a.id)));
+    clearSelection();
+    onRefresh();
+  }, [agents, selectedAgents, clearSelection, onRefresh]);
 
   if (userAgents.length === 0 && workflowAgents.length === 0) {
     return (
@@ -208,6 +237,8 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
                     onOpenChat={onOpenChat}
                     pinned={pins.has(agent.id)}
                     onTogglePin={() => togglePin(agent.id)}
+                    selected={selectedAgents.has(agent.id)}
+                    onSelect={() => toggleSelect(agent.id)}
                   />
                 ))}
               </div>
@@ -246,6 +277,8 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
                   onOpenChat={onOpenChat}
                   pinned={pins.has(agent.id)}
                   onTogglePin={() => togglePin(agent.id)}
+                  selected={selectedAgents.has(agent.id)}
+                  onSelect={() => toggleSelect(agent.id)}
                 />
               ))}
             </div>
@@ -254,6 +287,24 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
       )}
 
       <RelayPanel agents={agents} />
+
+      {/* Floating batch action bar */}
+      {selectedAgents.size > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
+          borderRadius: 12, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.4)', zIndex: 50,
+        }}>
+          <span style={{ color: 'var(--color-fg-1)', fontSize: '0.85rem', fontWeight: 500 }}>
+            {selectedAgents.size} selected
+          </span>
+          <button className="btn" onClick={handleBatchStop}>⏹ Stop</button>
+          <button className="btn" onClick={handleBatchRestart}>🔄 Restart</button>
+          <button className="btn" onClick={selectAll}>Select All</button>
+          <button className="btn" onClick={clearSelection}>✕ Clear</button>
+        </div>
+      )}
     </div>
   );
 }
