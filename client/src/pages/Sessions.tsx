@@ -40,6 +40,39 @@ function relativeTime(dateStr: string): string {
 
 const TURNS_PER_PAGE = 50;
 
+/** Normalize headless agent SDK messages into Turn[] for display */
+function normalizeHeadlessMessages(msgs: any[]): Turn[] {
+  const normalized: Turn[] = [];
+  let turnIdx = 0;
+  let pendingUser: string | null = null;
+  let pendingTs = '';
+  for (const m of msgs) {
+    if (m.type === 'user.message') {
+      if (pendingUser !== null) {
+        normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
+      }
+      pendingUser = m.prompt || m.content || m.text || '';
+      pendingTs = m.timestamp || '';
+    } else if (m.type === 'assistant.message') {
+      const resp = m.content || m.text || '';
+      const thinking = m.reasoningText || m.thinking || '';
+      const prefix = thinking ? `> 💭 **thinking**\n>\n> ${thinking.replace(/\n/g, '\n> ')}\n\n---\n\n` : '';
+      normalized.push({
+        turn_index: turnIdx++,
+        user_message: pendingUser || '',
+        assistant_response: prefix + resp,
+        timestamp: pendingTs || m.timestamp || '',
+      });
+      pendingUser = null;
+      pendingTs = '';
+    }
+  }
+  if (pendingUser !== null) {
+    normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
+  }
+  return normalized;
+}
+
 // ── Register / rename button ──────────────────────────────────────
 function RegisterButton({ session, onRegistered }: { session: CopilotSession; onRegistered: () => void }) {
   const [open, setOpen] = useState(false);
@@ -104,6 +137,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [sessionMeta, setSessionMeta] = useState<SessionEntry | null>(null);
   const [planContent, setPlanContent] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [turnSearch, setTurnSearch] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const [turnPage, setTurnPage] = useState(0);
@@ -253,48 +287,46 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
   // Load detail when selection changes
   useEffect(() => {
-    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); return; }
+    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); setLoadError(null); return; }
     setTurnPage(0);
     setDetailLoading(true);
+    setLoadError(null);
 
     if (detailTab === 'chat') {
       if (selectedType === 'headless' && selectedAgentName) {
-        // Headless agent — use /api/agents/:id/messages and normalize to Turn[]
+        // Headless agent — try live messages first, fall back to session-store.db
         api.getAgentMessages(selectedAgentName)
           .then(data => {
             const msgs = data?.messages || [];
-            const normalized: Turn[] = [];
-            let turnIdx = 0;
-            let pendingUser: string | null = null;
-            let pendingTs = '';
-            for (const m of msgs) {
-              if (m.type === 'user.message') {
-                if (pendingUser !== null) {
-                  normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
-                }
-                pendingUser = m.prompt || m.content || m.text || '';
-                pendingTs = m.timestamp || '';
-              } else if (m.type === 'assistant.message') {
-                const resp = m.content || m.text || '';
-                const thinking = m.reasoningText || m.thinking || '';
-                const prefix = thinking ? `> 💭 **thinking**\n>\n> ${thinking.replace(/\n/g, '\n> ')}\n\n---\n\n` : '';
-                normalized.push({
-                  turn_index: turnIdx++,
-                  user_message: pendingUser || '',
-                  assistant_response: prefix + resp,
-                  timestamp: pendingTs || m.timestamp || '',
-                });
-                pendingUser = null;
-                pendingTs = '';
-              }
+            const normalized = normalizeHeadlessMessages(msgs);
+            if (normalized.length > 0) {
+              setTurns(normalized);
+              setSessionMeta({ id: selectedId, summary: selectedAgentName + ' (headless)', branch: '', created_at: '', updated_at: '' });
+            } else {
+              // No live messages — try session-store.db as fallback
+              return api.getConversation(selectedId).then(t => {
+                setTurns(t);
+                return api.getConversationSummary(selectedId)
+                  .then(s => setSessionMeta(s))
+                  .catch(() => setSessionMeta({ id: selectedId, summary: selectedAgentName, branch: '', created_at: '', updated_at: '' }));
+              });
             }
-            if (pendingUser !== null) {
-              normalized.push({ turn_index: turnIdx++, user_message: pendingUser, assistant_response: '', timestamp: pendingTs });
-            }
-            setTurns(normalized);
-            setSessionMeta({ id: selectedId, summary: selectedAgentName + ' (headless)', branch: '', created_at: '', updated_at: '' });
           })
-          .catch(() => { setTurns([]); setSessionMeta(null); })
+          .catch(() => {
+            // Live agent failed — try session-store.db as fallback
+            return api.getConversation(selectedId)
+              .then(t => {
+                setTurns(t);
+                return api.getConversationSummary(selectedId)
+                  .then(s => setSessionMeta(s))
+                  .catch(() => setSessionMeta({ id: selectedId, summary: selectedAgentName, branch: '', created_at: '', updated_at: '' }));
+              })
+              .catch(() => {
+                setTurns([]);
+                setSessionMeta(null);
+                setLoadError('Could not load conversation history');
+              });
+          })
           .finally(() => setDetailLoading(false));
       } else {
         // Pane agent — use existing conversation endpoint
@@ -303,7 +335,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
           api.getConversationSummary(selectedId),
         ])
           .then(([t, s]) => { setTurns(t); setSessionMeta(s); })
-          .catch(() => { setTurns([]); setSessionMeta(null); })
+          .catch(() => { setTurns([]); setSessionMeta(null); setLoadError('Could not load conversation history'); })
           .finally(() => setDetailLoading(false));
       }
     } else {
@@ -694,8 +726,21 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                 )}
                 <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
                   {paginatedTurns.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-xs text-fg-2">
-                      {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
+                    <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
+                      {loadError ? (
+                        <>
+                          <span style={{ fontSize: '1.5rem', opacity: 0.4 }}>⚠️</span>
+                          <span className="text-xs" style={{ color: 'var(--color-fg-2)' }}>{loadError}</span>
+                          <button className="text-xs px-3 py-1 mt-1" style={{ borderRadius: 'var(--shape-full)', background: 'var(--color-bg-2)', border: '1px solid var(--color-border)', color: 'var(--color-fg-1)', cursor: 'pointer' }}
+                            onClick={() => { setLoadError(null); setDetailLoading(true); /* re-trigger by toggling selectedId */ const id = selectedId; setSelectedId(null); setTimeout(() => setSelectedId(id), 50); }}>
+                            Retry
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs" style={{ color: 'var(--color-fg-2)' }}>
+                          {turnSearch ? 'No matching messages' : selectedAgentName ? 'Send a message to start chatting' : 'No conversation history'}
+                        </span>
+                      )}
                     </div>
                   ) : (
                     paginatedTurns.map(turn => (
