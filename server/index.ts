@@ -352,7 +352,8 @@ wssHeadless.on('connection', async (ws, req) => {
 
   // Register as a stream listener for live token-by-token output
   const { addStreamListener, removeStreamListener, getHeadlessAgent, getOrReviveHeadless,
-          enqueueToHeadless, steerHeadless, abortHeadless, compactHeadless, persistUserPrompts } = await import('./services/headless.js');
+          enqueueToHeadless, steerHeadless, abortHeadless, compactHeadless, persistUserPrompts,
+          setHeadlessMode } = await import('./services/headless.js');
   const streamHandler = (event: any) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   };
@@ -379,6 +380,17 @@ wssHeadless.on('connection', async (ws, req) => {
         try {
           await compactHeadless(agentName);
           ws.send(JSON.stringify({ type: 'compacted' }));
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        }
+        return;
+      }
+
+      // ── Set mode ──
+      if (action === 'set_mode') {
+        try {
+          const result = await setHeadlessMode(agentName, msg.mode);
+          ws.send(JSON.stringify({ type: 'mode_changed', mode: result.mode }));
         } catch (e: any) {
           ws.send(JSON.stringify({ type: 'error', message: e.message }));
         }
