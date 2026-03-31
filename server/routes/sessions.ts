@@ -15,6 +15,18 @@ router.get('/orphaned', (_req, res) => {
   res.json(getOrphanedSessions());
 });
 
+// Enhanced session details — plan + all checkpoints in one call
+router.get('/:id/details', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const plan = getSessionPlan(req.params.id);
+  const checkpoints = session.checkpoints.map(cp => ({
+    ...cp,
+    content: getSessionCheckpointContent(req.params.id, cp.filename) || '',
+  }));
+  res.json({ session, plan, checkpoints });
+});
+
 // Get single session
 router.get('/:id', (req, res) => {
   const session = getSession(req.params.id);

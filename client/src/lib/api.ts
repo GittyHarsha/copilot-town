@@ -83,6 +83,26 @@ export interface ActivityEvent {
   severity: 'info' | 'warn' | 'error';
 }
 
+export interface ToolInfo {
+  name: string;
+  description: string;
+  category: 'mcp' | 'sdk';
+  parameters?: object;
+  stats: {
+    totalCalls: number;
+    lastUsed: string | null;
+    avgDuration: number | null;
+    agentsUsed: string[];
+  };
+}
+
+export interface AgentToolsInfo {
+  agent: string;
+  available: { name: string; description: string; category: string }[];
+  activity: { timestamp: string; tool: string; args?: any; result?: string; duration?: number }[];
+  stats: { totalCalls: number; uniqueTools: number; lastActive: string | null };
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -188,8 +208,13 @@ export const api = {
   getToolActivity: (id: string) =>
     fetchJson<{ agent: string; activity: { timestamp: string; tool: string; result?: string }[] }>(
       `/agents/${encodeURIComponent(id)}/tools/activity`),
+
+  // Tools registry
+  getToolsRegistry: () => fetchJson<{ tools: ToolInfo[] }>('/tools'),
+  getAgentTools: (name: string) => fetchJson<AgentToolsInfo>(`/tools/agents/${encodeURIComponent(name)}`),
+  getSessionDetails: (id: string) => fetchJson<any>(`/sessions/${id}/details`),
   getAgentMessages: (id: string) =>
-    fetchJson<any[]>(`/agents/${encodeURIComponent(id)}/messages`),
+    fetchJson<{ messages: any[] }>(`/agents/${encodeURIComponent(id)}/messages`),
 
   // Templates
   getTemplates: () => fetchJson<AgentTemplate[]>('/templates'),

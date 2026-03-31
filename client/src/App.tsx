@@ -16,8 +16,10 @@ const Graph = lazy(() => import('./pages/Graph'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Workflows = lazy(() => import('./pages/Workflows'));
 const LiveGrid = lazy(() => import('./pages/LiveGrid'));
+const MCPTools = lazy(() => import('./pages/MCPTools'));
+const PlanViewer = lazy(() => import('./pages/PlanViewer'));
 
-type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'tools' | 'plans' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
@@ -26,6 +28,8 @@ const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'sessions', label: 'Sessions', icon: '💬' },
   { id: 'graph', label: 'Graph', icon: '⊙' },
   { id: 'workflows', label: 'Workflows', icon: '⛓' },
+  { id: 'tools', label: 'Tools', icon: '🔧' },
+  { id: 'plans', label: 'Plans', icon: '📋' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
@@ -47,6 +51,11 @@ function AppInner() {
   const { panelHeight, isCollapsed } = useTerminalPanel();
   const { toast } = useToast();
   const prevEventRef = useRef<string | null>(null);
+
+  const [chatWidth, setChatWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('chat-panel-width') || '480');
+    return Math.max(320, Math.min(saved, window.innerWidth * 0.6));
+  });
 
   useEffect(() => {
     api.getAgents().then(setAgents).catch(() => {});
@@ -100,7 +109,7 @@ function AppInner() {
         return;
       }
       if (isInputFocused()) return;
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'settings' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'tools', '8': 'plans', '9': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -210,6 +219,8 @@ function AppInner() {
               {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
               {page === 'graph' && <Graph />}
               {page === 'workflows' && <Workflows />}
+              {page === 'tools' && <MCPTools />}
+              {page === 'plans' && <PlanViewer />}
               {page === 'settings' && <Settings />}
             </Suspense>
           </div>
@@ -217,11 +228,12 @@ function AppInner() {
 
         {/* ── Chat Sidebar ── */}
         {activeChat && (
-          <aside className="w-[480px] max-w-[45vw] flex-shrink-0 animate-slide-in-right bg-bg">
+          <aside className="flex-shrink-0 animate-slide-in-right bg-bg" style={{ width: chatWidth, maxWidth: '60vw' }}>
             <HeadlessChatPanel
               key={activeChat}
               agentName={activeChat}
               onClose={() => setActiveChat(null)}
+              onResize={(w) => { setChatWidth(w); localStorage.setItem('chat-panel-width', String(w)); }}
             />
           </aside>
         )}

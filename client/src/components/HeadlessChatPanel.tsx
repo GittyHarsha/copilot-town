@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { api } from '../lib/api';
 import { MarkdownContent, CopyButton, copyToClipboard, relativeTime, formatDuration } from './ChatMarkdown';
 
@@ -39,6 +39,7 @@ interface ChatMessage {
 interface Props {
   agentName: string;
   onClose: () => void;
+  onResize?: (width: number) => void;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -159,7 +160,7 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
    Main Component
    ═══════════════════════════════════════════════════════════════════ */
 
-export default function HeadlessChatPanel({ agentName, onClose }: Props) {
+export default function HeadlessChatPanel({ agentName, onClose, onResize }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -169,6 +170,26 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   const [agentMode, setAgentMode] = useState<string>('plan');
   const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
   const [hoveredMsg, setHoveredMsg] = useState<string | null>(null);
+  /* ── Search state ── */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchIndex, setSearchIndex] = useState(0);
+  /* ── Bookmarks ── */
+  const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`chat-bookmarks-${agentName}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+  const [showBookmarksOnly, setShowBookmarksOnly] = useState(false);
+  /* ── Resizable width ── */
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = parseInt(localStorage.getItem('chat-panel-width') || '480');
+    return Math.max(320, Math.min(saved, window.innerWidth * 0.6));
+  });
+  /* ── Streaming elapsed ── */
+  const [elapsedDisplay, setElapsedDisplay] = useState('');
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -178,6 +199,12 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   const toolsBuf = useRef<ToolCall[]>([]);
   const activeStreamId = useRef<string | null>(null);
   const pendingSend = useRef<string | null>(null);
+  const inputHistory = useRef<string[]>([]);
+  const historyIndex = useRef<number>(-1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const dragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
 
   /* ── Auto-scroll ── */
   useEffect(() => {
@@ -189,10 +216,23 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
-  /* ── Escape to close (only when not typing) ── */
+  /* ── Escape to close / Ctrl+F search ── */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return;
+      }
       if (e.key === 'Escape') {
+        if (searchOpen) {
+          setSearchOpen(false);
+          setSearchQuery('');
+          setSearchIndex(0);
+          inputRef.current?.focus();
+          return;
+        }
         const tag = document.activeElement?.tagName;
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
           (document.activeElement as HTMLElement).blur();
@@ -203,7 +243,108 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, searchOpen]);
+
+  /* ── Search matches ── */
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase();
+    return messages
+      .filter(m => m.role !== 'system' && m.text.toLowerCase().includes(q))
+      .map(m => m.id);
+  }, [messages, searchQuery]);
+
+  /* ── Scroll to current search match ── */
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    const matchId = searchMatches[searchIndex];
+    if (!matchId) return;
+    const el = document.getElementById(`msg-${matchId}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [searchOpen, searchIndex, searchMatches]);
+
+  /* ── Elapsed time counter ── */
+  useEffect(() => {
+    if (!sending) {
+      setElapsedDisplay('');
+      return;
+    }
+    const startTime = Date.now();
+    setElapsedDisplay('0s');
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      setElapsedDisplay(mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [sending]);
+
+  /* ── Persist bookmarks ── */
+  useEffect(() => {
+    try { localStorage.setItem(`chat-bookmarks-${agentName}`, JSON.stringify([...bookmarks])); } catch {}
+  }, [bookmarks, agentName]);
+
+  /* ── Persist panel width ── */
+  useEffect(() => {
+    localStorage.setItem('chat-panel-width', String(panelWidth));
+    onResize?.(panelWidth);
+  }, [panelWidth, onResize]);
+
+  /* ── Drag resize handlers ── */
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = dragStartX.current - e.clientX;
+      const w = Math.max(320, Math.min(dragStartWidth.current + delta, window.innerWidth * 0.6));
+      setPanelWidth(w);
+    };
+    const onUp = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  /* ── Visible messages (bookmark filter) ── */
+  const visibleMessages = useMemo(() => {
+    if (showBookmarksOnly) return messages.filter(m => bookmarks.has(m.id) || m.role === 'system');
+    return messages;
+  }, [messages, bookmarks, showBookmarksOnly]);
+
+  const toggleBookmark = useCallback((id: string) => {
+    setBookmarks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = panelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const renderHighlightedText = (text: string) => {
+    if (!searchOpen || !searchQuery.trim()) return text;
+    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
+    if (parts.length === 1) return text;
+    return parts.map((part, i) =>
+      part.toLowerCase() === searchQuery.toLowerCase()
+        ? <mark key={i} className="bg-yellow-400/30 text-inherit rounded-sm px-0.5">{part}</mark>
+        : part
+    );
+  };
 
   /* ── Load conversation history ── */
   useEffect(() => {
@@ -387,6 +528,9 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
     if (action) userMsg.action = action;
     setMessages(prev => [...prev, userMsg]);
     setInput('');
+    inputHistory.current.push(text);
+    if (inputHistory.current.length > 50) inputHistory.current.shift();
+    historyIndex.current = -1;
 
     const ws = wsRef.current;
     const isOpen = ws && ws.readyState === WebSocket.OPEN;
@@ -450,6 +594,25 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
   }, [agentName]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    /* ── Input history navigation ── */
+    if (e.key === 'ArrowUp' && !input && !e.shiftKey) {
+      e.preventDefault();
+      const hist = inputHistory.current;
+      if (hist.length === 0) return;
+      const idx = Math.min(historyIndex.current + 1, hist.length - 1);
+      historyIndex.current = idx;
+      setInput(hist[hist.length - 1 - idx]);
+      return;
+    }
+    if (e.key === 'ArrowDown' && historyIndex.current >= 0) {
+      e.preventDefault();
+      const hist = inputHistory.current;
+      const idx = historyIndex.current - 1;
+      historyIndex.current = idx;
+      if (idx < 0) { setInput(''); return; }
+      setInput(hist[hist.length - 1 - idx]);
+      return;
+    }
     if (e.key === 'q' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       if (input.trim()) sendMessage('enqueue');
@@ -467,7 +630,13 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="h-full bg-bg border-l border-border/50 flex flex-col">
+    <div className="h-full bg-bg border-l border-border/50 flex flex-col relative" style={{ width: panelWidth }}>
+
+      {/* ── Resize handle ── */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors z-10"
+        onMouseDown={startDrag}
+      />
 
       {/* ── Header ── */}
         <div className="flex-shrink-0 border-b border-border/40">
@@ -510,6 +679,13 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               )}
             </div>
             <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowBookmarksOnly(b => !b)}
+                className={`text-[11px] w-7 h-7 flex items-center justify-center rounded-lg transition-all ${
+                  showBookmarksOnly ? 'bg-amber-500/10 text-amber-400' : 'text-fg-2/30 hover:text-fg-2 hover:bg-bg-2'
+                }`}
+                title={showBookmarksOnly ? 'Show all messages' : 'Show bookmarks only'}
+              >🔖</button>
               {sending && (
                 <button onClick={abortAgent}
                   className="text-[10px] px-2.5 py-1 rounded-lg bg-red-500/8 text-red-400 hover:bg-red-500/15 border border-red-500/12 transition-all font-medium">
@@ -524,14 +700,68 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           </div>
         </div>
 
+        {/* ── Streaming status bar ── */}
+        {sending && (
+          <div className="flex items-center gap-2 px-5 py-2 bg-blue-500/[0.03] border-b border-blue-500/10 text-[11px] flex-shrink-0">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span className="text-blue-400/70 truncate">{liveIntent || 'Responding…'}</span>
+            <span className="ml-auto text-fg-2/30 tabular-nums">{elapsedDisplay}</span>
+            {liveUsage?.outputTokens && <span className="text-fg-2/30 tabular-nums">{liveUsage.outputTokens.toLocaleString()} tok</span>}
+          </div>
+        )}
+
+        {/* ── Search overlay ── */}
+        {searchOpen && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-bg-1 border-b border-border/40 flex-shrink-0">
+            <svg className="w-3.5 h-3.5 text-fg-2/40 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              ref={searchInputRef}
+              className="flex-1 bg-transparent text-[12px] text-fg outline-none placeholder:text-fg-2/30"
+              placeholder="Search messages…"
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); setSearchIndex(0); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setSearchIndex(i => (i + 1) % Math.max(1, searchMatches.length));
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setSearchIndex(i => (i - 1 + searchMatches.length) % Math.max(1, searchMatches.length));
+                } else if (e.key === 'Escape') {
+                  setSearchOpen(false);
+                  setSearchQuery('');
+                  setSearchIndex(0);
+                  inputRef.current?.focus();
+                }
+              }}
+            />
+            {searchQuery && (
+              <span className="text-[10px] text-fg-2/40 tabular-nums flex-shrink-0">
+                {searchMatches.length > 0 ? `${searchIndex + 1} of ${searchMatches.length}` : 'No matches'}
+              </span>
+            )}
+            <button
+              onClick={() => { setSearchOpen(false); setSearchQuery(''); setSearchIndex(0); }}
+              className="text-fg-2/40 hover:text-fg w-5 h-5 flex items-center justify-center rounded hover:bg-bg-2 transition-all flex-shrink-0"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        )}
+
         {/* ── Messages ── */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
           {messages.length === 0 ? (
             <EmptyState onSend={(text) => sendMessage(undefined, text)} />
           ) : (
             <div className="px-5 py-4 space-y-4">
-              {messages.map(m => {
+              {visibleMessages.map(m => {
                 const isHovered = hoveredMsg === m.id;
+                const isDimmed = searchOpen && searchQuery && !searchMatches.includes(m.id);
+                const isBookmarked = bookmarks.has(m.id);
+                const isCurrentMatch = searchOpen && searchQuery && searchMatches[searchIndex] === m.id;
 
                 /* ── System message ── */
                 if (m.role === 'system') {
@@ -547,9 +777,9 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                 /* ── User message ── */
                 if (m.role === 'user') {
                   return (
-                    <div key={m.id} className="flex justify-end animate-fade-in"
+                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-fade-in transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
                       onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
-                      <div className="max-w-[85%] relative group/user">
+                      <div className={`max-w-[85%] relative group/user ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
                         {/* Relay sender */}
                         {m.from && m.from !== 'you' && (
                           <div className="text-[10px] text-fg-2/40 mb-1 text-right">
@@ -565,12 +795,13 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                           </div>
                         )}
                         <div className="rounded-2xl rounded-br-sm px-4 py-2.5 bg-blue-500/[0.07] text-fg text-[13px] leading-relaxed border border-blue-500/[0.1] whitespace-pre-wrap break-words">
-                          {m.text}
+                          {renderHighlightedText(m.text)}
                         </div>
                         {/* Hover actions + timestamp */}
                         <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
                           <span className="text-[10px] text-fg-2/25 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
+                          <button onClick={() => toggleBookmark(m.id)} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
                         </div>
                       </div>
                     </div>
@@ -579,7 +810,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
 
                 /* ── Agent message (full-width) ── */
                 return (
-                  <div key={m.id} className="animate-fade-in"
+                  <div key={m.id} id={`msg-${m.id}`} className={`animate-fade-in transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-3' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
                     onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
                     {/* Thinking */}
                     {m.thinking && (
@@ -632,6 +863,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
                         <div className={`ml-auto flex items-center gap-1.5 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
                           <span className="text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
+                          <button onClick={() => toggleBookmark(m.id)} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
                         </div>
                       </div>
                     )}
@@ -684,7 +916,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
               placeholder={sending ? 'Type to steer or Ctrl+Q to queue…' : `Message ${agentName}…`}
               rows={1}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => { setInput(e.target.value); historyIndex.current = -1; }}
               onKeyDown={handleKeyDown}
               onInput={e => {
                 const t = e.currentTarget;
@@ -717,7 +949,7 @@ export default function HeadlessChatPanel({ agentName, onClose }: Props) {
           </div>
           <div className="flex items-center justify-between mt-2 px-1">
             <span className="text-[10px] text-fg-2/20">
-              {sending ? '⏎ steer · ⌃Q queue · click ■ abort' : '⏎ send · ⇧⏎ newline · ⌃Q queue'}
+              {sending ? '⏎ steer · ⌃Q queue · click ■ abort' : '⏎ send · ⇧⏎ newline · ⌃Q queue · ⌃F search · ↑ history'}
             </span>
             {liveUsage?.model && (
               <span className="text-[10px] text-fg-2/20">{liveUsage.model}</span>

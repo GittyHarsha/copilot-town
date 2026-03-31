@@ -16,6 +16,7 @@ import statusHistoryRoutes from './routes/statusHistory.js';
 import configRoutes from './routes/config.js';
 import notesRoutes from './routes/notes.js';
 import workflowRoutes from './routes/workflows.js';
+import toolRoutes from './routes/tools.js';
 import { getAllAgents, refreshAgents, loadAgentTemplates, invalidateAgentCache } from './services/agents.js';
 import { listPanes, capturePane, sendKeys, sendEscape, getPaneDimensions, isMuxAvailable, getMuxBinary, renameWindow } from './services/psmux.js';
 import { invalidateSessionCache } from './services/sessions.js';
@@ -43,6 +44,7 @@ app.use('/api/status-history', statusHistoryRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/notes', notesRoutes);
 app.use('/api/workflows', workflowRoutes);
+app.use('/api/tools', toolRoutes);
 
 app.get('/api/templates',(_req, res) => {
   res.json(loadAgentTemplates());
