@@ -18,9 +18,7 @@ const Graph = lazy(() => import('./pages/Graph'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Workflows = lazy(() => import('./pages/Workflows'));
 const LiveGrid = lazy(() => import('./pages/LiveGrid'));
-const ActivityFeed = lazy(() => import('./pages/ActivityFeed'));
-
-type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'activity' | 'workflows' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
@@ -28,7 +26,6 @@ const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'panes', label: 'Panes', icon: '▦' },
   { id: 'sessions', label: 'Sessions', icon: '💬' },
   { id: 'graph', label: 'Graph', icon: '⊙' },
-  { id: 'activity', label: 'Activity', icon: '📡' },
   { id: 'workflows', label: 'Workflows', icon: '⛓' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
@@ -107,8 +104,6 @@ function AppInner() {
   // Nav badge counts
   const navBadges = useMemo(() => {
     const badges: Record<string, number> = {};
-    const errorCount = events.filter(e => e.severity === 'error').length;
-    if (errorCount > 0) badges['activity'] = errorCount;
     const running = agents.filter(a => a.status === 'running').length;
     if (running > 0) badges['dashboard'] = running;
     return badges;
@@ -140,7 +135,7 @@ function AppInner() {
         setShowShortcuts(true);
         return;
       }
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'activity', '7': 'workflows', '8': 'settings' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -273,7 +268,7 @@ function AppInner() {
                     <span style={{
                       position: 'absolute', top: -4, right: -6,
                       minWidth: 16, height: 16, borderRadius: 'var(--shape-full)',
-                      background: item.id === 'activity' ? '#ef4444' : 'var(--accent)',
+                      background: 'var(--accent)',
                       color: '#fff', fontSize: '0.6rem', fontWeight: 700,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       padding: '0 4px', lineHeight: 1,
@@ -320,7 +315,6 @@ function AppInner() {
                 {page === 'panes' && <Towns />}
                 {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
                 {page === 'graph' && <Graph onNavigate={handleNavigate} />}
-                {page === 'activity' && <ActivityFeed onNavigate={handleNavigate} />}
                 {page === 'workflows' && <Workflows />}
 
                 {page === 'settings' && <Settings />}
