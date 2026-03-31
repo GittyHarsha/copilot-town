@@ -208,7 +208,7 @@ const MiniChat = memo(function MiniChat({
   const lastMessages = state.messages.slice(-30);
 
   return (
-    <div className={`flex flex-col rounded-xl border overflow-hidden transition-all duration-300 bg-bg-1 ${borderClass} min-h-0`}>
+    <div className={`flex flex-col rounded-xl border overflow-hidden transition-all duration-300 bg-bg-1 ${borderClass} min-h-0`} style={{ height: '100%' }}>
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0 relative">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
@@ -639,6 +639,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
                 outline: focusedIndex === i ? '2px solid #3b82f6' : 'none',
                 outlineOffset: -2,
                 borderRadius: 12,
+                height: '100%',
               }}
               onClick={() => setFocusedIndex(i)}
             >
