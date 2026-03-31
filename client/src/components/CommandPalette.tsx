@@ -177,6 +177,9 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
       ref={backdropRef}
       className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md flex items-start justify-center pt-[15vh] animate-fade-in"
       onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
     >
       <div className="w-full max-w-[520px] mx-4">
         {/* Search input */}
@@ -187,6 +190,7 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
             type="text"
             className="w-full bg-bg-1 border border-border-1 rounded-xl pl-9 pr-4 py-3.5 text-sm text-fg placeholder-fg-2/40 outline-none focus:border-blue-500/40 transition-colors"
             placeholder="Type a command…"
+            aria-label="Search commands"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -199,6 +203,7 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
           <div
             ref={listRef}
             className="mt-1.5 bg-bg-1 border border-border rounded-lg overflow-auto max-h-[60vh] py-1"
+            role="listbox"
           >
             {groupedItems.map(group => (
               <div key={group.label}>
@@ -216,6 +221,8 @@ export default function CommandPalette({ commands, onExecute, onClose }: Props) 
                       className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
                         isActive ? 'bg-bg-3 text-fg' : 'text-fg-1 hover:bg-bg-2'
                       }`}
+                      role="option"
+                      aria-selected={isActive}
                       onMouseEnter={() => setActiveIdx(idx)}
                       onClick={() => execute(idx)}
                     >

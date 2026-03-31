@@ -200,14 +200,14 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
               </div>
             ) : isAlive ? (
               <>
-                <button className="btn btn-primary"
+                <button className="btn btn-primary" aria-label="Open chat"
                   onClick={(e) => { e.stopPropagation(); if (isHeadless && onOpenChat) onOpenChat(agent.name); else setShowChat(true); }}>💬 Chat</button>
-                <button className="btn btn-danger"
+                <button className="btn btn-danger" aria-label="Stop agent"
                   onClick={(e) => { e.stopPropagation(); handleStop(); }}>Stop</button>
 
                 {/* Overflow menu for secondary actions */}
                 <div className="relative" ref={moreRef}>
-                  <button className="btn" onClick={(e) => { e.stopPropagation(); setShowMoreMenu(!showMoreMenu); }}>⋯</button>
+                  <button className="btn" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setShowMoreMenu(!showMoreMenu); }}>⋯</button>
                   {showMoreMenu && (
                     <div className="absolute top-full left-0 mt-1.5 z-50 bg-bg-1 border border-border-1 rounded-xl py-1.5 min-w-[170px] animate-slide-down"
                       style={{ boxShadow: 'var(--card-shadow-hover)' }}>
@@ -237,6 +237,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                       )}
                       <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                         style={{ width: 'calc(100% - 4px)' }}
+                        aria-label="Restart agent"
                         onClick={async (e) => {
                           e.stopPropagation();
                           setShowMoreMenu(false);
@@ -257,6 +258,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                         onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); setShowEdit(true); }}>✏️ Edit</button>
                       <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                         style={{ width: 'calc(100% - 4px)' }}
+                        aria-label="Clone agent"
                         onClick={async (e) => {
                           e.stopPropagation();
                           setShowMoreMenu(false);
@@ -280,7 +282,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
               <>
                 {/* Headless agents: Chat auto-revives the session */}
                 {isHeadless && agent.sessionId && (
-                  <button className="btn btn-primary"
+                  <button className="btn btn-primary" aria-label="Open chat"
                     onClick={(e) => { e.stopPropagation(); if (onOpenChat) onOpenChat(agent.name); else setShowChat(true); }}>💬 Chat</button>
                 )}
                 {agent.sessionId && !agent.sessionId.startsWith('pane-') && !isHeadless && (
@@ -309,7 +311,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                 <option value="medium">medium</option>
                 <option value="high">high</option>
               </select>
-              <button className="btn btn-success" onClick={handleModelSwitch}>Apply</button>
+              <button className="btn btn-success" aria-label="Apply model change" onClick={handleModelSwitch}>Apply</button>
             </div>
           )}
 

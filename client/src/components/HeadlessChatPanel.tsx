@@ -647,7 +647,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                 style={{ background: connected ? '#4ade80' : '#f87171' }} />
               <span className="text-sm font-semibold tracking-tight text-fg">{agentName}</span>
             </div>
-            <button onClick={onClose}
+            <button onClick={onClose} aria-label="Close chat"
               className="text-fg-2/40 hover:text-fg w-7 h-7 flex items-center justify-center rounded-lg hover:bg-bg-2 transition-all">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
@@ -662,6 +662,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                     key={m}
                     onClick={() => changeMode(m)}
                     disabled={!connected}
+                    aria-label={`Set mode to ${m}`}
+                    aria-pressed={agentMode === m}
                     className={`text-[10px] px-2.5 py-1 rounded-md transition-all font-medium ${
                       agentMode === m
                         ? 'bg-bg-3 text-fg shadow-sm border border-border/40'
@@ -681,6 +683,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowBookmarksOnly(b => !b)}
+                aria-label={showBookmarksOnly ? 'Show all messages' : 'Show bookmarks only'}
+                aria-pressed={showBookmarksOnly}
                 className={`text-[11px] w-7 h-7 flex items-center justify-center rounded-lg transition-all ${
                   showBookmarksOnly ? 'bg-amber-500/10 text-amber-400' : 'text-fg-2/30 hover:text-fg-2 hover:bg-bg-2'
                 }`}
@@ -720,6 +724,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
               ref={searchInputRef}
               className="flex-1 bg-transparent text-[12px] text-fg outline-none placeholder:text-fg-2/30"
               placeholder="Search messages…"
+              aria-label="Search messages"
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setSearchIndex(0); }}
               onKeyDown={e => {
@@ -744,6 +749,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
             )}
             <button
               onClick={() => { setSearchOpen(false); setSearchQuery(''); setSearchIndex(0); }}
+              aria-label="Close search"
               className="text-fg-2/40 hover:text-fg w-5 h-5 flex items-center justify-center rounded hover:bg-bg-2 transition-all flex-shrink-0"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -801,7 +807,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                         <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
                           <span className="text-[10px] text-fg-2/25 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
-                          <button onClick={() => toggleBookmark(m.id)} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
+                          <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
                         </div>
                       </div>
                     </div>
@@ -863,7 +869,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                         <div className={`ml-auto flex items-center gap-1.5 transition-opacity duration-150 ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
                           <span className="text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                           <CopyButton text={m.text} />
-                          <button onClick={() => toggleBookmark(m.id)} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
+                          <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
                         </div>
                       </div>
                     )}
@@ -934,6 +940,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
               } disabled:opacity-20`}
               onClick={() => sending ? (input.trim() ? sendMessage('steer') : abortAgent()) : sendMessage()}
               disabled={!input.trim() && !sending}
+              aria-label={sending ? (input.trim() ? 'Steer' : 'Stop') : 'Send message'}
               title={sending ? (input.trim() ? 'Steer (redirect agent)' : 'Stop') : 'Send'}
             >
               {sending ? (

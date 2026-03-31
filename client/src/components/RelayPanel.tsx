@@ -64,6 +64,24 @@ export default function RelayPanel({ agents }: Props) {
         <span className="text-sm">↗</span>
         <span className="text-sm font-medium">Relay Messages</span>
         <span className="text-xs text-fg-2/50 ml-auto">{relays.length} relays</span>
+        {relays.length > 0 && (
+          <button
+            onClick={() => {
+              const data = JSON.stringify(relays, null, 2);
+              const blob = new Blob([data], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `copilot-town-relays-${new Date().toISOString().slice(0, 10)}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="text-[10px] px-2 py-1 rounded bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40"
+            aria-label="Export relay log"
+          >
+            📥
+          </button>
+        )}
       </div>
 
       {/* Composer */}

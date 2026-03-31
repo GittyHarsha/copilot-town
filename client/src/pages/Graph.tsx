@@ -235,9 +235,9 @@ export default function Graph() {
           </div>
           <div className="flex items-center gap-2">
             {selected && (
-              <button className="btn text-[11px] px-2 py-1" onClick={() => setSelected(null)}>✕ Clear</button>
+              <button className="btn text-[11px] px-2 py-1" aria-label="Clear selection" onClick={() => setSelected(null)}>✕ Clear</button>
             )}
-            <button className="btn text-[11px] px-2 py-1" onClick={refresh}>↻ Refresh</button>
+            <button className="btn text-[11px] px-2 py-1" aria-label="Refresh graph" onClick={refresh}>↻ Refresh</button>
           </div>
         </div>
 
@@ -250,7 +250,7 @@ export default function Graph() {
               <p className="text-[11px] text-fg-2/50 mt-1">{agents.length} agents loaded — send a relay to see the graph</p>
             </div>
           ) : null}
-          <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" onClick={() => setSelected(null)}>
+          <svg ref={svgRef} viewBox={viewBox} className="w-full h-full" role="img" aria-label="Agent relay graph" onClick={() => setSelected(null)}>
             <defs>
               <marker id="arrow" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto">
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="var(--color-fg-2, #71717a)" strokeWidth="1" opacity="0.5" />
@@ -364,7 +364,7 @@ export default function Graph() {
           <div className="px-4 py-3 border-b border-border">
             <div className="flex items-center justify-between">
               <h3 className="text-[14px] font-semibold text-fg truncate">{selected}</h3>
-              <button className="text-fg-2 hover:text-fg text-xs" onClick={() => setSelected(null)}>✕</button>
+              <button className="text-fg-2 hover:text-fg text-xs" aria-label="Close" onClick={() => setSelected(null)}>✕</button>
             </div>
             {selectedAgent && (
               <div className="flex items-center gap-1.5 mt-1.5">

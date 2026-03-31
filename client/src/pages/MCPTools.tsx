@@ -117,11 +117,13 @@ export default function MCPTools() {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-fg-2 text-sm">🔍</span>
+
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search tools…"
+            aria-label="Search tools"
             className="w-full bg-bg-1 border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-fg placeholder:text-fg-2 focus:outline-none focus:border-border-1 transition-colors"
           />
         </div>
@@ -131,6 +133,7 @@ export default function MCPTools() {
             <button
               key={c}
               onClick={() => setCategory(c)}
+              aria-pressed={category === c}
               className={`text-[11px] font-medium px-4 py-2 transition-all uppercase tracking-wider ${
                 category === c ? 'bg-bg-3 text-fg' : 'text-fg-2 hover:text-fg-1'
               }`}
@@ -149,6 +152,7 @@ export default function MCPTools() {
             <button
               key={s.key}
               onClick={() => setSortBy(s.key)}
+              aria-pressed={sortBy === s.key}
               className={`text-[11px] font-medium px-3 py-2 transition-all ${
                 sortBy === s.key ? 'bg-bg-3 text-fg' : 'text-fg-2 hover:text-fg-1'
               }`}
@@ -157,6 +161,23 @@ export default function MCPTools() {
             </button>
           ))}
         </div>
+
+        <button
+          onClick={() => {
+            const data = JSON.stringify(tools, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `copilot-town-tools-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="text-[11px] px-2.5 py-1.5 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40 transition-all"
+          aria-label="Export tools data as JSON"
+        >
+          📥 Export
+        </button>
       </div>
 
       {/* Tools grid */}
@@ -337,6 +358,7 @@ function AgentDetailPanel({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="text-fg-2 hover:text-fg text-lg leading-none transition-colors"
           >
             ✕

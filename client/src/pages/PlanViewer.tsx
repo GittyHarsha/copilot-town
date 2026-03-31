@@ -252,18 +252,35 @@ export default function PlanViewer() {
             {/* Plan Section */}
             {details.plan && (
               <div className="bg-bg-1 border border-border rounded-xl overflow-hidden">
-                <button
-                  onClick={() => setPlanExpanded(!planExpanded)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-2/30 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px]">📋</span>
-                    <span className="text-xs font-semibold text-fg">Plan</span>
-                  </div>
-                  <span className={`text-fg-2 text-[10px] transition-transform ${planExpanded ? 'rotate-180' : ''}`}>
-                    ▼
-                  </span>
-                </button>
+                <div className="flex items-center">
+                  <button
+                    onClick={() => setPlanExpanded(!planExpanded)}
+                    className="flex-1 flex items-center justify-between px-4 py-3 hover:bg-bg-2/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px]">📋</span>
+                      <span className="text-xs font-semibold text-fg">Plan</span>
+                    </div>
+                    <span className={`text-fg-2 text-[10px] transition-transform ${planExpanded ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([details.plan!], { type: 'text/markdown' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `plan-${selectedId?.slice(0, 8)}.md`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="text-[11px] px-2.5 py-1.5 mr-3 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40 transition-all"
+                    aria-label="Download plan as markdown"
+                  >
+                    📥 Export
+                  </button>
+                </div>
                 {planExpanded && (
                   <div className="px-4 pb-4 border-t border-border">
                     <div className="pt-3 prose-sm">

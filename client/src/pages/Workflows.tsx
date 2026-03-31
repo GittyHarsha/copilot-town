@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
+import { MarkdownContent } from '../components/ChatMarkdown';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 /* ─── 1. Types ──────────────────────────────────────────────────── */
 
@@ -75,6 +77,9 @@ export default function Workflows() {
   const [editingStageName, setEditingStageName] = useState<string | null>(null);
   const [editingStageContent, setEditingStageContent] = useState('');
   const [editingStageIsNew, setEditingStageIsNew] = useState(false);
+
+  // Confirm dialog state
+  const [deleteWfId, setDeleteWfId] = useState<string | null>(null);
 
   // Load workflows + runs + stage files
   const load = useCallback(async () => {
@@ -227,13 +232,19 @@ export default function Workflows() {
 
   const handleDeleteWorkflow = async (e: React.MouseEvent, wfId: string) => {
     e.stopPropagation();
-    if (!confirm(`Delete workflow "${wfId}"? This will remove the YAML file from disk.`)) return;
+    setDeleteWfId(wfId);
+  };
+
+  const confirmDeleteWorkflow = async () => {
+    if (!deleteWfId) return;
     try {
-      await api.deleteWorkflow(wfId);
-      if (selectedWf?.id === wfId) { setSelectedWf(null); setView('list'); }
+      await api.deleteWorkflow(deleteWfId);
+      if (selectedWf?.id === deleteWfId) { setSelectedWf(null); setView('list'); }
       await load();
     } catch (err: any) {
       alert(`Delete failed: ${err.message}`);
+    } finally {
+      setDeleteWfId(null);
     }
   };
 
@@ -553,6 +564,17 @@ export default function Workflows() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={deleteWfId !== null}
+        title="Delete Workflow"
+        message={`Delete workflow "${deleteWfId}"? This will remove the YAML file from disk.`}
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={confirmDeleteWorkflow}
+        onCancel={() => setDeleteWfId(null)}
+      />
     </div>
   );
 }
@@ -573,6 +595,8 @@ function WorkflowEditor(props:
       onSaveStage: () => void; saving: boolean; onCancel: () => void;
     }
 ) {
+  const [previewMode, setPreviewMode] = useState(false);
+
   if (props.mode === 'stage') {
     return (
       <div className="p-6 max-w-4xl">
@@ -659,14 +683,29 @@ function WorkflowEditor(props:
       </div>
 
       <div>
-        <label className="block text-sm text-fg-1 mb-1">YAML Definition</label>
-        <textarea
-          value={props.yaml}
-          onChange={e => props.onYamlChange(e.target.value)}
-          className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
-          placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
-          spellCheck={false}
-        />
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm text-fg-1">YAML Definition</label>
+          <button
+            onClick={() => setPreviewMode(!previewMode)}
+            className="text-[11px] px-2 py-1 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg border border-border/40"
+            aria-pressed={previewMode}
+          >
+            {previewMode ? '✏️ Edit' : '👁 Preview'}
+          </button>
+        </div>
+        {previewMode ? (
+          <div className="font-mono text-[12px] overflow-auto p-4 bg-bg-1 rounded-lg border border-border min-h-[300px] h-[calc(100vh-380px)]">
+            <MarkdownContent content={'```yaml\n' + props.yaml + '\n```'} />
+          </div>
+        ) : (
+          <textarea
+            value={props.yaml}
+            onChange={e => props.onYamlChange(e.target.value)}
+            className="w-full h-[calc(100vh-380px)] bg-bg-1 border border-border-1 rounded-lg px-4 py-3 text-sm text-fg font-mono focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+            placeholder="name: My Workflow&#10;steps:&#10;  - id: step1&#10;    prompt: |&#10;      ..."
+            spellCheck={false}
+          />
+        )}
       </div>
 
       {/* Inline YAML Reference */}

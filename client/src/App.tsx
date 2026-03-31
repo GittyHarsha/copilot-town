@@ -234,7 +234,7 @@ function AppInner() {
               <span className="text-base" aria-hidden>🏘️</span>
               <span className="text-sm font-bold tracking-tight hidden sm:inline">Copilot Town</span>
             </div>
-            <nav className="flex items-center gap-0.5 bg-bg-1/50 rounded-xl p-0.5 border border-border/50">
+            <nav className="flex items-center gap-0.5 bg-bg-1/50 rounded-xl p-0.5 border border-border/50" role="navigation" aria-label="Main navigation">
               {NAV.map(item => (
                 <button
                   key={item.id}
@@ -243,6 +243,7 @@ function AppInner() {
                   }`}
                   onClick={() => setPage(item.id)}
                   title={item.label}
+                  aria-current={page === item.id ? 'page' : undefined}
                 >
                   <span className="md:hidden">{item.icon}</span>
                   <span className="hidden md:inline">{item.label}</span>
@@ -253,7 +254,9 @@ function AppInner() {
           <div className="flex items-center gap-3">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500 dot-live' : 'bg-red-500'}`}
-              title={connected ? 'Connected' : 'Disconnected'} />
+              role="status"
+              title={connected ? 'Connected' : 'Disconnected'}
+              aria-label={connected ? 'Connected' : 'Disconnected'} />
           </div>
         </div>
       </header>
