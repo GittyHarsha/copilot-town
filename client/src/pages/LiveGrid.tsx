@@ -33,10 +33,18 @@ const WS_BASE = `ws://${window.location.host}/ws/headless`;
 /* ─── MiniChat — compact agent panel for grid ────────────────────── */
 
 const MiniChat = memo(function MiniChat({
-  agent, onExpand,
+  agent, onExpand, displayAgents,
+  relayTarget, setRelayTarget, relayTo, setRelayTo, relayInput, setRelayInput,
 }: {
   agent: AgentData;
   onExpand: () => void;
+  displayAgents?: AgentData[];
+  relayTarget?: string | null;
+  setRelayTarget?: (name: string | null) => void;
+  relayTo?: string;
+  setRelayTo?: (name: string) => void;
+  relayInput?: string;
+  setRelayInput?: (value: string) => void;
 }) {
   const [state, setState] = useState<StreamState>({
     messages: [], streaming: '', thinking: false,
@@ -202,7 +210,7 @@ const MiniChat = memo(function MiniChat({
   return (
     <div className={`flex flex-col rounded-xl border overflow-hidden transition-all duration-300 bg-bg-1 ${borderClass} min-h-0`}>
       {/* ── Header ── */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0 relative">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
           state.busy ? 'bg-blue-500 animate-pulse'
           : isAlive ? 'bg-emerald-500 dot-live'
@@ -229,6 +237,27 @@ const MiniChat = memo(function MiniChat({
           <span className="text-[9px] text-blue-400/60 truncate max-w-[120px] flex-shrink-0">{state.intent}</span>
         )}
 
+        {/* Relay button */}
+        {setRelayTarget && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setRelayTarget(relayTarget === agent.name ? null : agent.name);
+              setRelayTo?.('');
+              setRelayInput?.('');
+            }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: relayTarget === agent.name ? '#3b82f6' : 'var(--color-fg-2)',
+              fontSize: '0.8rem', padding: '0 2px',
+            }}
+            title="Send relay message"
+            aria-label={`Relay from ${agent.name}`}
+          >
+            📤
+          </button>
+        )}
+
         <button
           onClick={onExpand}
           className="text-fg-2/40 hover:text-fg text-xs transition-colors flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-bg-3/60"
@@ -238,6 +267,69 @@ const MiniChat = memo(function MiniChat({
             <path strokeLinecap="round" d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
           </svg>
         </button>
+
+        {/* Relay popup */}
+        {relayTarget === agent.name && displayAgents && setRelayTo && setRelayInput && (
+          <div style={{
+            position: 'absolute', top: '100%', right: 0, zIndex: 30,
+            background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
+            borderRadius: 8, padding: 8, width: 220,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--color-fg-2)', marginBottom: 6 }}>
+              Relay from {agent.name} to:
+            </div>
+            <select
+              style={{
+                width: '100%', padding: '4px 6px', marginBottom: 6,
+                background: 'var(--color-bg-2)', color: 'var(--color-fg)',
+                border: '1px solid var(--color-border)', borderRadius: 4, fontSize: '0.8rem',
+              }}
+              value={relayTo}
+              onChange={(e) => setRelayTo(e.target.value)}
+            >
+              <option value="">Select agent...</option>
+              {displayAgents.filter(a => a.name !== agent.name).map(a => (
+                <option key={a.name} value={a.name}>{a.name}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input
+                type="text"
+                value={relayInput}
+                onChange={(e) => setRelayInput(e.target.value)}
+                placeholder="Message..."
+                style={{
+                  flex: 1, padding: '4px 6px', fontSize: '0.8rem',
+                  background: 'var(--color-bg-2)', color: 'var(--color-fg)',
+                  border: '1px solid var(--color-border)', borderRadius: 4,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && relayTo && relayInput?.trim()) {
+                    api.relayMessage(agent.name, relayTo, relayInput.trim());
+                    setRelayInput('');
+                    setRelayTarget?.(null);
+                  }
+                  if (e.key === 'Escape') setRelayTarget?.(null);
+                }}
+              />
+              <button
+                className="btn"
+                style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                disabled={!relayTo || !relayInput?.trim()}
+                onClick={() => {
+                  if (relayTo && relayInput?.trim()) {
+                    api.relayMessage(agent.name, relayTo, relayInput.trim());
+                    setRelayInput('');
+                    setRelayTarget?.(null);
+                  }
+                }}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Messages ── */}
@@ -375,6 +467,9 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
   const [filter, setFilter] = useState<'active' | 'all'>('all');
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const [fullscreenAgent, setFullscreenAgent] = useState<string | null>(null);
+  const [relayTarget, setRelayTarget] = useState<string | null>(null);
+  const [relayTo, setRelayTo] = useState('');
+  const [relayInput, setRelayInput] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -550,6 +645,13 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
               <MiniChat
                 agent={agent}
                 onExpand={() => setFullscreenAgent(agent.name)}
+                displayAgents={filtered}
+                relayTarget={relayTarget}
+                setRelayTarget={setRelayTarget}
+                relayTo={relayTo}
+                setRelayTo={setRelayTo}
+                relayInput={relayInput}
+                setRelayInput={setRelayInput}
               />
             </div>
           ))}
@@ -606,6 +708,13 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
               <MiniChat
                 agent={agent}
                 onExpand={() => setFullscreenAgent(null)}
+                displayAgents={filtered}
+                relayTarget={relayTarget}
+                setRelayTarget={setRelayTarget}
+                relayTo={relayTo}
+                setRelayTo={setRelayTo}
+                relayInput={relayInput}
+                setRelayInput={setRelayInput}
               />
             </div>
           </div>

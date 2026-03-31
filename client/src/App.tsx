@@ -47,7 +47,7 @@ function AppInner() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [conversationAgent, setConversationAgent] = useState<string | null>(null);
   const [activeChat, setActiveChat] = useState<string | null>(null);
-  const { status: wsStatus, connected, latestEvent } = useAgentStatus();
+  const { status: wsStatus, connected, events, latestEvent } = useAgentStatus();
   const { theme, toggleTheme } = useTheme();
   const { panelHeight, isCollapsed } = useTerminalPanel();
   const { toast } = useToast();
@@ -103,6 +103,16 @@ function AppInner() {
     else if (type === 'agent_started' || type === 'agent_resumed') toast('success', agent ? `${agent} started` : message);
     else if (type === 'agent_stopped') toast('info', agent ? `${agent} stopped` : message);
   }, [latestEvent, toast]);
+
+  // Nav badge counts
+  const navBadges = useMemo(() => {
+    const badges: Record<string, number> = {};
+    const errorCount = events.filter(e => e.severity === 'error').length;
+    if (errorCount > 0) badges['activity'] = errorCount;
+    const running = agents.filter(a => a.status === 'running').length;
+    if (running > 0) badges['dashboard'] = running;
+    return badges;
+  }, [agents, events]);
 
   const refreshAgents = useCallback(() => {
     api.getAgents().then(setAgents).catch(() => {});
@@ -248,9 +258,22 @@ function AppInner() {
                   onClick={() => setPage(item.id)}
                   title={item.label}
                   aria-current={page === item.id ? 'page' : undefined}
+                  style={{ position: 'relative' }}
                 >
                   <span className="md:hidden">{item.icon}</span>
                   <span className="hidden md:inline">{item.label}</span>
+                  {navBadges[item.id] && (
+                    <span style={{
+                      position: 'absolute', top: -4, right: -6,
+                      minWidth: 16, height: 16, borderRadius: 8,
+                      background: item.id === 'activity' ? '#ef4444' : '#3b82f6',
+                      color: '#fff', fontSize: '0.65rem', fontWeight: 700,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '0 4px', lineHeight: 1,
+                    }}>
+                      {navBadges[item.id] > 99 ? '99+' : navBadges[item.id]}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>

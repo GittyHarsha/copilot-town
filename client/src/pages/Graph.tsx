@@ -24,6 +24,7 @@ interface GraphEdge {
   count: number;
   lastMessage?: string;
   lastTime?: string;
+  relays: RelayEntry[];
 }
 
 const R = 18; // node radius
@@ -43,12 +44,13 @@ function buildGraph(relays: RelayEntry[], agents: AgentData[]) {
     const existing = edgeMap.get(key);
     if (existing) {
       existing.count++;
+      existing.relays.push(r);
       if (!existing.lastTime || r.timestamp > existing.lastTime) {
         existing.lastMessage = r.message;
         existing.lastTime = r.timestamp;
       }
     } else {
-      edgeMap.set(key, { from: r.from, to: r.to, count: 1, lastMessage: r.message, lastTime: r.timestamp });
+      edgeMap.set(key, { from: r.from, to: r.to, count: 1, lastMessage: r.message, lastTime: r.timestamp, relays: [r] });
     }
     agentNames.add(r.from);
     agentNames.add(r.to);
@@ -88,6 +90,11 @@ function buildGraph(relays: RelayEntry[], agents: AgentData[]) {
 
   // Run force layout
   forceLayout(nodes, Array.from(edgeMap.values()), cx, cy);
+
+  // Sort relays newest-first per edge
+  for (const edge of edgeMap.values()) {
+    edge.relays.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
 
   return { nodes, edges: Array.from(edgeMap.values()) };
 }
@@ -149,6 +156,7 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0 });
@@ -311,19 +319,27 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
             role="img"
             aria-label="Agent relay graph"
             style={{ cursor: isPanning.current ? 'grabbing' : 'grab' }}
-            onClick={() => { if (!didPan.current) { setSelected(null); setFocusedNode(null); } didPan.current = false; }}
+            onClick={() => { if (!didPan.current) { setSelected(null); setFocusedNode(null); setSelectedEdge(null); } didPan.current = false; }}
             onWheel={handleWheel}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
+            <style>{`
+              @keyframes flowDash {
+                to { stroke-dashoffset: -10; }
+              }
+            `}</style>
             <defs>
               <marker id="arrow" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto">
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="var(--color-fg-2, #71717a)" strokeWidth="1" opacity="0.5" />
               </marker>
               <marker id="arrow-hl" markerWidth="6" markerHeight="5" refX="5.5" refY="2.5" orient="auto">
                 <path d="M0,0 L6,2.5 L0,5" fill="none" stroke="#3b82f6" strokeWidth="1.2" />
+              </marker>
+              <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="var(--color-fg-2)" />
               </marker>
             </defs>
             <g transform={`translate(${transform.x}, ${transform.y}) scale(${transform.scale})`}>
@@ -345,16 +361,36 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
               const w = 1 + (e.count / maxCount) * 2.5;
               // Curved edge (quadratic bezier with slight offset)
               const mx = (x1 + x2) / 2 - uy * 20, my = (y1 + y2) / 2 + ux * 20;
+              const pathD = `M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
+              const isRecentlyActive = e.lastTime ? (Date.now() - new Date(e.lastTime).getTime()) < 5 * 60 * 1000 : false;
+              const edgeColor = isActive ? '#3b82f6' : 'var(--color-fg-2, #71717a)';
 
               return (
                 <g key={key} opacity={edgeOpacity}>
+                  {/* Invisible wide hitbox for clicking */}
                   <path
-                    d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
+                    d={pathD}
                     fill="none"
-                    stroke={isActive ? '#3b82f6' : 'var(--color-fg-2, #71717a)'}
+                    stroke="transparent"
+                    strokeWidth={Math.max(w + 10, 15)}
+                    style={{ cursor: 'pointer' }}
+                    onClick={(ev) => { ev.stopPropagation(); setSelectedEdge(e); }}
+                  />
+                  {/* Visible edge */}
+                  <path
+                    d={pathD}
+                    fill="none"
+                    stroke={edgeColor}
                     strokeWidth={w}
                     strokeOpacity={isActive ? 0.7 : 0.25}
-                    markerEnd={isActive ? 'url(#arrow-hl)' : 'url(#arrow)'}
+                    strokeDasharray={isRecentlyActive ? "6 4" : "none"}
+                    markerEnd={isActive ? 'url(#arrow-hl)' : isRecentlyActive ? 'url(#arrowhead)' : 'url(#arrow)'}
+                    style={{
+                      cursor: 'pointer',
+                      transition: 'stroke 0.3s, stroke-width 0.3s',
+                      ...(isRecentlyActive ? { animation: 'flowDash 1s linear infinite' } : {}),
+                    }}
+                    onClick={(ev) => { ev.stopPropagation(); setSelectedEdge(e); }}
                   />
                   {/* Count badge on edge */}
                   {e.count > 1 && !isDimmed && (
@@ -367,8 +403,7 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
                       </text>
                     </g>
                   )}
-                  {/* Wider hitbox */}
-                  <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: 'pointer' }} />
+                  {/* Wider hitbox already rendered above */}
                 </g>
               );
             })}
@@ -434,6 +469,43 @@ export default function Graph({ onNavigate: _onNavigate }: GraphProps) {
             <button onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.3, prev.scale * 0.8) }))} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-sm" aria-label="Zoom out">−</button>
             <button onClick={() => setTransform({ x: 0, y: 0, scale: 1 })} className="w-7 h-7 rounded-lg bg-bg-1 border border-border text-fg-2 hover:text-fg text-[10px]" aria-label="Fit view">Fit</button>
           </div>
+          {/* Edge detail panel */}
+          {selectedEdge && (
+            <div style={{
+              position: 'absolute', bottom: 16, left: 16, right: 16, maxWidth: 400,
+              background: 'var(--color-bg-1)', border: '1px solid var(--color-border-1)',
+              borderRadius: 10, padding: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 20, maxHeight: 300, overflow: 'auto',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, color: 'var(--color-fg)' }}>
+                  {selectedEdge.from} → {selectedEdge.to}
+                </div>
+                <button
+                  onClick={() => setSelectedEdge(null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-fg-2)', fontSize: '1rem' }}
+                >✕</button>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--color-fg-2)', marginBottom: 8 }}>
+                {selectedEdge.count} message{selectedEdge.count !== 1 ? 's' : ''}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {selectedEdge.relays.slice(0, 5).map((r: RelayEntry, i: number) => (
+                  <div key={i} style={{
+                    padding: '6px 8px', background: 'var(--color-bg-2)', borderRadius: 6,
+                    fontSize: '0.75rem', color: 'var(--color-fg-1)',
+                  }}>
+                    <div style={{ color: 'var(--color-fg-2)', fontSize: '0.7rem', marginBottom: 2 }}>
+                      {new Date(r.timestamp).toLocaleTimeString()}
+                    </div>
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 60, overflow: 'hidden' }}>
+                      {r.message?.slice(0, 200) || '(empty)'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-4 text-[10px] text-fg-2 mt-3 px-4 pb-2">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Running
