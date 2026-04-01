@@ -1,22 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
-import { api } from '../lib/api';
 import { MarkdownContent, relativeTime } from './ChatMarkdown';
 import { ThinkingBlock, InlineToolCall, ToolTimeline, type ToolCall, type UsageInfo } from './ChatWidgets';
+import { useHeadlessChat, type ChatMessage } from '../hooks/useHeadlessChat';
 
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'agent' | 'system';
-  text: string;
-  thinking?: string;
-  tokens?: number;
-  usage?: UsageInfo;
-  timestamp: number;
-  from?: string;
-  streaming?: boolean;
-  tools?: ToolCall[];
-  intent?: string;
-  action?: 'enqueue' | 'steer';
-}
+export type { ChatMessage } from '../hooks/useHeadlessChat';
 
 interface Props {
   agentName: string;
@@ -30,7 +17,6 @@ interface Props {
    Helpers
    ═══════════════════════════════════════════════════════════════════ */
 
-const WS_BASE = `ws://${window.location.host}/ws/headless`;
 
 /* ═══════════════════════════════════════════════════════════════════
    Sub-components (panel-specific)
@@ -69,15 +55,11 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
    ═══════════════════════════════════════════════════════════════════ */
 
 export default function HeadlessChatPanel({ agentName, onClose, onResize, embedded }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  /* ── Shared chat hook (WS, streaming, messages, actions) ── */
+  const chat = useHeadlessChat(agentName);
+  const { messages, connected, sending, liveIntent, liveUsage, agentMode, pendingPermission } = chat;
+
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [liveIntent, setLiveIntent] = useState<string | null>(null);
-  const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
-  const [agentMode, setAgentMode] = useState<string>('plan');
-  const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
-  // hoveredMsg removed — no more flickery hover actions
   /* ── Search state ── */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,15 +84,6 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const msgCounter = useRef(0);
-  const streamBuf = useRef('');
-  const thinkBuf = useRef('');
-  const toolsBuf = useRef<ToolCall[]>([]);
-  const activeStreamId = useRef<string | null>(null);
-  const pendingSend = useRef<string | null>(null);
-  const inputHistory = useRef<string[]>([]);
-  const historyIndex = useRef<number>(-1);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const dragging = useRef(false);
   const dragStartX = useRef(0);
@@ -267,327 +240,36 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
     );
   };
 
-  /* ── Load conversation history ── */
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await api.getAgentMessages(agentName);
-        if (!data?.messages) return;
-        const history: ChatMessage[] = [];
-        for (const m of data.messages) {
-          if (m.type === 'user.message') {
-            const text = m.prompt || m.content || m.text || '';
-            if (!text) {
-              history.push({ id: m.id || `h-${msgCounter.current++}`, role: 'user', text: '(message not available)', from: 'you', timestamp: new Date(m.timestamp || 0).getTime() });
-              continue;
-            }
-            history.push({
-              id: m.id || `h-${msgCounter.current++}`, role: 'user', text,
-              from: text.startsWith('[Message from ') ? text.match(/\[Message from (.+?)\]/)?.[1] : 'you',
-              timestamp: new Date(m.timestamp || 0).getTime(),
-            });
-          } else if (m.type === 'assistant.message') {
-            history.push({
-              id: m.id || `h-${msgCounter.current++}`, role: 'agent',
-              text: m.content || m.text || '',
-              thinking: m.thinking || m.reasoningText || undefined,
-              tokens: m.outputTokens,
-              timestamp: new Date(m.timestamp || 0).getTime(),
-            });
-          }
-        }
-        setMessages(history);
-      } catch {}
-    })();
-  }, [agentName]);
-
-  /* ── WebSocket ── */
-  const wireWs = useCallback((ws: WebSocket) => {
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        let sid = activeStreamId.current;
-
-        // Auto-create a placeholder when agent starts a turn (e.g. from relay/external trigger)
-        if (msg.type === 'turn_start' && !sid) {
-          const agentId = `agent-${msgCounter.current++}`;
-          activeStreamId.current = agentId;
-          sid = agentId;
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setSending(true);
-          setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-          return;
-        }
-
-        // If we get streaming data with no active placeholder, create one on-the-fly
-        if (!sid && (msg.type === 'message_delta' || msg.type === 'streaming_delta' || msg.type === 'reasoning_delta' || msg.type === 'tool_start')) {
-          const agentId = `agent-${msgCounter.current++}`;
-          activeStreamId.current = agentId;
-          sid = agentId;
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setSending(true);
-          setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-        }
-
-        if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
-          streamBuf.current += msg.content || msg.deltaContent || '';
-          if (sid) {
-            const text = streamBuf.current;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, text, streaming: true } : m));
-          }
-        } else if (msg.type === 'reasoning_delta') {
-          thinkBuf.current += msg.content || msg.deltaContent || '';
-          if (sid) {
-            const thinking = thinkBuf.current;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, thinking, streaming: true } : m));
-          }
-        } else if (msg.type === 'tool_start') {
-          const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
-          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, status: 'running', timestamp: Date.now(), input }];
-          if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
-        } else if (msg.type === 'tool_complete') {
-          const output = (msg.output || msg.result) ? (typeof (msg.output || msg.result) === 'string' ? (msg.output || msg.result) : JSON.stringify(msg.output || msg.result)) : undefined;
-          toolsBuf.current = toolsBuf.current.map(t =>
-            t.tool === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output } : t
-          );
-          if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
-        } else if (msg.type === 'intent') {
-          setLiveIntent(msg.intent || null);
-          if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, intent: msg.intent } : m));
-        } else if (msg.type === 'usage') {
-          const usage: UsageInfo = { model: msg.model, inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, cost: msg.cost, duration: msg.duration };
-          setLiveUsage(usage);
-          if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, usage, tokens: msg.outputTokens } : m));
-        } else if (msg.type === 'subagent_start') {
-          toolsBuf.current = [...toolsBuf.current, { tool: `🤖 ${msg.name || 'subagent'}`, status: 'running', timestamp: Date.now() }];
-          if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
-        } else if (msg.type === 'subagent_complete') {
-          toolsBuf.current = toolsBuf.current.map(t =>
-            t.tool === `🤖 ${msg.name}` && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now() } : t
-          );
-          if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
-        } else if (msg.type === 'response') {
-          if (sid) {
-            setMessages(prev => prev.map(m => m.id === sid ? {
-              ...m,
-              text: msg.content || streamBuf.current,
-              thinking: msg.thinking || thinkBuf.current || undefined,
-              tokens: msg.outputTokens,
-              tools: toolsBuf.current.length > 0 ? toolsBuf.current.map(t => ({ ...t, status: 'done' as const, endTimestamp: t.endTimestamp || Date.now() })) : undefined,
-              streaming: false,
-            } : m));
-          }
-          activeStreamId.current = null;
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setLiveIntent(null);
-          setLiveUsage(null);
-          setSending(false);
-        } else if (msg.type === 'aborted') {
-          if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
-          activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setLiveUsage(null); setSending(false);
-          setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '⏹ Response aborted', timestamp: Date.now() }]);
-        } else if (msg.type === 'enqueued') {
-          setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '📋 Queued — runs when idle', timestamp: Date.now() }]);
-        } else if (msg.type === 'steered') {
-          // User message already added
-        } else if (msg.type === 'compacted') {
-          setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '🗜️ Context compacted', timestamp: Date.now() }]);
-        } else if (msg.type === 'mode_changed') {
-          const m = msg.mode ?? msg.data?.mode;
-          if (m) {
-            setAgentMode(m);
-            setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: `Mode → ${m}`, timestamp: Date.now() }]);
-          }
-        } else if (msg.type === 'permission_request') {
-          setPendingPermission({ id: msg.requestId, tool: msg.tool, args: msg.args });
-        } else if (msg.type === 'error') {
-          if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: `Error: ${msg.message}`, streaming: false } : m));
-          else setMessages(prev => [...prev, { id: `err-${msgCounter.current++}`, role: 'system', text: `⚠ ${msg.message}`, timestamp: Date.now() }]);
-          activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setSending(false);
-        } else if (msg.type === 'turn_end') {
-          // Finalize stream if server sends turn_end instead of response
-          if (sid && streamBuf.current) {
-            const text = streamBuf.current;
-            const thinking = thinkBuf.current || undefined;
-            const tools = toolsBuf.current.length > 0
-              ? toolsBuf.current.map(t => ({ ...t, status: 'done' as const, endTimestamp: t.endTimestamp || Date.now() }))
-              : undefined;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, text, thinking, tools, streaming: false } : m));
-          } else if (sid) {
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, streaming: false } : m));
-          }
-          activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setLiveUsage(null); setSending(false);
-        } else if (msg.type === 'user_message') {
-          const prompt = msg.prompt || '';
-          const from = prompt.startsWith('[Message from ') ? prompt.match(/\[Message from (.+?)\]/)?.[1] : undefined;
-          setMessages(prev => [...prev, { id: `ext-${msgCounter.current++}`, role: 'user', text: prompt, from: from || 'external', timestamp: Date.now() }]);
-        }
-      } catch {}
-    };
-  }, [agentName]);
-
-  // Auto-connect on mount with auto-reconnect
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const reconnectDelay = useRef(1000);
-
-  const connectWs = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
-    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
-    wsRef.current = ws;
-    wireWs(ws);
-    ws.onopen = () => {
-      setConnected(true);
-      reconnectDelay.current = 1000; // reset backoff on success
-      if (pendingSend.current) {
-        const prompt = pendingSend.current;
-        pendingSend.current = null;
-        const agentId = `a-${msgCounter.current++}`;
-        setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-        activeStreamId.current = agentId;
-        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-        setSending(true);
-        ws.send(JSON.stringify({ prompt }));
-      }
-    };
-    ws.onclose = () => {
-      setConnected(false);
-      wsRef.current = null;
-      // Auto-reconnect with exponential backoff (max 15s)
-      reconnectTimer.current = setTimeout(() => {
-        connectWs();
-      }, reconnectDelay.current);
-      reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 15000);
-    };
-  }, [agentName, wireWs]);
-
-  useEffect(() => {
-    connectWs();
-    return () => {
-      clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  }, [connectWs]);
-
-  const ensureWs = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return wsRef.current;
-    connectWs();
-    return wsRef.current!;
-  }, [connectWs]);
-
-  /* ── Actions ── */
-  const sendMessage = useCallback((action?: 'enqueue' | 'steer', textOverride?: string) => {
-    const text = (textOverride || input).trim();
-    if (!text) return;
-
-    const userId = `u-${msgCounter.current++}`;
-    const userMsg: ChatMessage = { id: userId, role: 'user', text, from: 'you', timestamp: Date.now() };
-    if (action) userMsg.action = action;
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    inputHistory.current.push(text);
-    if (inputHistory.current.length > 50) inputHistory.current.shift();
-    historyIndex.current = -1;
-
-    const ws = wsRef.current;
-    const isOpen = ws && ws.readyState === WebSocket.OPEN;
-
-    if (action === 'enqueue') {
-      if (isOpen) ws.send(JSON.stringify({ action: 'enqueue', prompt: text }));
-      return;
-    }
-    if (action === 'steer') {
-      activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-      const agentId = `a-${msgCounter.current++}`;
-      setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-      activeStreamId.current = agentId;
-      if (isOpen) ws!.send(JSON.stringify({ action: 'steer', prompt: text }));
-      else { pendingSend.current = text; ensureWs(); }
-      return;
-    }
-
-    if (sending) return;
-    if (isOpen) {
-      const agentId = `a-${msgCounter.current++}`;
-      setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
-      activeStreamId.current = agentId;
-      streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-      setSending(true);
-      ws!.send(JSON.stringify({ prompt: text }));
-    } else {
-      pendingSend.current = text;
-      ensureWs();
-    }
-  }, [input, sending, ensureWs]);
-
-  const abortAgent = useCallback(() => {
-    wsRef.current?.readyState === WebSocket.OPEN && wsRef.current.send(JSON.stringify({ action: 'abort' }));
-  }, []);
-
-  const compactAgent = useCallback(() => {
-    wsRef.current?.readyState === WebSocket.OPEN && wsRef.current.send(JSON.stringify({ action: 'compact' }));
-  }, []);
-
-  const changeMode = useCallback(async (mode: string) => {
-    try {
-      await api.setAgentMode(agentName, mode);
-      setAgentMode(mode);
-    } catch (e: any) {
-      setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: `Failed: ${e.message}`, timestamp: Date.now() }]);
-    }
-  }, [agentName]);
-
-  const respondPermission = useCallback((approved: boolean) => {
-    if (!pendingPermission || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ action: 'permission_response', requestId: pendingPermission.id, approved }));
-    setPendingPermission(null);
-  }, [pendingPermission]);
-
-  useEffect(() => {
-    api.getAgentMode(agentName).then(r => {
-      const mode = r.mode || 'plan';
-      setAgentMode(mode === 'interactive' ? 'plan' : mode);
-    }).catch(() => {});
-  }, [agentName]);
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     /* ── Input history navigation ── */
     if (e.key === 'ArrowUp' && !input && !e.shiftKey) {
       e.preventDefault();
-      const hist = inputHistory.current;
+      const hist = chat.inputHistory.current;
       if (hist.length === 0) return;
-      const idx = Math.min(historyIndex.current + 1, hist.length - 1);
-      historyIndex.current = idx;
+      const idx = Math.min(chat.historyIndex.current + 1, hist.length - 1);
+      chat.historyIndex.current = idx;
       setInput(hist[hist.length - 1 - idx]);
       return;
     }
-    if (e.key === 'ArrowDown' && historyIndex.current >= 0) {
+    if (e.key === 'ArrowDown' && chat.historyIndex.current >= 0) {
       e.preventDefault();
-      const hist = inputHistory.current;
-      const idx = historyIndex.current - 1;
-      historyIndex.current = idx;
+      const hist = chat.inputHistory.current;
+      const idx = chat.historyIndex.current - 1;
+      chat.historyIndex.current = idx;
       if (idx < 0) { setInput(''); return; }
       setInput(hist[hist.length - 1 - idx]);
       return;
     }
     if (e.key === 'q' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      if (input.trim()) sendMessage('enqueue');
+      if (input.trim()) chat.send(input, 'enqueue');
+      setInput('');
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (sending) { if (input.trim()) sendMessage('steer'); }
-      else sendMessage();
+      if (sending) { if (input.trim()) { chat.send(input, 'steer'); setInput(''); } }
+      else { chat.send(input); setInput(''); }
     }
   };
 
@@ -629,7 +311,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 {(['plan', 'autopilot'] as const).map(m => (
                   <button
                     key={m}
-                    onClick={() => changeMode(m)}
+                    onClick={() => chat.changeMode(m)}
                     disabled={!connected}
                     aria-label={`Set mode to ${m}`}
                     aria-pressed={agentMode === m}
@@ -660,12 +342,12 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 title={showBookmarksOnly ? 'Show all messages' : 'Show bookmarks only'}
               >🔖</button>
               {sending && (
-                <button onClick={abortAgent}
+                <button onClick={chat.abort}
                   className="text-[10px] px-2.5 py-1 rounded-lg bg-red-500/8 text-red-400 hover:bg-red-500/15 border border-red-500/12 transition-all font-medium">
                   ⏹ Abort
                 </button>
               )}
-              <button onClick={compactAgent}
+              <button onClick={chat.compact}
                 className="text-fg-2/30 hover:text-fg-2 text-[11px] w-7 h-7 flex items-center justify-center rounded-lg hover:bg-bg-2 transition-all" title="Compact context">
                 🗜️
               </button>
@@ -729,7 +411,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
         {/* ── Messages ── */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
           {messages.length === 0 ? (
-            <EmptyState onSend={(text) => sendMessage(undefined, text)} />
+            <EmptyState onSend={(text) => { chat.send(text); }} />
           ) : (
             <div className="px-5 py-4 space-y-4">
               {visibleMessages.map(m => {
@@ -883,11 +565,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 <div className="text-[10px] text-fg-2/40 truncate mt-0.5 font-mono">{JSON.stringify(pendingPermission.args).slice(0, 100)}</div>
               )}
             </div>
-            <button onClick={() => respondPermission(true)}
+            <button onClick={() => chat.respondPermission(true)}
               className="text-[11px] px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/15 transition-all font-medium">
               Allow
             </button>
-            <button onClick={() => respondPermission(false)}
+            <button onClick={() => chat.respondPermission(false)}
               className="text-[11px] px-3 py-1.5 rounded-lg bg-bg-2/60 text-fg-2 hover:text-fg hover:bg-bg-2 border border-border/40 transition-all font-medium">
               Deny
             </button>
@@ -925,7 +607,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                     : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/15'
                   : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-none'
               } disabled:opacity-20`}
-              onClick={() => sending ? (input.trim() ? sendMessage('steer') : abortAgent()) : sendMessage()}
+              onClick={() => { if (sending) { input.trim() ? (chat.send(input, 'steer'), setInput('')) : chat.abort(); } else { chat.send(input); setInput(''); } }}
               disabled={!input.trim() && !sending}
               aria-label={sending ? (input.trim() ? 'Steer' : 'Stop') : 'Send message'}
               title={sending ? (input.trim() ? 'Steer (redirect agent)' : 'Stop') : 'Send'}

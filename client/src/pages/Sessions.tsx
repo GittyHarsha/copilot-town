@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, type CopilotSession, type AgentData } from '../lib/api';
 import { MarkdownContent } from '../components/ChatMarkdown';
-import { ThinkingBlock, ToolTimeline, type ToolCall, type UsageInfo } from '../components/ChatWidgets';
+import { ThinkingBlock, ToolTimeline } from '../components/ChatWidgets';
+import { useHeadlessChat, type ChatMessage } from '../hooks/useHeadlessChat';
 
 interface Turn {
   turn_index: number;
@@ -25,17 +26,6 @@ interface Props {
   initialAgent?: string | null;
 }
 
-interface RichChatMessage {
-  id: string;
-  role: 'user' | 'agent' | 'system';
-  text: string;
-  thinking?: string;
-  tokens?: number;
-  tools?: ToolCall[];
-  usage?: UsageInfo;
-  intent?: string;
-  timestamp: number;
-}
 
 function relativeTime(dateStr: string): string {
   if (!dateStr) return '';
@@ -87,64 +77,6 @@ function normalizeHeadlessMessages(msgs: any[]): Turn[] {
   return normalized;
 }
 
-/** Convert headless SDK messages to RichChatMessage[] preserving thinking, tool calls, tokens */
-function normalizeToRichMessages(msgs: any[]): RichChatMessage[] {
-  const rich: RichChatMessage[] = [];
-  let counter = 0;
-  let pendingTools: ToolCall[] = [];
-
-  for (const m of msgs) {
-    if (m.type === 'user.message') {
-      pendingTools = [];
-      rich.push({
-        id: `rich-${counter++}`,
-        role: 'user',
-        text: m.prompt || m.content || m.text || '',
-        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
-      });
-    } else if (m.type === 'tool.call') {
-      pendingTools.push({
-        tool: m.name || m.tool || 'unknown',
-        status: 'done' as const,
-        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
-        endTimestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
-        input: m.arguments || m.input ? (typeof (m.arguments || m.input) === 'string' ? (m.arguments || m.input) : JSON.stringify(m.arguments || m.input)) : undefined,
-      });
-    } else if (m.type === 'tool.result') {
-      // Attach result to the last pending tool
-      if (pendingTools.length > 0) {
-        const last = pendingTools[pendingTools.length - 1];
-        last.output = m.result || m.output || m.content || '';
-        if (typeof last.output !== 'string') last.output = JSON.stringify(last.output);
-        if (m.timestamp) last.endTimestamp = new Date(m.timestamp).getTime();
-      }
-    } else if (m.type === 'assistant.message') {
-      const msg: RichChatMessage = {
-        id: `rich-${counter++}`,
-        role: 'agent',
-        text: m.content || m.text || '',
-        thinking: m.reasoningText || m.thinking || undefined,
-        tokens: m.outputTokens || m.tokens || undefined,
-        timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
-      };
-      if (pendingTools.length > 0) {
-        msg.tools = [...pendingTools];
-        pendingTools = [];
-      }
-      if (m.usage) {
-        msg.usage = {
-          model: m.usage.model,
-          inputTokens: m.usage.inputTokens,
-          outputTokens: m.usage.outputTokens,
-          cost: m.usage.cost,
-          duration: m.usage.duration,
-        };
-      }
-      rich.push(msg);
-    }
-  }
-  return rich;
-}
 
 // ── Register / rename button ──────────────────────────────────────
 function RegisterButton({ session, onRegistered }: { session: CopilotSession; onRegistered: () => void }) {
@@ -217,242 +149,57 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [turnPage, setTurnPage] = useState(0);
 
-  // Rich message state for headless agents
-  const [richMessages, setRichMessages] = useState<RichChatMessage[] | null>(null);
-  const [liveIntent, setLiveIntent] = useState<string | null>(null);
+  // Headless chat via shared hook (connects only when selectedType === 'headless')
+  const headlessAgent = selectedType === 'headless' ? selectedAgentName : null;
+  const chat = useHeadlessChat(headlessAgent);
+
+  // Bridge hook state to rendering variables used by the template
+  const richMessages: ChatMessage[] | null = headlessAgent ? chat.messages : null;
+  const liveIntent = chat.liveIntent;
+  const wsConnected = chat.connected;
+  const sending = chat.sending;
 
   // Chat input
   const [chatInput, setChatInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const streamBuf = useRef('');
-  const thinkBuf = useRef('');
-  const toolsBuf = useRef<ToolCall[]>([]);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
-  const wsReconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const wsReconnectDelay = useRef(1000);
-  const [wsConnected, setWsConnected] = useState(false);
 
-  // Connect WebSocket for headless agent chat (with auto-reconnect)
-  useEffect(() => {
-    if (selectedType !== 'headless' || !selectedAgentName) {
-      wsRef.current?.close();
-      wsRef.current = null;
-      setWsConnected(false);
-      return;
-    }
-
-    let cancelled = false;
-    const connect = () => {
-      if (cancelled) return;
-      const ws = new WebSocket(`ws://${window.location.host}/ws/headless?agent=${encodeURIComponent(selectedAgentName)}`);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setWsConnected(true);
-        wsReconnectDelay.current = 1000;
-      };
-
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
-          streamBuf.current += msg.content || msg.deltaContent || '';
-          // Update Turn[] for fallback
-          setTurns(prev => {
-            const last = prev[prev.length - 1];
-            if (!last) return prev;
-            return [...prev.slice(0, -1), { ...last, assistant_response: streamBuf.current }];
-          });
-          // Update rich messages
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, text: streamBuf.current, thinking: thinkBuf.current || undefined, tools: toolsBuf.current.length > 0 ? [...toolsBuf.current] : undefined }];
-          });
-        } else if (msg.type === 'reasoning_delta') {
-          thinkBuf.current += msg.content || msg.deltaContent || '';
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, thinking: thinkBuf.current }];
-          });
-        } else if (msg.type === 'tool_start') {
-          const tc: ToolCall = {
-            tool: msg.tool || msg.name || 'unknown',
-            status: 'running',
-            timestamp: Date.now(),
-            input: msg.input || msg.arguments ? (typeof (msg.input || msg.arguments) === 'string' ? (msg.input || msg.arguments) : JSON.stringify(msg.input || msg.arguments)) : undefined,
-          };
-          toolsBuf.current = [...toolsBuf.current, tc];
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, tools: [...toolsBuf.current] }];
-          });
-        } else if (msg.type === 'tool_complete') {
-          const toolName = msg.tool || msg.name || 'unknown';
-          toolsBuf.current = toolsBuf.current.map(t =>
-            t.tool === toolName && t.status === 'running'
-              ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output: msg.output || msg.result || undefined }
-              : t
-          );
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, tools: [...toolsBuf.current] }];
-          });
-        } else if (msg.type === 'intent') {
-          setLiveIntent(msg.intent || msg.content || null);
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, intent: msg.intent || msg.content || undefined }];
-          });
-        } else if (msg.type === 'usage') {
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, usage: { model: msg.model, inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, cost: msg.cost, duration: msg.duration }, tokens: msg.outputTokens || last.tokens }];
-          });
-        } else if (msg.type === 'response') {
-          const final = msg.content || streamBuf.current;
-          setTurns(prev => {
-            const last = prev[prev.length - 1];
-            if (!last) return prev;
-            return [...prev.slice(0, -1), { ...last, assistant_response: final }];
-          });
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, text: final, thinking: thinkBuf.current || undefined, tools: toolsBuf.current.length > 0 ? [...toolsBuf.current] : undefined }];
-          });
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setLiveIntent(null);
-          setSending(false);
-        } else if (msg.type === 'error') {
-          setTurns(prev => {
-            const last = prev[prev.length - 1];
-            if (!last) return prev;
-            return [...prev.slice(0, -1), { ...last, assistant_response: `⚠️ Error: ${msg.message}` }];
-          });
-          setRichMessages(prev => {
-            if (!prev) return prev;
-            const last = prev[prev.length - 1];
-            if (!last || last.role !== 'agent') return prev;
-            return [...prev.slice(0, -1), { ...last, text: `⚠️ Error: ${msg.message}` }];
-          });
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setLiveIntent(null);
-          setSending(false);
-        }
-      } catch {}
-    };
-
-    ws.onclose = () => {
-        wsRef.current = null;
-        setWsConnected(false);
-        setSending(false);
-        // Auto-reconnect with exponential backoff (max 15s)
-        if (!cancelled) {
-          wsReconnectTimer.current = setTimeout(() => connect(), wsReconnectDelay.current);
-          wsReconnectDelay.current = Math.min(wsReconnectDelay.current * 1.5, 15000);
-        }
-      };
-    };
-
-    connect();
-    return () => {
-      cancelled = true;
-      clearTimeout(wsReconnectTimer.current);
-      wsRef.current?.close();
-      wsRef.current = null;
-      setWsConnected(false);
-    };
-  }, [selectedType, selectedAgentName]);
 
   // Send message handler
   const handleSendChat = useCallback(async () => {
     const text = chatInput.trim();
-    if (!text || sending || !selectedAgentName) return;
+    if (!text || !selectedAgentName) return;
 
-    const newTurn: Turn = {
-      turn_index: turns.length,
-      user_message: text,
-      assistant_response: '',
-      timestamp: new Date().toISOString(),
-    };
-    setTurns(prev => [...prev, newTurn]);
     setChatInput('');
-    setSending(true);
 
     if (selectedType === 'headless') {
-      // Add rich messages for headless
-      const userMsg: RichChatMessage = {
-        id: `rich-live-${Date.now()}-u`,
-        role: 'user',
-        text,
-        timestamp: Date.now(),
-      };
-      const agentMsg: RichChatMessage = {
-        id: `rich-live-${Date.now()}-a`,
-        role: 'agent',
-        text: '',
-        timestamp: Date.now(),
-      };
-      setRichMessages(prev => prev ? [...prev, userMsg, agentMsg] : [userMsg, agentMsg]);
-
-      // Send via WebSocket
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        streamBuf.current = '';
-        thinkBuf.current = '';
-        toolsBuf.current = [];
-        wsRef.current.send(JSON.stringify({ prompt: text }));
-      } else {
-        setTurns(prev => {
-          const last = prev[prev.length - 1];
-          if (!last) return prev;
-          return [...prev.slice(0, -1), { ...last, assistant_response: '⚠️ WebSocket not connected' }];
-        });
-        setRichMessages(prev => {
-          if (!prev) return prev;
-          const last = prev[prev.length - 1];
-          if (!last || last.role !== 'agent') return prev;
-          return [...prev.slice(0, -1), { ...last, text: '⚠️ WebSocket not connected' }];
-        });
-        setSending(false);
-      }
+      // Hook handles user message creation, WS send, and streaming
+      chat.send(text);
     } else {
-      // Send via relay (pane agent)
+      // Pane agent — add Turn entry and relay via REST
+      const newTurn: Turn = {
+        turn_index: turns.length,
+        user_message: text,
+        assistant_response: '',
+        timestamp: new Date().toISOString(),
+      };
+      setTurns(prev => [...prev, newTurn]);
+
       try {
         await api.sendMessage(selectedAgentName, text, 'you');
-        // Pane agents don't stream back — update message to show it was sent
         setTurns(prev => {
           const last = prev[prev.length - 1];
           if (!last) return prev;
-          return [...prev.slice(0, -1), { ...last, assistant_response: '*(message relayed via psmux — check agent pane for response)*' }];
+          return [...prev.slice(0, -1), { ...last, assistant_response: '*(message relayed via psmux \u2014 check agent pane for response)*' }];
         });
       } catch (err: any) {
         setTurns(prev => {
           const last = prev[prev.length - 1];
           if (!last) return prev;
-          return [...prev.slice(0, -1), { ...last, assistant_response: `⚠️ Relay failed: ${err.message}` }];
+          return [...prev.slice(0, -1), { ...last, assistant_response: `\u26a0\ufe0f Relay failed: ${err.message}` }];
         });
       }
-      setSending(false);
     }
-  }, [chatInput, sending, selectedAgentName, selectedType, turns.length]);
+  }, [chatInput, selectedAgentName, selectedType, turns.length, chat]);
 
   // Load all sessions
   const loadSessions = useCallback(() => {
@@ -498,25 +245,23 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
 
   // Load detail when selection changes
   useEffect(() => {
-    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); setLoadError(null); setRichMessages(null); setLiveIntent(null); return; }
+    if (!selectedId) { setTurns([]); setSessionMeta(null); setPlanContent(null); setTurnPage(0); setLoadError(null); return; }
     setTurnPage(0);
     setDetailLoading(true);
     setLoadError(null);
 
     if (detailTab === 'chat') {
       if (selectedType === 'headless' && selectedAgentName) {
-        // Headless agent — try live messages first, fall back to session-store.db
+        // Headless agent — hook handles live WS + history loading.
+        // Also load normalized Turn[] as fallback, and try session-store.db for old sessions.
         api.getAgentMessages(selectedAgentName)
           .then(data => {
             const msgs = data?.messages || [];
             const normalized = normalizeHeadlessMessages(msgs);
-            const rich = normalizeToRichMessages(msgs);
             if (normalized.length > 0) {
               setTurns(normalized);
-              setRichMessages(rich);
               setSessionMeta({ id: selectedId, summary: selectedAgentName + ' (headless)', branch: '', created_at: '', updated_at: '' });
             } else {
-              setRichMessages(null);
               // No live messages — try session-store.db as fallback
               return api.getConversation(selectedId).then(t => {
                 setTurns(t);
@@ -527,7 +272,6 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
             }
           })
           .catch(() => {
-            setRichMessages(null);
             // Live agent failed — try session-store.db as fallback
             return api.getConversation(selectedId)
               .then(t => {
@@ -544,7 +288,6 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
           })
           .finally(() => setDetailLoading(false));
       } else {
-        setRichMessages(null);
         // Pane agent — use existing conversation endpoint
         Promise.all([
           api.getConversation(selectedId),
@@ -1020,7 +763,7 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
                                     )}
                                   </div>
                                   {msg.thinking && (
-                                    <ThinkingBlock text={msg.thinking} isStreaming={sending && i === richMessages.length - 1 && !msg.text} hasResponse={!!msg.text} />
+                                    <ThinkingBlock text={msg.thinking} isStreaming={!!msg.streaming && !msg.text} hasResponse={!!msg.text} />
                                   )}
                                   {msg.tools && msg.tools.length > 0 && (
                                     <ToolTimeline tools={msg.tools} />

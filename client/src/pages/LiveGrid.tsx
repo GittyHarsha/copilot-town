@@ -1,34 +1,7 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { api, type AgentData } from '../lib/api';
 import { MiniMarkdownContent, CopyButton, relativeTime } from '../components/ChatMarkdown';
-
-/* ─── Types ──────────────────────────────────────────────────────── */
-
-interface ToolInfo {
-  name: string;
-  status: 'running' | 'done';
-}
-
-interface StreamMessage {
-  role: 'user' | 'agent';
-  text: string;
-  thinking?: boolean;
-  tools?: ToolInfo[];
-  timestamp: number;
-}
-
-interface StreamState {
-  messages: StreamMessage[];
-  streaming: string;
-  thinking: boolean;
-  activeTool: string | null;
-  intent: string | null;
-  connected: boolean;
-  busy: boolean;
-  activeTools: ToolInfo[];
-}
-
-const WS_BASE = `ws://${window.location.host}/ws/headless`;
+import { useHeadlessChat, type ChatMessage } from '../hooks/useHeadlessChat';
 
 /* ─── MiniChat — compact agent panel for grid ────────────────────── */
 
@@ -46,180 +19,56 @@ const MiniChat = memo(function MiniChat({
   relayInput?: string;
   setRelayInput?: (value: string) => void;
 }) {
-  const [state, setState] = useState<StreamState>({
-    messages: [], streaming: '', thinking: false,
-    activeTool: null, intent: null, connected: false, busy: false,
-    activeTools: [],
-  });
+  const isAlive = agent.status === 'running' || agent.status === 'idle';
+  const chat = useHeadlessChat(isAlive ? agent.name : null, { maxMessages: 60 });
+  const { messages, connected, sending, liveIntent } = chat;
+
   const [input, setInput] = useState('');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pendingSend = useRef<string | null>(null);
-  const toolsRef = useRef<ToolInfo[]>([]);
 
-  const isAlive = agent.status === 'running' || agent.status === 'idle';
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const wireWs = useCallback((ws: WebSocket) => {
-    ws.onopen = () => {
-      if (!mountedRef.current) return;
-      setState(s => ({ ...s, connected: true }));
-      if (pendingSend.current) {
-        ws.send(JSON.stringify({ prompt: pendingSend.current }));
-        pendingSend.current = null;
-      }
-    };
-    ws.onclose = () => {
-      if (!mountedRef.current) return;
-      setState(s => ({ ...s, connected: false }));
-      wsRef.current = null;
-    };
-    ws.onmessage = (e) => {
-      if (!mountedRef.current) return;
-      try {
-        const msg = JSON.parse(e.data);
-        switch (msg.type) {
-          case 'message_delta':
-          case 'streaming_delta':
-            streamRef.current += msg.delta || msg.content || msg.text || '';
-            setState(s => ({ ...s, streaming: streamRef.current, busy: true }));
-            break;
-          case 'reasoning':
-          case 'reasoning_delta':
-            setState(s => ({ ...s, thinking: true, busy: true }));
-            break;
-          case 'tool_start':
-            toolsRef.current = [...toolsRef.current, { name: msg.tool, status: 'running' }];
-            setState(s => ({ ...s, activeTool: msg.tool, busy: true, activeTools: [...toolsRef.current] }));
-            break;
-          case 'tool_complete':
-            toolsRef.current = toolsRef.current.map(t =>
-              t.name === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const } : t
-            );
-            setState(s => ({ ...s, activeTool: null, activeTools: [...toolsRef.current] }));
-            break;
-          case 'intent':
-            setState(s => ({ ...s, intent: msg.intent }));
-            break;
-          case 'response': {
-            const text = msg.content || msg.text || msg.response || streamRef.current;
-            const tools = toolsRef.current.length > 0 ? [...toolsRef.current] : undefined;
-            if (text) {
-              setState(s => ({
-                ...s,
-                messages: [...s.messages, { role: 'agent', text, tools, timestamp: Date.now() }],
-                streaming: '', thinking: false, activeTool: null, busy: false, activeTools: [],
-              }));
-            }
-            streamRef.current = '';
-            toolsRef.current = [];
-            break;
-          }
-          case 'turn_end':
-            if (streamRef.current) {
-              const text = streamRef.current;
-              const tools = toolsRef.current.length > 0 ? [...toolsRef.current] : undefined;
-              streamRef.current = '';
-              toolsRef.current = [];
-              setState(s => ({
-                ...s,
-                messages: [...s.messages, { role: 'agent', text, tools, timestamp: Date.now() }],
-                streaming: '', thinking: false, activeTool: null, busy: false, activeTools: [],
-              }));
-            } else {
-              setState(s => ({ ...s, thinking: false, activeTool: null, busy: false, activeTools: [] }));
-              toolsRef.current = [];
-            }
-            break;
-          case 'history':
-            if (msg.messages?.length) {
-              const history = msg.messages
-                .map((m: any) => ({
-                  role: (m.role === 'user' ? 'user' : 'agent') as 'user' | 'agent',
-                  text: m.content || m.text || m.prompt || '',
-                  timestamp: m.timestamp ? new Date(m.timestamp).getTime() : Date.now(),
-                }))
-                .filter((m: any) => m.text);
-              setState(s => ({ ...s, messages: history }));
-            }
-            break;
-        }
-      } catch {}
-    };
-  }, [agent.name]);
-
-  const ensureWs = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return wsRef.current;
-    const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agent.name)}`);
-    wsRef.current = ws;
-    wireWs(ws);
-    return ws;
-  }, [agent.name, wireWs]);
-
-  useEffect(() => {
-    if (!isAlive) return;
-    ensureWs();
-    return () => { wsRef.current?.close(); wsRef.current = null; };
-  }, [agent.name, isAlive, ensureWs]);
+  // Derive compact status from last streaming message
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const isStreaming = lastMsg?.streaming ?? false;
+  const streamingText = isStreaming ? lastMsg!.text : '';
+  const isThinking = isStreaming && !!lastMsg?.thinking && !lastMsg?.text;
+  const activeTools = isStreaming && lastMsg?.tools ? lastMsg.tools : [];
+  const activeTool = activeTools.find(t => t.status === 'running')?.name ?? null;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [state.messages, state.streaming]);
+  }, [messages, isStreaming]);
 
   const send = useCallback(() => {
     const text = input.trim();
     if (!text) return;
-
-    setState(s => ({
-      ...s,
-      messages: [...s.messages, { role: 'user', text, timestamp: Date.now() }],
-      busy: true,
-    }));
+    chat.send(text, sending ? 'steer' : undefined);
     setInput('');
-    streamRef.current = '';
-    toolsRef.current = [];
-    setState(s => ({ ...s, streaming: '', activeTools: [] }));
+  }, [input, sending, chat]);
 
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      const action = state.busy ? 'steer' : undefined;
-      ws.send(JSON.stringify(action ? { action, prompt: text } : { prompt: text }));
-    } else {
-      pendingSend.current = text;
-      ensureWs();
-    }
-  }, [input, state.busy, ensureWs]);
-
-  const borderClass = state.busy
+  const borderClass = sending
     ? 'border-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.08)]'
-    : state.connected
+    : connected
       ? 'border-border-1'
       : 'border-border';
 
-  const lastMessages = state.messages.slice(-30);
+  const lastMessages = messages.slice(-30);
 
   return (
     <div className={`flex flex-col border overflow-hidden bg-bg-1 ${borderClass} min-h-0`} style={{ height: '100%', borderRadius: 'var(--shape-lg)', transition: 'all var(--duration-medium) var(--ease-standard)' }}>
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0 relative">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-          state.busy ? 'bg-blue-500 animate-pulse'
+          sending ? 'bg-blue-500 animate-pulse'
           : isAlive ? 'bg-emerald-500 dot-live'
           : 'bg-fg-2/30'
         }`} />
         <span className="text-[11px] font-semibold truncate flex-1 tracking-tight">{agent.name}</span>
 
         {/* Live status indicators */}
-        {state.thinking && (
+        {isThinking && (
           <span className="flex items-center gap-1 flex-shrink-0">
             <span className="flex gap-0.5">
               <span className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -228,13 +77,13 @@ const MiniChat = memo(function MiniChat({
             </span>
           </span>
         )}
-        {state.activeTool && !state.thinking && (
+        {activeTool && !isThinking && (
           <span className="text-[9px] text-amber-400/80 truncate max-w-[100px] flex-shrink-0 font-mono">
-            {state.activeTool}
+            {activeTool}
           </span>
         )}
-        {state.intent && !state.thinking && !state.activeTool && (
-          <span className="text-[9px] text-blue-400/60 truncate max-w-[120px] flex-shrink-0">{state.intent}</span>
+        {liveIntent && !isThinking && !activeTool && (
+          <span className="text-[9px] text-blue-400/60 truncate max-w-[120px] flex-shrink-0">{liveIntent}</span>
         )}
 
         {/* Relay button */}
@@ -336,7 +185,7 @@ const MiniChat = memo(function MiniChat({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-2.5 py-2 space-y-3 min-h-0">
         {lastMessages.map((msg, i) => (
           <div
-            key={i}
+            key={msg.id}
             className="group/msg"
             onMouseEnter={() => setHoveredIdx(i)}
             onMouseLeave={() => setHoveredIdx(null)}
@@ -357,7 +206,7 @@ const MiniChat = memo(function MiniChat({
                   <div className="flex flex-wrap gap-1 mb-1">
                     {msg.tools.map((t, j) => (
                       <span key={j} className="text-[9px] px-1.5 py-0.5 rounded bg-bg-2/60 text-fg-2/50 border border-border/30 font-mono">
-                        {t.status === 'done' ? '✓' : '⟳'} {t.name}
+                        {t.status === 'done' ? '✓' : '⟳'} {t.tool}
                       </span>
                     ))}
                   </div>
@@ -377,28 +226,28 @@ const MiniChat = memo(function MiniChat({
         ))}
 
         {/* Streaming */}
-        {state.streaming && (
+        {isStreaming && streamingText && (
           <div className="text-fg-1">
-            {state.activeTools.length > 0 && (
+            {activeTools.length > 0 && (
               <div className="flex flex-wrap gap-1 mb-1">
-                {state.activeTools.map((t, j) => (
+                {activeTools.map((t, j) => (
                   <span key={j} className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
                     t.status === 'running'
                       ? 'bg-amber-500/[0.06] text-amber-400/70 border-amber-500/15 animate-pulse'
                       : 'bg-bg-2/60 text-fg-2/50 border-border/30'
                   }`}>
-                    {t.status === 'done' ? '✓' : '⟳'} {t.name}
+                    {t.status === 'done' ? '✓' : '⟳'} {t.tool}
                   </span>
                 ))}
               </div>
             )}
-            <MiniMarkdownContent content={state.streaming} />
+            <MiniMarkdownContent content={streamingText} />
             <span className="inline-block w-[2px] h-3 bg-blue-400/60 animate-pulse rounded-full align-text-bottom ml-0.5" />
           </div>
         )}
 
         {/* Thinking indicator */}
-        {state.thinking && !state.streaming && (
+        {isThinking && (
           <div className="flex items-center gap-1.5 py-1">
             <div className="flex gap-0.5">
               <span className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -410,21 +259,21 @@ const MiniChat = memo(function MiniChat({
         )}
 
         {/* Active tool indicator (no streaming yet) */}
-        {!state.streaming && !state.thinking && state.activeTool && (
+        {!streamingText && !isThinking && activeTool && (
           <div className="flex items-center gap-1.5 py-1">
             <span className="w-2 h-2 rounded-full bg-amber-400/60 animate-pulse flex-shrink-0" />
-            <span className="text-[9px] text-amber-400/60 font-mono truncate">{state.activeTool}</span>
+            <span className="text-[9px] text-amber-400/60 font-mono truncate">{activeTool}</span>
           </div>
         )}
 
         {/* Empty state */}
-        {state.messages.length === 0 && !state.streaming && !state.thinking && !state.activeTool && (
+        {messages.length === 0 && !isStreaming && !isThinking && !activeTool && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 border border-border/30 flex items-center justify-center mb-2">
               <span className="text-sm opacity-40">⚡</span>
             </div>
             <div className="text-[10px] text-fg-2/40">
-              {state.connected ? 'Ready — send a message' : isAlive ? 'Connecting…' : 'Type to wake agent'}
+              {connected ? 'Ready — send a message' : isAlive ? 'Connecting…' : 'Type to wake agent'}
             </div>
           </div>
         )}
@@ -438,7 +287,7 @@ const MiniChat = memo(function MiniChat({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder={state.busy ? '↯ Steer…' : 'Message…'}
+          placeholder={sending ? '↯ Steer…' : 'Message…'}
           className="flex-1 bg-bg border border-border rounded-lg px-2.5 py-1.5 text-[11px] text-fg placeholder-fg-2/40 focus:border-blue-500/30 focus:outline-none transition-colors min-w-0"
         />
         <button
