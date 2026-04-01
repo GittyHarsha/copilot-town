@@ -47,11 +47,10 @@ interface Props {
   setAgents: React.Dispatch<React.SetStateAction<AgentData[]>>;
   connected: boolean;
   onRefresh: () => void;
-  onViewHistory?: (name: string) => void;
   onOpenChat?: (agentName: string) => void;
 }
 
-export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat }: Props) {
+export default function Dashboard({ agents, onRefresh, onOpenChat }: Props) {
   const [pins, setPins] = useState<Set<string>>(loadPins);
   const [groupMode, setGroupMode] = useState<GroupMode>('flat');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['__workflow']));
@@ -447,7 +446,6 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
                     key={agent.id}
                     agent={agent}
                     onRefresh={onRefresh}
-                    onViewHistory={onViewHistory}
                     onOpenChat={onOpenChat}
                     pinned={pins.has(agent.id)}
                     onTogglePin={() => togglePin(agent.id)}
@@ -497,7 +495,6 @@ export default function Dashboard({ agents, onRefresh, onViewHistory, onOpenChat
                   key={agent.id}
                   agent={agent}
                   onRefresh={onRefresh}
-                  onViewHistory={onViewHistory}
                   onOpenChat={onOpenChat}
                   pinned={pins.has(agent.id)}
                   onTogglePin={() => togglePin(agent.id)}

@@ -23,7 +23,6 @@ interface SessionEntry {
 
 interface Props {
   agents: AgentData[];
-  initialAgent?: string | null;
 }
 
 
@@ -121,7 +120,7 @@ function RegisterButton({ session, onRegistered }: { session: CopilotSession; on
 }
 
 // ── Main unified Sessions page ───────────────────────────────────
-export default function Sessions({ agents = [], initialAgent }: Props) {
+export default function Sessions({ agents = [] }: Props) {
   // Session list (from /sessions endpoint — has registration, plan, checkpoints)
   const [sessions, setSessions] = useState<CopilotSession[]>([]);
   const [orphaned, setOrphaned] = useState<CopilotSession[]>([]);
@@ -229,19 +228,6 @@ export default function Sessions({ agents = [], initialAgent }: Props) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => doSearch(val), 300);
   }, [doSearch]);
-
-  // Auto-select from initialAgent
-  useEffect(() => {
-    if (!initialAgent || convSessions.length === 0) return;
-    const agent = agents.find(a => a.id === initialAgent || a.name === initialAgent);
-    const sid = agent?.sessionId;
-    if (sid) {
-      setSelectedId(sid);
-      setSelectedType(agent?.type === 'headless' ? 'headless' : 'pane');
-      setSelectedAgentName(agent?.name || null);
-      setDetailTab('chat');
-    }
-  }, [initialAgent, agents, convSessions]);
 
   // Load detail when selection changes
   useEffect(() => {

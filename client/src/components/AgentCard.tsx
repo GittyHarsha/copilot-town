@@ -11,7 +11,6 @@ import AgentEditPanel from './AgentEditPanel';
 interface Props {
   agent: AgentData;
   onRefresh?: () => void;
-  onViewHistory?: (name: string) => void;
   onOpenChat?: (agentName: string) => void;
   pinned?: boolean;
   onTogglePin?: () => void;
@@ -32,7 +31,7 @@ const GLOW: Record<string, string> = {
   running: 'glow-green', idle: 'glow-yellow',
 };
 
-function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogglePin, selected, onSelect }: Props) {
+function AgentCard({ agent, onRefresh, onOpenChat, pinned, onTogglePin, selected, onSelect }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [pendingAction, setPendingAction] = useState<'stopping' | 'starting' | 'movingToPane' | 'movingToHeadless' | 'restarting' | null>(null);
   const [resumeError, setResumeError] = useState('');
@@ -296,11 +295,6 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                           style={{ width: 'calc(100% - 4px)' }}
                           onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); openTerminal(agent.name, agent.pane!.target); }}>📺 View output</button>
                       )}
-                      {agent.sessionId && !agent.sessionId.startsWith('pane-') && onViewHistory && (
-                        <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
-                          style={{ width: 'calc(100% - 4px)' }}
-                          onClick={(e) => { e.stopPropagation(); setShowMoreMenu(false); onViewHistory(agent.id); }}>📜 History</button>
-                      )}
                       <button className="w-full text-left px-3.5 py-2 text-[11px] text-fg-1 hover:bg-bg-2 transition-colors rounded-lg mx-0.5"
                         style={{ width: 'calc(100% - 4px)' }}
                         aria-label="Restart agent"
@@ -354,10 +348,6 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
                 {agent.sessionId && !agent.sessionId.startsWith('pane-') && !isHeadless && (
                   <button className="btn btn-success"
                     onClick={(e) => { e.stopPropagation(); handleResume(); }}>▶ Resume</button>
-                )}
-                {agent.sessionId && !agent.sessionId.startsWith('pane-') && onViewHistory && (
-                  <button className="btn"
-                    onClick={(e) => { e.stopPropagation(); onViewHistory(agent.id); }}>📜 History</button>
                 )}
                 <button className="btn"
                   onClick={(e) => { e.stopPropagation(); setShowEdit(true); }}>✏️ Edit</button>

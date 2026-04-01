@@ -46,7 +46,6 @@ function AppInner() {
   const [agents, setAgents] = useState<AgentData[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [conversationAgent, setConversationAgent] = useState<string | null>(null);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const { status: wsStatus, connected, events, latestEvent } = useAgentStatus();
   const { theme, toggleTheme } = useTheme();
@@ -308,7 +307,6 @@ function AppInner() {
               <ErrorBoundary>
                 <Dashboard
                   agents={agents} setAgents={setAgents} connected={connected} onRefresh={refreshAgents}
-                  onViewHistory={(id) => { setConversationAgent(id); setPage('sessions'); }}
                   onOpenChat={openChat}
                 />
               </ErrorBoundary>
@@ -317,7 +315,7 @@ function AppInner() {
               <ErrorBoundary>
                 {page === 'live' && <LiveGrid onOpenChat={openChat} />}
                 {page === 'panes' && <Towns />}
-                {page === 'sessions' && <Sessions agents={agents} initialAgent={conversationAgent} />}
+                {page === 'sessions' && <Sessions agents={agents} />}
                 {page === 'graph' && <Graph onNavigate={handleNavigate} />}
                 {page === 'workflows' && <Workflows />}
 
