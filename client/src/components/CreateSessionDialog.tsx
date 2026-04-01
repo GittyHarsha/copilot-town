@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type AgentData, type AgentTemplate } from '../lib/api';
 import { fetchModels, getCachedModels, type ModelInfo } from '../lib/models';
 
@@ -129,7 +130,7 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
         : 'bg-bg border-border text-fg-2 hover:text-fg-1'
     }`;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-bg-1 border border-border/60 rounded-2xl w-[460px] max-h-[85vh] overflow-auto animate-slide-down"
@@ -268,6 +269,7 @@ export default function CreateSessionDialog({ open, onClose, onLaunched }: Props
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

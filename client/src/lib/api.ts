@@ -387,6 +387,8 @@ export const api = {
     postJson<{ token: string; url: string }>(`/workflows/${encodeURIComponent(id)}/webhook`),
   disableWebhook: (id: string) =>
     deleteJson<{ ok: boolean }>(`/workflows/${encodeURIComponent(id)}/webhook`),
+  updateSchedule: (id: string, schedule: { cron?: string; enabled?: boolean } | null) =>
+    postJson<any>(`/workflows/${encodeURIComponent(id)}/schedule`, schedule === null ? { cron: null } : schedule),
 
   // Stage files
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),

@@ -245,10 +245,21 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
     emit({ type: 'turn_end' });
   });
   sess.on('tool.execution_start', (e: any) => {
-    emit({ type: 'tool_start', tool: e?.data?.toolName || e?.data?.name });
+    const d = e?.data || {};
+    emit({
+      type: 'tool_start',
+      tool: d.toolName || d.name,
+      description: d.description,
+      input: d.input ?? d.parameters ?? d.args,
+    });
   });
   sess.on('tool.execution_complete', (e: any) => {
-    emit({ type: 'tool_complete', tool: e?.data?.toolName || e?.data?.name });
+    const d = e?.data || {};
+    emit({
+      type: 'tool_complete',
+      tool: d.toolName || d.name,
+      output: d.output ?? d.result,
+    });
   });
   sess.on('assistant.intent', (e: any) => {
     emit({ type: 'intent', intent: e?.data?.intent || e?.data?.content });

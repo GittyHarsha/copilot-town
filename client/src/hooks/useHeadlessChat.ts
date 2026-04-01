@@ -187,7 +187,8 @@ export function useHeadlessChat(
           }
         } else if (msg.type === 'tool_start') {
           const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
-          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, status: 'running', timestamp: Date.now(), input }];
+          const description = msg.description || undefined;
+          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, description, status: 'running', timestamp: Date.now(), input }];
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'tool_complete') {
           const output = (msg.output || msg.result) ? (typeof (msg.output || msg.result) === 'string' ? (msg.output || msg.result) : JSON.stringify(msg.output || msg.result)) : undefined;
@@ -300,6 +301,7 @@ export function useHeadlessChat(
     ws.onclose = () => {
       setConnected(false);
       wsRef.current = null;
+      clearTimeout(reconnectTimer.current);
       reconnectTimer.current = setTimeout(() => connectWs(), reconnectDelay.current);
       reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 15000);
     };

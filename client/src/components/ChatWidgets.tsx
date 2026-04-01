@@ -11,6 +11,8 @@ import { formatDuration } from './ChatMarkdown';
 
 export interface ToolCall {
   tool: string;
+  name?: string;
+  description?: string;
   status: 'running' | 'done';
   timestamp: number;
   endTimestamp?: number;
@@ -87,13 +89,12 @@ export function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string
   );
 }
 
-/** Inline expandable tool call card with live timer */
-export function InlineToolCall({ tool }: { tool: ToolCall }) {
+/** Inline expandable tool call card with live timer — shows what the tool did */
+export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
   const hasDetails = !!(tool.input || tool.output);
 
-  // Tick timer every 500ms while tool is running
   useEffect(() => {
     if (tool.status !== 'running') return;
     const id = setInterval(() => setNow(Date.now()), 500);
@@ -102,43 +103,81 @@ export function InlineToolCall({ tool }: { tool: ToolCall }) {
 
   const elapsed = (tool.endTimestamp || (tool.status === 'running' ? now : Date.now())) - tool.timestamp;
 
+  // Build a short summary of what the tool did from input
+  const inputSummary = (() => {
+    if (!tool.input) return tool.description || null;
+    try {
+      const parsed = typeof tool.input === 'string' ? JSON.parse(tool.input) : tool.input;
+      // Common tool patterns — extract the most useful field
+      if (parsed.command) return parsed.description || (typeof parsed.command === 'string' ? parsed.command.slice(0, 120) : null);
+      if (parsed.pattern) return `/${parsed.pattern}/ ${parsed.path || parsed.glob || ''}`.trim();
+      if (parsed.path && parsed.old_str) return `edit ${parsed.path}`;
+      if (parsed.path) return parsed.path;
+      if (parsed.query) return parsed.query.slice(0, 100);
+      if (parsed.url) return parsed.url.slice(0, 100);
+      if (parsed.prompt) return parsed.prompt.slice(0, 100);
+      if (parsed.message) return parsed.message.slice(0, 100);
+      if (tool.description) return tool.description;
+      return null;
+    } catch {
+      return tool.description || (typeof tool.input === 'string' ? tool.input.slice(0, 100) : null);
+    }
+  })();
+
+  // Build a short summary of the output
+  const outputSummary = (() => {
+    if (!tool.output) return null;
+    const raw = typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output);
+    // Count lines for file-like output
+    const lines = raw.split('\n');
+    if (lines.length > 3) return `${lines.length} lines`;
+    return raw.slice(0, 80);
+  })();
+
+  const isRunning = tool.status === 'running';
+
   return (
     <div
+      className={`group/tool rounded-md transition-colors ${hasDetails ? 'cursor-pointer hover:bg-bg-3/30' : ''}`}
       style={{
-        background: 'transparent',
-        border: '1px solid var(--color-border-1)',
-        borderRadius: 'var(--shape-md)',
-        padding: '4px 8px',
-        fontSize: '0.75rem',
+        padding: compact ? '2px 6px' : '4px 8px',
+        fontSize: compact ? '0.65rem' : '0.7rem',
         fontFamily: 'monospace',
-        cursor: hasDetails ? 'pointer' : 'default',
       }}
       onClick={() => hasDetails && setExpanded(!expanded)}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ color: tool.status === 'done' ? '#22c55e' : '#3b82f6' }}>
-          {tool.status === 'done' ? '✓' : '⏳'}
+      {/* Main row: status icon + tool name + summary + duration */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="flex-shrink-0" style={{ color: isRunning ? '#3b82f6' : '#22c55e', fontSize: compact ? '0.6rem' : '0.7rem' }}>
+          {isRunning ? '⏳' : '✓'}
         </span>
-        <span style={{ color: '#60a5fa' }}>{tool.tool}</span>
-        <span style={{ marginLeft: 'auto', color: 'var(--color-fg-2)', fontSize: '0.7rem' }}>
+        <span className="text-blue-400/80 flex-shrink-0 font-semibold">{tool.tool}</span>
+        {inputSummary && (
+          <span className="text-fg-2/50 truncate min-w-0 flex-1">{inputSummary}</span>
+        )}
+        <span className="ml-auto text-fg-2/30 flex-shrink-0 tabular-nums">
           {formatDuration(elapsed)}
         </span>
+        {outputSummary && !expanded && (
+          <span className="text-emerald-400/40 flex-shrink-0 max-w-[80px] truncate">{outputSummary}</span>
+        )}
         {hasDetails && (
-          <span style={{ color: 'var(--color-fg-2)' }}>{expanded ? '▾' : '▸'}</span>
+          <span className="text-fg-2/30 flex-shrink-0 text-[8px]">{expanded ? '▾' : '▸'}</span>
         )}
       </div>
+      {/* Expanded details: full input + output */}
       {expanded && (
-        <div style={{ marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--color-border)' }}>
+        <div className="mt-1.5 pt-1.5 border-t border-border/20 space-y-1.5">
           {tool.input && (
-            <div style={{ color: 'var(--color-fg-2)', marginBottom: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 100, overflow: 'auto' }}>
-              <span style={{ color: 'var(--color-fg-1)' }}>→ </span>
-              {typeof tool.input === 'string' ? tool.input.slice(0, 300) : JSON.stringify(tool.input).slice(0, 300)}
+            <div className="text-fg-2/50 text-[10px] leading-relaxed whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto rounded bg-bg/50 px-2 py-1">
+              <span className="text-fg-1/60 select-none">→ </span>
+              {typeof tool.input === 'string' ? tool.input.slice(0, 1000) : JSON.stringify(tool.input, null, 2).slice(0, 1000)}
             </div>
           )}
           {tool.output && (
-            <div style={{ color: 'var(--color-fg-1)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 150, overflow: 'auto' }}>
-              <span style={{ color: '#22c55e' }}>← </span>
-              {typeof tool.output === 'string' ? tool.output.slice(0, 500) : JSON.stringify(tool.output).slice(0, 500)}
+            <div className="text-fg-1/70 text-[10px] leading-relaxed whitespace-pre-wrap break-all max-h-[200px] overflow-y-auto rounded bg-bg/50 px-2 py-1">
+              <span className="text-emerald-400/60 select-none">← </span>
+              {typeof tool.output === 'string' ? tool.output.slice(0, 2000) : JSON.stringify(tool.output, null, 2).slice(0, 2000)}
             </div>
           )}
         </div>
@@ -148,11 +187,11 @@ export function InlineToolCall({ tool }: { tool: ToolCall }) {
 }
 
 /** Tool timeline — vertical stack of inline tool cards */
-export function ToolTimeline({ tools }: { tools: ToolCall[] }) {
+export function ToolTimeline({ tools, compact }: { tools: ToolCall[]; compact?: boolean }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0' }}>
+    <div className="flex flex-col gap-0.5 my-1">
       {tools.map((t, i) => (
-        <InlineToolCall key={`${t.tool}-${i}`} tool={t} />
+        <InlineToolCall key={`${t.tool}-${i}`} tool={t} compact={compact} />
       ))}
     </div>
   );

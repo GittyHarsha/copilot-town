@@ -406,14 +406,12 @@ wssHeadless.on('connection', async (ws, req) => {
 
       let agent = getHeadlessAgent(agentName);
       if (!agent) {
-        // Agent not in memory — tell the client we're reviving it
-        ws.send(JSON.stringify({ type: 'system', message: '⏳ Waking agent…' }));
+        // Agent not in memory — revive it silently (MiniChat provides its own wake feedback)
         agent = await getOrReviveHeadless(agentName);
         if (!agent) {
           ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found or could not be revived` }));
           return;
         }
-        ws.send(JSON.stringify({ type: 'system', message: '✓ Agent ready' }));
       }
 
       // ── Enqueue — queue while busy ──

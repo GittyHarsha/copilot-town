@@ -121,7 +121,15 @@ interface StreamCache {
   usage: UsageInfo | null;
   streaming: boolean;
 }
+const STREAM_CACHE_MAX = 50;
 const streamCache = new Map<string, StreamCache>();
+function setStreamCache(key: string, value: StreamCache) {
+  streamCache.set(key, value);
+  if (streamCache.size > STREAM_CACHE_MAX) {
+    const oldest = streamCache.keys().next().value;
+    if (oldest) streamCache.delete(oldest);
+  }
+}
 
 /* ─── 3. Main Workflows Component ───────────────────────────────── */
 
@@ -450,7 +458,12 @@ export default function Workflows() {
               <div className="flex items-center gap-2">
                 <span className="text-lg">{wf.icon || '📋'}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">{wf.name}</div>
+                  <div className="text-sm font-medium truncate flex items-center gap-1.5">
+                    {wf.name}
+                    {wf.schedule?.cron && wf.schedule.enabled !== false && (
+                      <span className="text-[9px] text-amber-400/80" title={`Cron: ${wf.schedule.cron}`}>⏰</span>
+                    )}
+                  </div>
                   <div className="text-xs text-fg-2 truncate">{wf.description || `${wf.steps.length} steps`}</div>
                 </div>
                 <span
@@ -749,15 +762,15 @@ export default function Workflows() {
 
             {/* Schedule & Webhook Config */}
             <div className="mb-6 flex gap-3">
-              {selectedWf.schedule?.cron && (
-                <div className="flex-1 bg-bg-1 border border-border p-3 rounded-lg">
-                  <div className="text-xs font-medium text-fg-2 uppercase tracking-wider mb-1">⏰ Schedule</div>
-                  <div className="text-sm font-mono text-fg-1">{selectedWf.schedule.cron}</div>
-                  <div className="text-[10px] text-fg-2 mt-1">
-                    {selectedWf.schedule.enabled !== false ? '🟢 Active' : '⚪ Disabled'}
-                  </div>
-                </div>
-              )}
+              <ScheduleConfig
+                workflowId={selectedWf.id}
+                schedule={selectedWf.schedule}
+                onUpdate={(s) => {
+                  const updated = { ...selectedWf, schedule: s };
+                  setSelectedWf(updated);
+                  setWorkflows(prev => prev.map(w => w.id === selectedWf.id ? updated : w));
+                }}
+              />
               <WebhookConfig workflowId={selectedWf.id} webhook={selectedWf.webhook} />
             </div>
 
@@ -1562,10 +1575,12 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
   const thinkRef = useRef(cached?.thinking || '');
   const toolsRef = useRef<ToolCall[]>(cached?.tools || []);
   const containerRef = useRef<HTMLDivElement>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   // Persist to cache whenever state changes
   useEffect(() => {
-    streamCache.set(agentName, { text, thinking, tools, intent, usage, streaming });
+    setStreamCache(agentName, { text, thinking, tools, intent, usage, streaming });
   }, [agentName, text, thinking, tools, intent, usage, streaming]);
 
   useEffect(() => {
@@ -1577,6 +1592,7 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
     // Don't reset state — keep cached data, append new events
 
     ws.onmessage = (e) => {
+      if (!mountedRef.current) return;
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
@@ -1949,6 +1965,231 @@ function AnalyticsPanel({ workflowId }: { workflowId: string }) {
               </div>
             </div>
           )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── 9b. ScheduleConfig Component ──────────────────────────────── */
+
+const CRON_PRESETS: { label: string; cron: string }[] = [
+  { label: 'Every 15 min', cron: '*/15 * * * *' },
+  { label: 'Hourly', cron: '0 * * * *' },
+  { label: 'Daily 9 AM', cron: '0 9 * * *' },
+  { label: 'Weekdays 9 AM', cron: '0 9 * * 1-5' },
+  { label: 'Weekly Mon 9 AM', cron: '0 9 * * 1' },
+  { label: 'Monthly 1st', cron: '0 0 1 * *' },
+];
+
+function cronToHuman(cron: string): string {
+  const p = cron.trim().split(/\s+/);
+  if (p.length !== 5) return cron;
+  const [min, hr, dom, mon, dow] = p;
+  // Match common patterns
+  if (min.startsWith('*/') && hr === '*' && dom === '*' && mon === '*' && dow === '*')
+    return `Every ${min.slice(2)} min`;
+  if (min === '0' && hr === '*' && dom === '*' && mon === '*' && dow === '*')
+    return 'Every hour';
+  if (min === '0' && hr !== '*' && dom === '*' && mon === '*' && dow === '*')
+    return `Daily at ${hr}:00`;
+  if (min === '0' && hr !== '*' && dom === '*' && mon === '*' && dow === '1-5')
+    return `Weekdays at ${hr}:00`;
+  if (min === '0' && hr !== '*' && dom === '*' && mon === '*' && dow === '1')
+    return `Mondays at ${hr}:00`;
+  if (min === '0' && hr === '0' && dom === '1' && mon === '*' && dow === '*')
+    return '1st of each month';
+  return cron;
+}
+
+function getNextCronRun(cron: string): Date | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const now = new Date();
+  // Brute-force: check every minute for the next 48 hours
+  for (let i = 1; i <= 2880; i++) {
+    const t = new Date(now.getTime() + i * 60_000);
+    t.setSeconds(0, 0);
+    if (cronMatchesClient(parts, t)) return t;
+  }
+  return null;
+}
+
+function cronMatchesClient(parts: string[], d: Date): boolean {
+  const fields = [d.getMinutes(), d.getHours(), d.getDate(), d.getMonth() + 1, d.getDay()];
+  for (let i = 0; i < 5; i++) {
+    if (!cronFieldMatchesClient(parts[i], fields[i])) return false;
+  }
+  return true;
+}
+
+function cronFieldMatchesClient(field: string, value: number): boolean {
+  if (field === '*') return true;
+  if (field.startsWith('*/')) {
+    const n = parseInt(field.slice(2), 10);
+    return n > 0 && value % n === 0;
+  }
+  for (const v of field.split(',')) {
+    if (v.includes('-')) {
+      const [lo, hi] = v.split('-').map(Number);
+      if (value >= lo && value <= hi) return true;
+    } else {
+      if (parseInt(v, 10) === value) return true;
+    }
+  }
+  return false;
+}
+
+function relativeTimeShort(date: Date): string {
+  const diff = date.getTime() - Date.now();
+  if (diff < 0) return 'now';
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `in ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `in ${hrs}h ${mins % 60}m`;
+  return `in ${Math.floor(hrs / 24)}d`;
+}
+
+function ScheduleConfig({ workflowId, schedule, onUpdate }: {
+  workflowId: string;
+  schedule?: { cron: string; enabled?: boolean };
+  onUpdate: (schedule: { cron: string; enabled?: boolean } | undefined) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [cronInput, setCronInput] = useState(schedule?.cron || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const enabled = schedule?.enabled !== false;
+  const nextRun = schedule?.cron && enabled ? getNextCronRun(schedule.cron) : null;
+
+  const handleSave = async () => {
+    const trimmed = cronInput.trim();
+    if (!trimmed) { setError('Cron expression required'); return; }
+    if (trimmed.split(/\s+/).length !== 5) { setError('Need 5 fields: min hour day month weekday'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await api.updateSchedule(workflowId, { cron: trimmed, enabled: true });
+      onUpdate({ cron: trimmed, enabled: true });
+      setEditing(false);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save');
+    }
+    setSaving(false);
+  };
+
+  const handleToggle = async () => {
+    if (!schedule?.cron) return;
+    setSaving(true);
+    try {
+      await api.updateSchedule(workflowId, { cron: schedule.cron, enabled: !enabled });
+      onUpdate({ cron: schedule.cron, enabled: !enabled });
+    } catch {}
+    setSaving(false);
+  };
+
+  const handleRemove = async () => {
+    setSaving(true);
+    try {
+      await api.updateSchedule(workflowId, null);
+      onUpdate(undefined);
+      setCronInput('');
+      setEditing(false);
+    } catch {}
+    setSaving(false);
+  };
+
+  if (!schedule?.cron && !editing) {
+    return (
+      <div className="flex-1 bg-bg-1 border border-border p-3 rounded-lg">
+        <div className="text-xs font-medium text-fg-2 uppercase tracking-wider mb-1">⏰ Schedule</div>
+        <button
+          onClick={() => setEditing(true)}
+          className="text-[10px] text-fg-2 hover:text-fg-1 mt-1 transition-colors"
+        >
+          + Add cron schedule
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 bg-bg-1 border border-border p-3 rounded-lg">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs font-medium text-fg-2 uppercase tracking-wider">⏰ Schedule</div>
+        {schedule?.cron && !editing && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setCronInput(schedule.cron); setEditing(true); }}
+              className="text-[10px] text-fg-2 hover:text-fg-1 px-1"
+              title="Edit"
+            >✏️</button>
+            <button onClick={handleRemove} disabled={saving} className="text-[10px] text-red-400 hover:text-red-300 px-1" title="Remove schedule">✕</button>
+          </div>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          {/* Preset buttons */}
+          <div className="flex flex-wrap gap-1">
+            {CRON_PRESETS.map(p => (
+              <button
+                key={p.cron}
+                onClick={() => { setCronInput(p.cron); setError(''); }}
+                className={`px-2 py-0.5 text-[10px] border rounded transition-colors ${
+                  cronInput === p.cron
+                    ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
+                    : 'border-border text-fg-2 hover:text-fg-1 hover:border-border-1'
+                }`}
+              >{p.label}</button>
+            ))}
+          </div>
+          {/* Cron input */}
+          <div className="flex items-center gap-1">
+            <input
+              value={cronInput}
+              onChange={e => { setCronInput(e.target.value); setError(''); }}
+              placeholder="* * * * *"
+              className="flex-1 bg-bg-2 border border-border-1 rounded px-2 py-1 text-xs font-mono text-fg focus:outline-none focus:border-emerald-500"
+              onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
+              autoFocus
+            />
+            <button onClick={handleSave} disabled={saving} className="px-2 py-1 text-[10px] bg-emerald-600 text-white rounded hover:bg-emerald-500 disabled:opacity-50">
+              {saving ? '...' : '✓'}
+            </button>
+            <button onClick={() => setEditing(false)} className="px-2 py-1 text-[10px] text-fg-2 hover:text-fg-1">✕</button>
+          </div>
+          {cronInput.trim().split(/\s+/).length === 5 && (
+            <div className="text-[10px] text-fg-2">→ {cronToHuman(cronInput)}</div>
+          )}
+          {error && <div className="text-[10px] text-red-400">{error}</div>}
+          <div className="text-[9px] text-fg-2/50">min hour day month weekday · e.g. <code>0 9 * * 1-5</code></div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 mt-1">
+            <code className="text-xs text-fg-1 bg-bg-2 px-2 py-0.5 rounded font-mono">{schedule!.cron}</code>
+            <span className="text-[10px] text-fg-2">{cronToHuman(schedule!.cron)}</span>
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <button
+              onClick={handleToggle}
+              disabled={saving}
+              className="flex items-center gap-1 text-[10px] transition-colors hover:opacity-80 disabled:opacity-50"
+            >
+              <span className={`inline-block w-6 h-3.5 rounded-full relative transition-colors ${enabled ? 'bg-emerald-500' : 'bg-bg-3'}`}>
+                <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all ${enabled ? 'left-3' : 'left-0.5'}`} />
+              </span>
+              <span className={enabled ? 'text-emerald-400' : 'text-fg-2'}>{enabled ? 'Active' : 'Disabled'}</span>
+            </button>
+            {nextRun && (
+              <span className="text-[10px] text-fg-2" title={nextRun.toLocaleString()}>
+                Next: {relativeTimeShort(nextRun)}
+              </span>
+            )}
+          </div>
         </>
       )}
     </div>

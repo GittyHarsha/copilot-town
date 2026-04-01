@@ -1,7 +1,7 @@
 import { readdir, readFile, writeFile, mkdir, unlink, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, basename, resolve, sep } from 'path';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes } from 'crypto';
@@ -243,6 +243,31 @@ export async function deleteWorkflow(id: string): Promise<void> {
   const filePath = join(WORKFLOWS_DIR, `${id}.yaml`);
   await unlink(filePath);
   workflows.delete(id);
+}
+
+export async function updateSchedule(id: string, schedule: { cron?: string; enabled?: boolean } | null): Promise<WorkflowDef> {
+  const def = workflows.get(id);
+  if (!def) throw new Error(`Workflow "${id}" not found`);
+
+  // Read existing YAML, parse, modify schedule, write back
+  const filePath = join(WORKFLOWS_DIR, `${id}.yaml`);
+  const raw = await readFile(filePath, 'utf-8');
+  const parsed = parseYaml(raw) as Record<string, any>;
+
+  if (schedule === null) {
+    delete parsed.schedule;
+    def.schedule = undefined;
+  } else {
+    parsed.schedule = {
+      ...(parsed.schedule || {}),
+      ...schedule,
+    };
+    def.schedule = parsed.schedule;
+  }
+
+  await writeFile(filePath, stringifyYaml(parsed, { lineWidth: 120 }), 'utf-8');
+  workflows.set(id, def);
+  return def;
 }
 
 // ─── Variable Interpolation ─────────────────────────────────────────

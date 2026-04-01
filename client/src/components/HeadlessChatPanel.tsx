@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { MarkdownContent, relativeTime } from './ChatMarkdown';
 import { ThinkingBlock, InlineToolCall, ToolTimeline, type ToolCall, type UsageInfo } from './ChatWidgets';
-import { useHeadlessChat, type ChatMessage } from '../hooks/useHeadlessChat';
+import { useHeadlessChat, type ChatMessage, type UseHeadlessChatReturn } from '../hooks/useHeadlessChat';
+import { api } from '../lib/api';
 
-export type { ChatMessage } from '../hooks/useHeadlessChat';
+export type { ChatMessage, UseHeadlessChatReturn } from '../hooks/useHeadlessChat';
 
 interface Props {
   agentName: string;
@@ -11,6 +12,10 @@ interface Props {
   onResize?: (width: number) => void;
   /** When true, panel fills parent width (no resize handle, no fixed width) */
   embedded?: boolean;
+  /** When true, hides the built-in header (agent name, close, toolbar). Parent provides its own. */
+  headerless?: boolean;
+  /** Pass a pre-created useHeadlessChat return to share state with the parent. */
+  externalChat?: UseHeadlessChatReturn;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -23,13 +28,30 @@ interface Props {
    ═══════════════════════════════════════════════════════════════════ */
 
 /** Empty state with quick suggestions */
-function EmptyState({ onSend }: { onSend: (text: string) => void }) {
+function EmptyState({ onSend, compact }: { onSend: (text: string) => void; compact?: boolean }) {
   const suggestions = [
     { label: 'Status check', prompt: 'What are you currently working on?' },
     { label: 'Explore codebase', prompt: 'Give me an overview of this codebase' },
     { label: 'Run tests', prompt: 'Run the test suite and report results' },
     { label: 'Review changes', prompt: 'Review the current git diff' },
   ];
+  if (compact) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center px-3">
+        <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 border border-border/30 flex items-center justify-center mb-2">
+          <span className="text-xs opacity-40">⚡</span>
+        </div>
+        <p className="text-[10px] text-fg-2/40 mb-3">Send a message to start</p>
+        <div className="flex flex-wrap gap-1 justify-center">
+          {suggestions.slice(0, 2).map(s => (
+            <button key={s.label} onClick={() => onSend(s.prompt)}
+              className="text-[9px] px-2 py-1 rounded-md bg-bg-1 text-fg-2/60 hover:text-fg hover:bg-bg-2 border border-border/40 transition-all"
+            >{s.label}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-6">
       <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/10 to-violet-500/10 border border-border/40 flex items-center justify-center mb-4">
@@ -54,9 +76,11 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
    Main Component
    ═══════════════════════════════════════════════════════════════════ */
 
-export default function HeadlessChatPanel({ agentName, onClose, onResize, embedded }: Props) {
+export default function HeadlessChatPanel({ agentName, onClose, onResize, embedded, headerless, externalChat }: Props) {
+  const compact = !!headerless; // compact mode for grid cells
   /* ── Shared chat hook (WS, streaming, messages, actions) ── */
-  const chat = useHeadlessChat(agentName);
+  const ownChat = useHeadlessChat(externalChat ? null : agentName);
+  const chat = externalChat || ownChat;
   const { messages, connected, sending, liveIntent, liveUsage, agentMode, pendingPermission } = chat;
 
   const [input, setInput] = useState('');
@@ -89,17 +113,24 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
 
-  /* ── Auto-scroll ── */
+  /* ── Auto-scroll (only when user is near the bottom) ── */
+  const isNearBottom = useRef(true);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    const el = scrollRef.current;
+    if (!el) return;
+    if (isNearBottom.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
   }, [messages]);
 
-  /* ── Scroll-to-bottom button listener ── */
+  /* ── Scroll listener — tracks position for auto-scroll + scroll-to-bottom button ── */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const onScroll = () => {
-      setIsScrolledUp(el.scrollHeight - el.scrollTop - el.clientHeight > 150);
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      isNearBottom.current = gap <= 150;
+      setIsScrolledUp(gap > 150);
     };
     el.addEventListener('scroll', onScroll);
     return () => el.removeEventListener('scroll', onScroll);
@@ -107,6 +138,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
 
   /* ── Auto-focus input ── */
   useEffect(() => {
+    if (compact) return; // Don't steal focus in compact/grid mode
     setTimeout(() => inputRef.current?.focus(), 100);
   }, []);
 
@@ -240,6 +272,62 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
     );
   };
 
+  /* ── Slash command handler ── */
+  const handleSlashCommand = useCallback((text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('/')) return false;
+
+    const [cmd, ...args] = trimmed.slice(1).split(/\s+/);
+    const arg = args.join(' ');
+    const sysMsg = (msg: string) => {
+      chat.setMessages(prev => [...prev, { id: `sys-${Date.now()}`, role: 'system' as const, text: msg, timestamp: Date.now() }]);
+    };
+
+    switch (cmd.toLowerCase()) {
+      case 'compact':
+        chat.compact();
+        sysMsg('🗜️ Compacting context…');
+        return true;
+      case 'clear':
+        chat.setMessages([]);
+        sysMsg('🗑️ Chat cleared');
+        return true;
+      case 'abort':
+      case 'stop':
+        chat.abort();
+        return true;
+      case 'mode':
+        if (['plan', 'autopilot', 'interactive'].includes(arg.toLowerCase())) {
+          chat.changeMode(arg.toLowerCase());
+          sysMsg(`Mode → ${arg.toLowerCase()}`);
+        } else {
+          sysMsg(`Current mode: ${agentMode}. Usage: /mode [plan|autopilot|interactive]`);
+        }
+        return true;
+      case 'model':
+        if (arg) {
+          api.setAgentModel(agentName, arg).then(() => sysMsg(`Model → ${arg}`)).catch(e => sysMsg(`⚠ ${e.message}`));
+        } else {
+          sysMsg('Usage: /model <model-id>  (e.g. /model claude-sonnet-4)');
+        }
+        return true;
+      case 'help':
+        sysMsg([
+          '📖 Slash commands:',
+          '  /compact — compress context',
+          '  /clear — clear chat history',
+          '  /abort — stop current response',
+          '  /mode [plan|autopilot|interactive]',
+          '  /model <model-id>',
+          '  /help — show this',
+        ].join('\n'));
+        return true;
+      default:
+        sysMsg(`Unknown command: /${cmd}. Type /help for available commands.`);
+        return true;
+    }
+  }, [chat, agentName, agentMode]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     /* ── Input history navigation ── */
     if (e.key === 'ArrowUp' && !input && !e.shiftKey) {
@@ -268,6 +356,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      if (input.trim().startsWith('/')) {
+        handleSlashCommand(input);
+        setInput('');
+        return;
+      }
       if (sending) { if (input.trim()) { chat.send(input, 'steer'); setInput(''); } }
       else { chat.send(input); setInput(''); }
     }
@@ -278,7 +371,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="h-full bg-bg border-l border-border/50 flex flex-col relative" style={embedded ? undefined : { width: panelWidth }}>
+    <div className={`h-full flex flex-col relative ${headerless ? 'bg-transparent' : 'bg-bg border-l border-border/50'}`} style={embedded ? undefined : { width: panelWidth }}>
 
       {/* ── Resize handle ── */}
       {!embedded && (
@@ -290,6 +383,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
       )}
 
       {/* ── Header ── */}
+      {!headerless && (
         <div className="flex-shrink-0 border-b border-border/40">
           {/* Top row: agent name + close */}
           <div className="flex items-center justify-between px-5 pt-3.5 pb-2">
@@ -354,6 +448,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
             </div>
           </div>
         </div>
+      )}
 
         {/* ── Streaming status bar ── */}
         {sending && (
@@ -411,9 +506,9 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
         {/* ── Messages ── */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
           {messages.length === 0 ? (
-            <EmptyState onSend={(text) => { chat.send(text); }} />
+            <EmptyState onSend={(text) => { chat.send(text); }} compact={headerless} />
           ) : (
-            <div className="px-5 py-4 space-y-4">
+            <div className={headerless ? 'px-2.5 py-2 space-y-2' : 'px-5 py-4 space-y-4'}>
               {visibleMessages.map(m => {
                 const isDimmed = searchOpen && searchQuery && !searchMatches.includes(m.id);
                 const isBookmarked = bookmarks.has(m.id);
@@ -449,7 +544,10 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                             }`}>{m.action === 'enqueue' ? '📋 queued' : '↯ steer'}</span>
                           </div>
                         )}
-                        <div className="px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words" style={{ borderRadius: '18px 18px 4px 18px' }}>
+                        <div className={compact
+                          ? 'px-3 py-1.5 bg-blue-500/[0.12] text-fg text-[11px] leading-relaxed border border-blue-500/[0.15] whitespace-pre-wrap break-words'
+                          : 'px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words'
+                        } style={{ borderRadius: compact ? '14px 14px 4px 14px' : '18px 18px 4px 18px' }}>
                           {renderHighlightedText(m.text)}
                         </div>
                         <div className="flex items-center justify-end gap-2 mt-0.5">
@@ -463,66 +561,56 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 /* ── Agent message ── */
                 return (
                   <div key={m.id} id={`msg-${m.id}`} className={`flex gap-2.5 animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-2' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}>
-                    {/* Agent avatar */}
-                    <div className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px]"
-                      style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
-                      ⚡
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-2">
-
-                    {/* Thinking bubble */}
-                    {m.thinking && (
-                      <div style={{
-                        background: 'color-mix(in srgb, var(--color-bg-2) 60%, transparent)',
-                        borderRadius: '4px 14px 14px 14px',
-                        padding: '8px 12px',
-                        border: '1px solid color-mix(in srgb, var(--color-border) 60%, transparent)',
-                      }}>
-                        <ThinkingBlock text={m.thinking} isStreaming={!!m.streaming} hasResponse={!!m.text} />
+                    {/* Agent avatar — hidden in compact mode */}
+                    {!compact && (
+                      <div className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px]"
+                        style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
+                        ⚡
                       </div>
                     )}
-
-                    {/* Tools bubble */}
-                    {m.tools && m.tools.length > 0 && (
-                      <div style={{
-                        background: 'color-mix(in srgb, var(--color-bg-2) 50%, transparent)',
-                        borderRadius: '4px 14px 14px 14px',
-                        padding: '8px 12px',
-                        border: '1px solid color-mix(in srgb, var(--color-border) 50%, transparent)',
-                      }}>
-                        <ToolTimeline tools={m.tools} />
-                      </div>
-                    )}
-
-                    {/* Response text bubble */}
-                    {(m.text || m.streaming) && (
+                    <div className="flex-1 min-w-0">
+                    {/* Single unified agent bubble */}
+                    {(m.thinking || m.text || (m.tools && m.tools.length > 0) || m.streaming) && (
                       <div style={{
                         background: 'var(--color-bg-2)',
-                        borderRadius: '4px 18px 18px 18px',
-                        padding: '12px 14px',
+                        borderRadius: compact ? '4px 14px 14px 14px' : '4px 18px 18px 18px',
+                        padding: compact ? '6px 10px' : '12px 14px',
                         border: '1px solid var(--color-border)',
+                        overflow: 'hidden',
                       }}>
-                        <div className="text-[13px] leading-relaxed text-fg/90">
-                          {m.text ? (
-                            <>
-                              <MarkdownContent content={m.text} />
-                              {m.streaming && (
-                                <span className="inline-block w-[2px] h-4 bg-blue-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
-                              )}
-                            </>
-                          ) : (
-                            m.streaming && !m.thinking && (
-                              <div className="flex items-center gap-2 py-2">
-                                <div className="flex gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
-                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
-                                </div>
-                                <span className="text-[11px] text-fg-2/30">Thinking…</span>
-                              </div>
-                            )
-                          )}
-                        </div>
+                        {/* Thinking section */}
+                        {m.thinking && (
+                          <div className={m.text || (m.tools && m.tools.length > 0) ? 'mb-2 pb-2 border-b border-border/30' : ''}>
+                            <ThinkingBlock text={m.thinking} isStreaming={!!m.streaming} hasResponse={!!m.text} />
+                          </div>
+                        )}
+
+                        {/* Tools section */}
+                        {m.tools && m.tools.length > 0 && (
+                          <div className={m.text ? 'mb-2 pb-2 border-b border-border/30' : ''}>
+                            <ToolTimeline tools={m.tools} compact={compact} />
+                          </div>
+                        )}
+
+                        {/* Response text */}
+                        {m.text ? (
+                          <div className={compact ? 'text-[11px] leading-relaxed text-fg/90' : 'text-[13px] leading-relaxed text-fg/90'}>
+                            <MarkdownContent content={m.text} />
+                            {m.streaming && (
+                              <span className="inline-block w-[2px] h-4 bg-blue-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
+                            )}
+                          </div>
+                        ) : m.streaming && !m.thinking && !(m.tools && m.tools.length > 0) ? (
+                          /* Streaming placeholder — only when nothing else is showing yet */
+                          <div className="flex items-center gap-2 py-1">
+                            <div className="flex gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                            <span className="text-[11px] text-fg-2/30">Thinking…</span>
+                          </div>
+                        ) : null}
 
                         {/* Intent while streaming */}
                         {m.intent && m.streaming && (
@@ -534,27 +622,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                       </div>
                     )}
 
-                    {/* No content yet — just streaming placeholder */}
-                    {!m.text && !m.thinking && !m.tools?.length && m.streaming && (
-                      <div style={{
-                        background: 'var(--color-bg-2)',
-                        borderRadius: '4px 18px 18px 18px',
-                        padding: '12px 14px',
-                        border: '1px solid var(--color-border)',
-                      }}>
-                        <div className="flex items-center gap-2 py-2">
-                          <div className="flex gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
-                          </div>
-                          <span className="text-[11px] text-fg-2/30">Thinking…</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Footer: usage/tokens */}
-                    {(m.tokens || m.usage) && (
+                    {/* Footer: usage/tokens — hidden in compact mode */}
+                    {!compact && (m.tokens || m.usage) && (
                       <div className="flex items-center gap-3 text-[10px] px-1">
                         {m.usage?.model && <span className="text-fg-2/25">{m.usage.model}</span>}
                         {m.tokens && <span className={`tabular-nums ${m.streaming ? 'text-blue-400/40' : 'text-fg-2/20'}`}>{m.tokens.toLocaleString()} out{m.streaming && '…'}</span>}
@@ -571,7 +640,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
           )}
           {isScrolledUp && (
             <button
-              onClick={() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })}
+              onClick={() => { isNearBottom.current = true; scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }}
               style={{
                 position: 'sticky', bottom: 12, alignSelf: 'center',
                 width: 40, height: 40, borderRadius: '50%',
@@ -613,18 +682,20 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
         )}
 
         {/* ── Input ── */}
-        <div className="border-t border-border/30 p-5 flex-shrink-0 bg-bg-1/80">
-          {!connected && (
+        <div className={headerless ? 'border-t border-border/30 px-2 py-1.5 flex-shrink-0' : 'border-t border-border/30 p-5 flex-shrink-0 bg-bg-1/80'}>
+          {!connected && !headerless && (
             <div className="text-[11px] text-amber-400/60 bg-amber-400/[0.04] rounded-lg px-3 py-2 mb-2.5 border border-amber-400/[0.08] flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
               Not connected — reconnecting…
             </div>
           )}
-          <div className="flex items-end gap-2.5">
+          <div className={headerless ? 'flex items-center gap-1.5' : 'flex items-end gap-2.5'}>
             <textarea
               ref={inputRef}
-              className="flex-1 input-m3 px-4 py-3 text-[13px] text-fg resize-none focus:outline-none min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40"
-              placeholder={sending ? 'Type to steer or Ctrl+Q to queue…' : `Message ${agentName}…`}
+              className={headerless
+                ? 'flex-1 bg-bg border border-border rounded-lg px-2.5 py-1.5 text-[11px] text-fg resize-none focus:outline-none focus:border-blue-500/30 min-h-[28px] max-h-[60px] transition-colors placeholder:text-fg-2/40'
+                : 'flex-1 input-m3 px-4 py-3 text-[13px] text-fg resize-none focus:outline-none min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40'}
+              placeholder={sending ? (headerless ? '↯ Steer…' : 'Type to steer or Ctrl+Q to queue…') : `Message ${agentName}…`}
               rows={1}
               value={input}
               onChange={e => { setInput(e.target.value); historyIndex.current = -1; }}
@@ -632,18 +703,26 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               onInput={e => {
                 const t = e.currentTarget;
                 t.style.height = 'auto';
-                t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+                t.style.height = Math.min(t.scrollHeight, headerless ? 60 : 140) + 'px';
               }}
             />
             <button
-              className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 ${
-                sending
-                  ? input.trim()
-                    ? 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/20'
-                    : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/15'
-                  : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-none'
-              } disabled:opacity-20`}
-              onClick={() => { if (sending) { input.trim() ? (chat.send(input, 'steer'), setInput('')) : chat.abort(); } else { chat.send(input); setInput(''); } }}
+              className={headerless
+                ? `flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                    sending
+                      ? input.trim()
+                        ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/20'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/15'
+                      : 'bg-blue-600/80 hover:bg-blue-500 text-white'
+                  } disabled:opacity-20`
+                : `flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 ${
+                    sending
+                      ? input.trim()
+                        ? 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/20'
+                        : 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/15'
+                      : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-none'
+                  } disabled:opacity-20`}
+              onClick={() => { if (input.trim().startsWith('/')) { handleSlashCommand(input); setInput(''); return; } if (sending) { input.trim() ? (chat.send(input, 'steer'), setInput('')) : chat.abort(); } else { chat.send(input); setInput(''); } }}
               disabled={!input.trim() && !sending}
               aria-label={sending ? (input.trim() ? 'Steer' : 'Stop') : 'Send message'}
               title={sending ? (input.trim() ? 'Steer (redirect agent)' : 'Stop') : 'Send'}
@@ -660,9 +739,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
             </button>
           </div>
           <div className="flex items-center justify-between mt-2 px-1">
-            <span className="text-[10px] text-fg-2/20">
-              {sending ? '⏎ steer · ⌃Q queue · click ■ abort' : '⏎ send · ⇧⏎ newline · ⌃Q queue · ⌃F search · ↑ history'}
-            </span>
+            {!compact && (
+              <span className="text-[10px] text-fg-2/20">
+                {sending ? '⏎ steer · ⌃Q queue · click ■ abort' : '⏎ send · ⇧⏎ newline · ⌃Q queue · ⌃F search · ↑ history'}
+              </span>
+            )}
             <div className="flex items-center gap-2">
               {input.length > 0 && (
                 <span style={{ fontSize: '0.65rem', color: 'var(--color-fg-2)', opacity: 0.3, fontFamily: 'monospace' }}>

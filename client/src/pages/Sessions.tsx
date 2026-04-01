@@ -526,12 +526,12 @@ export default function Sessions({ agents = [] }: Props) {
             <div className="text-center" style={{ maxWidth: 320 }}>
               <div style={{ fontSize: '3rem', marginBottom: 16, opacity: 0.12 }}>💬</div>
               <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--color-fg)', marginBottom: 6 }}>
-                {liveAgentSessions.length > 0 ? 'Select an agent to chat' : 'No live agents'}
+                {liveAgentSessions.length > 0 ? 'Select an agent to chat' : 'Select a session'}
               </p>
               <p style={{ fontSize: 13, color: 'var(--color-fg-2)', lineHeight: 1.6 }}>
                 {liveAgentSessions.length > 0
                   ? 'Pick a live agent from the sidebar to start a conversation'
-                  : 'Spawn agents from the Dashboard, then come here to chat'}
+                  : 'Pick a session from the sidebar to view its history, or spawn agents from the Dashboard'}
               </p>
             </div>
           </div>

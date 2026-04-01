@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
+  loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow, updateSchedule,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate, rerunFromStep,
   pauseRun, resumeRun, chatWithStepAgent, rerunSingleStep, getAliveAgents, cleanupAgentsNow,
   promoteStepAgent, generateWebhookToken, resolveWebhookToken, disableWebhook,
@@ -68,6 +68,19 @@ router.delete('/:id', async (req, res) => {
     res.json({ ok: true });
   } catch (e: any) {
     res.status(404).json({ error: e.message });
+  }
+});
+
+// Update schedule for a workflow
+router.post('/:id/schedule', async (req, res) => {
+  try {
+    const { cron, enabled } = req.body;
+    // null means remove schedule entirely
+    const schedule = cron === null && enabled === undefined ? null : { cron, enabled };
+    const def = await updateSchedule(req.params.id, schedule);
+    res.json(def);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
   }
 });
 
