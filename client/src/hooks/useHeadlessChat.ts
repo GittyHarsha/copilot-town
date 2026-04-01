@@ -84,7 +84,7 @@ export function useHeadlessChat(
   const [connected, setConnected] = useState(false);
   const [liveIntent, setLiveIntent] = useState<string | null>(null);
   const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
-  const [agentMode, setAgentMode] = useState<string>('plan');
+  const [agentMode, setAgentMode] = useState<string>('autopilot');
   const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
 
   /* ── Refs ── */
@@ -323,8 +323,8 @@ export function useHeadlessChat(
   useEffect(() => {
     if (!agentName) return;
     api.getAgentMode(agentName).then(r => {
-      const mode = r.mode || 'plan';
-      setAgentMode(mode === 'interactive' ? 'plan' : mode);
+      const mode = r.mode || 'autopilot';
+      setAgentMode(mode === 'interactive' ? 'autopilot' : mode);
     }).catch(() => {});
   }, [agentName]);
 
