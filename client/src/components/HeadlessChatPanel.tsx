@@ -468,57 +468,94 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                       style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
                       ⚡
                     </div>
-                    <div className="flex-1 min-w-0">
-                    <div style={{
-                      background: 'var(--color-bg-2)',
-                      borderRadius: '4px 18px 18px 18px',
-                      padding: '12px 14px',
-                      border: '1px solid var(--color-border)',
-                    }}>
-                    {/* Thinking */}
+                    <div className="flex-1 min-w-0 space-y-2">
+
+                    {/* Thinking bubble */}
                     {m.thinking && (
-                      <ThinkingBlock text={m.thinking} isStreaming={!!m.streaming} hasResponse={!!m.text} />
+                      <div style={{
+                        background: 'color-mix(in srgb, var(--color-bg-2) 60%, transparent)',
+                        borderRadius: '4px 14px 14px 14px',
+                        padding: '8px 12px',
+                        border: '1px solid color-mix(in srgb, var(--color-border) 60%, transparent)',
+                      }}>
+                        <ThinkingBlock text={m.thinking} isStreaming={!!m.streaming} hasResponse={!!m.text} />
+                      </div>
                     )}
 
-                    {/* Tool timeline */}
-                    {m.tools && m.tools.length > 0 && <ToolTimeline tools={m.tools} />}
+                    {/* Tools bubble */}
+                    {m.tools && m.tools.length > 0 && (
+                      <div style={{
+                        background: 'color-mix(in srgb, var(--color-bg-2) 50%, transparent)',
+                        borderRadius: '4px 14px 14px 14px',
+                        padding: '8px 12px',
+                        border: '1px solid color-mix(in srgb, var(--color-border) 50%, transparent)',
+                      }}>
+                        <ToolTimeline tools={m.tools} />
+                      </div>
+                    )}
 
-                    {/* Response content — full-width markdown */}
+                    {/* Response text bubble */}
                     {(m.text || m.streaming) && (
-                      <div className="text-[13px] leading-relaxed text-fg/90">
-                        {m.text ? (
-                          <>
-                            <MarkdownContent content={m.text} />
-                            {m.streaming && (
-                              <span className="inline-block w-[2px] h-4 bg-blue-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
-                            )}
-                          </>
-                        ) : (
-                          m.streaming && !m.thinking && (
-                            <div className="flex items-center gap-2 py-2">
-                              <div className="flex gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <div style={{
+                        background: 'var(--color-bg-2)',
+                        borderRadius: '4px 18px 18px 18px',
+                        padding: '12px 14px',
+                        border: '1px solid var(--color-border)',
+                      }}>
+                        <div className="text-[13px] leading-relaxed text-fg/90">
+                          {m.text ? (
+                            <>
+                              <MarkdownContent content={m.text} />
+                              {m.streaming && (
+                                <span className="inline-block w-[2px] h-4 bg-blue-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
+                              )}
+                            </>
+                          ) : (
+                            m.streaming && !m.thinking && (
+                              <div className="flex items-center gap-2 py-2">
+                                <div className="flex gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
+                                  <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+                                </div>
+                                <span className="text-[11px] text-fg-2/30">Thinking…</span>
                               </div>
-                              <span className="text-[11px] text-fg-2/30">Thinking…</span>
-                            </div>
-                          )
+                            )
+                          )}
+                        </div>
+
+                        {/* Intent while streaming */}
+                        {m.intent && m.streaming && (
+                          <div className="text-[10px] text-blue-400/40 mt-1 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-blue-400/40 animate-pulse" />
+                            {m.intent}
+                          </div>
                         )}
                       </div>
                     )}
 
-                    {/* Intent while streaming */}
-                    {m.intent && m.streaming && (
-                      <div className="text-[10px] text-blue-400/40 mt-1 flex items-center gap-1">
-                        <span className="w-1 h-1 rounded-full bg-blue-400/40 animate-pulse" />
-                        {m.intent}
+                    {/* No content yet — just streaming placeholder */}
+                    {!m.text && !m.thinking && !m.tools?.length && m.streaming && (
+                      <div style={{
+                        background: 'var(--color-bg-2)',
+                        borderRadius: '4px 18px 18px 18px',
+                        padding: '12px 14px',
+                        border: '1px solid var(--color-border)',
+                      }}>
+                        <div className="flex items-center gap-2 py-2">
+                          <div className="flex gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                          <span className="text-[11px] text-fg-2/30">Thinking…</span>
+                        </div>
                       </div>
                     )}
 
-                    {/* Footer: usage/tokens — show live during streaming too */}
+                    {/* Footer: usage/tokens */}
                     {(m.tokens || m.usage) && (
-                      <div className="flex items-center gap-3 mt-1.5 text-[10px]">
+                      <div className="flex items-center gap-3 text-[10px] px-1">
                         {m.usage?.model && <span className="text-fg-2/25">{m.usage.model}</span>}
                         {m.tokens && <span className={`tabular-nums ${m.streaming ? 'text-blue-400/40' : 'text-fg-2/20'}`}>{m.tokens.toLocaleString()} out{m.streaming && '…'}</span>}
                         {m.usage?.inputTokens && <span className="text-fg-2/20 tabular-nums">{m.usage.inputTokens.toLocaleString()} in</span>}
@@ -526,7 +563,6 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                         <span className="ml-auto text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                       </div>
                     )}
-                    </div>
                     </div>
                   </div>
                 );
