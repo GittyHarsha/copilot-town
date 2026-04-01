@@ -247,6 +247,8 @@ export function useHeadlessChat(
           }
         } else if (msg.type === 'permission_request') {
           setPendingPermission({ id: msg.requestId, tool: msg.tool, args: msg.args });
+        } else if (msg.type === 'system') {
+          setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: msg.message, timestamp: Date.now() }]);
         } else if (msg.type === 'error') {
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: `Error: ${msg.message}`, streaming: false } : m));
           else setMessages(prev => [...prev, { id: `err-${msgCounter.current++}`, role: 'system', text: `⚠ ${msg.message}`, timestamp: Date.now() }]);

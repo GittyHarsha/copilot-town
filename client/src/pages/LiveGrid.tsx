@@ -21,8 +21,15 @@ const MiniChat = memo(function MiniChat({
   setRelayInput?: (value: string) => void;
 }) {
   const isAlive = agent.status === 'running' || agent.status === 'idle';
-  const chat = useHeadlessChat(isAlive ? agent.name : null, { maxMessages: 60 });
+  // Only connect WS for alive agents — stopped agents use wake-on-send
+  const [waking, setWaking] = useState(false);
+  const [forceConnect, setForceConnect] = useState(false);
+  const shouldConnect = isAlive || forceConnect;
+  const chat = useHeadlessChat(shouldConnect ? agent.name : null, { maxMessages: 60 });
   const { messages, connected, sending, liveIntent } = chat;
+
+  // Reset forceConnect when agent becomes alive (normal flow takes over)
+  useEffect(() => { if (isAlive) setForceConnect(false); }, [isAlive]);
 
   const [input, setInput] = useState('');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -42,12 +49,36 @@ const MiniChat = memo(function MiniChat({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, isStreaming]);
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const text = input.trim();
     if (!text) return;
-    chat.send(text, sending ? 'steer' : undefined);
     setInput('');
-  }, [input, sending, chat]);
+
+    if (!shouldConnect) {
+      // Agent is stopped — wake it first, then send via the hook
+      setWaking(true);
+      chat.setMessages(prev => [
+        ...prev,
+        { id: `u-wake-${Date.now()}`, role: 'user', text, from: 'you', timestamp: Date.now() },
+        { id: `sys-wake-${Date.now()}`, role: 'system', text: '⏳ Waking agent…', timestamp: Date.now() },
+      ]);
+      try {
+        await api.relayMessage('dashboard', agent.name, text);
+        // Force WS connection now that the agent should be alive
+        setForceConnect(true);
+        setWaking(false);
+      } catch (e: any) {
+        chat.setMessages(prev => [
+          ...prev,
+          { id: `err-wake-${Date.now()}`, role: 'system', text: `⚠ Failed to wake: ${e.message}`, timestamp: Date.now() },
+        ]);
+        setWaking(false);
+      }
+      return;
+    }
+
+    chat.send(text, sending ? 'steer' : undefined);
+  }, [input, sending, chat, shouldConnect, agent.name]);
 
   const borderClass = sending
     ? 'border-blue-500/40 shadow-[0_0_12px_rgba(59,130,246,0.08)]'
@@ -62,8 +93,10 @@ const MiniChat = memo(function MiniChat({
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-bg-2/40 flex-shrink-0 relative">
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-          sending ? 'bg-blue-500 animate-pulse'
+          waking ? 'bg-amber-400 animate-pulse'
+          : sending ? 'bg-blue-500 animate-pulse'
           : isAlive ? 'bg-emerald-500 dot-live'
+          : connected ? 'bg-amber-400/60'
           : 'bg-fg-2/30'
         }`} />
         <span className="text-[11px] font-semibold truncate flex-1 tracking-tight">{agent.name}</span>
@@ -274,7 +307,7 @@ const MiniChat = memo(function MiniChat({
               <span className="text-sm opacity-40">⚡</span>
             </div>
             <div className="text-[10px] text-fg-2/40">
-              {connected ? 'Ready — send a message' : isAlive ? 'Connecting…' : 'Type to wake agent'}
+              {waking ? '⏳ Waking agent…' : connected ? 'Ready — send a message' : isAlive ? 'Connecting…' : 'Send a message to wake'}
             </div>
           </div>
         )}
@@ -288,7 +321,7 @@ const MiniChat = memo(function MiniChat({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder={sending ? '↯ Steer…' : 'Message…'}
+          placeholder={waking ? '⏳ Waking…' : sending ? '↯ Steer…' : !isAlive ? 'Send to wake agent…' : 'Message…'}
           className="flex-1 bg-bg border border-border rounded-lg px-2.5 py-1.5 text-[11px] text-fg placeholder-fg-2/40 focus:border-blue-500/30 focus:outline-none transition-colors min-w-0"
         />
         <button

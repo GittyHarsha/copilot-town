@@ -406,11 +406,14 @@ wssHeadless.on('connection', async (ws, req) => {
 
       let agent = getHeadlessAgent(agentName);
       if (!agent) {
+        // Agent not in memory — tell the client we're reviving it
+        ws.send(JSON.stringify({ type: 'system', message: '⏳ Waking agent…' }));
         agent = await getOrReviveHeadless(agentName);
         if (!agent) {
-          ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found` }));
+          ws.send(JSON.stringify({ type: 'error', message: `Agent "${agentName}" not found or could not be revived` }));
           return;
         }
+        ws.send(JSON.stringify({ type: 'system', message: '✓ Agent ready' }));
       }
 
       // ── Enqueue — queue while busy ──
@@ -451,9 +454,31 @@ wssHeadless.on('connection', async (ws, req) => {
         await agent.session.sendAndWait(sendOpts, 600_000);
         agent.status = 'idle';
       } catch (e: any) {
-        agent.status = 'idle';
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'error', message: e.message }));
+        const errMsg = e.message || '';
+        // Auto-revive: if session expired, create a fresh one and retry
+        if (errMsg.includes('Session not found') || errMsg.includes('session_expired')) {
+          ws.send(JSON.stringify({ type: 'system', message: '⏳ Session expired — creating fresh session…' }));
+          try {
+            const { createHeadlessAgent: createAgent } = await import('./services/headless.js');
+            agent = await createAgent(agentName);
+            if (agent) {
+              ws.send(JSON.stringify({ type: 'system', message: '✓ New session ready' }));
+              const sendOpts2: any = { prompt: msg.prompt };
+              await agent.session.sendAndWait(sendOpts2, 600_000);
+              agent.status = 'idle';
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'Failed to create fresh session' }));
+            }
+          } catch (retryErr: any) {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'error', message: retryErr.message }));
+            }
+          }
+        } else {
+          agent.status = 'idle';
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'error', message: e.message }));
+          }
         }
       }
     } catch (e: any) {
