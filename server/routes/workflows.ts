@@ -3,7 +3,7 @@ import {
   loadWorkflows, getWorkflows, getWorkflow, saveWorkflow, deleteWorkflow,
   executeWorkflow, getRuns, getRun, cancelRun, resolveGate, rerunFromStep,
   pauseRun, resumeRun, chatWithStepAgent, rerunSingleStep, getAliveAgents, cleanupAgentsNow,
-  promoteStepAgent,
+  promoteStepAgent, generateWebhookToken, resolveWebhookToken, disableWebhook,
   getStageFiles, getStageFile, saveStageFile, deleteStageFile,
   type WorkflowRun,
 } from '../services/workflows.js';
@@ -247,6 +247,37 @@ router.get('/:id/analytics', (_req, res) => {
       tokens: r.steps.reduce((s, step) => s + (step.tokens || 0), 0),
     })),
   });
+});
+
+// ─── Webhook Trigger ────────────────────────────────────────────────
+
+// Generate a webhook token for a workflow
+router.post('/:id/webhook', (req, res) => {
+  const def = getWorkflow(req.params.id);
+  if (!def) return res.status(404).json({ error: 'Workflow not found' });
+  const token = generateWebhookToken(req.params.id);
+  res.json({ token, url: `/api/workflows/webhook/${token}` });
+});
+
+// Disable webhook for a workflow
+router.delete('/:id/webhook', (req, res) => {
+  const def = getWorkflow(req.params.id);
+  if (!def) return res.status(404).json({ error: 'Workflow not found' });
+  disableWebhook(req.params.id);
+  res.json({ ok: true });
+});
+
+// Trigger workflow via webhook
+router.post('/webhook/:token', async (req, res) => {
+  const workflowId = resolveWebhookToken(req.params.token);
+  if (!workflowId) return res.status(404).json({ error: 'Invalid webhook token' });
+  const def = getWorkflow(workflowId);
+  if (!def) return res.status(404).json({ error: 'Workflow not found' });
+
+  const inputs = req.body.inputs || {};
+  executeWorkflow(workflowId, inputs)
+    .catch(e => console.error(`Webhook run of ${workflowId} failed:`, e.message));
+  res.json({ ok: true, workflowId, message: 'Workflow triggered via webhook' });
 });
 
 // ─── Stage Files ────────────────────────────────────────────────────

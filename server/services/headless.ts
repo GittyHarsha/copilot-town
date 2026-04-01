@@ -168,8 +168,10 @@ export async function createHeadlessAgent(
     sessionConfig.reasoningEffort = options.reasoningEffort;
   }
 
+  const t0 = Date.now();
   const session = await client.createSession(sessionConfig);
   const sessionId = (session as any).sessionId || `headless-${Date.now()}`;
+  console.log(`⚡ createSession for "${name}" took ${Date.now() - t0}ms (model: ${model})`);
 
   agent.session = session;
   agent.sessionId = sessionId;
@@ -292,12 +294,15 @@ export async function sendToHeadless(
     if (options?.attachments?.length) {
       sendOpts.attachments = options.attachments;
     }
+    const t0 = Date.now();
     const result = await Promise.race([
       a.session.sendAndWait(sendOpts),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Headless agent timed out')), timeoutMs)
       ),
     ]);
+    console.log(`⚡ sendAndWait to "${name}" took ${Date.now() - t0}ms`);
+
 
     const data = (result as any)?.data || {};
     a.status = 'idle';

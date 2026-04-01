@@ -383,6 +383,10 @@ export const api = {
     fetchJson<any>(`/workflows/${encodeURIComponent(id)}/analytics`),
   getArtifactUrl: (runId: string, stepId: string, name: string) =>
     `${API_BASE}/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/artifacts/${encodeURIComponent(name)}`,
+  generateWebhook: (id: string) =>
+    postJson<{ token: string; url: string }>(`/workflows/${encodeURIComponent(id)}/webhook`),
+  disableWebhook: (id: string) =>
+    deleteJson<{ ok: boolean }>(`/workflows/${encodeURIComponent(id)}/webhook`),
 
   // Stage files
   getStageFiles: () => fetchJson<string[]>('/workflows/stages/list'),

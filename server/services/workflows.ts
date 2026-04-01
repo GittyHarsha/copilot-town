@@ -4,6 +4,7 @@ import { join, basename, resolve, sep } from 'path';
 import { parse as parseYaml } from 'yaml';
 import { exec as execCb } from 'child_process';
 import { promisify } from 'util';
+import { randomBytes } from 'crypto';
 import { createHeadlessAgent, sendToHeadless, destroyHeadlessAgent } from './headless.js';
 import { pushEvent } from './events.js';
 
@@ -23,6 +24,10 @@ export interface WorkflowDef {
   icon?: string;
   inputs?: Record<string, { description?: string; required?: boolean; default?: string }>;
   steps: StepDef[];
+  // Scheduled triggers
+  schedule?: { cron: string; enabled?: boolean };
+  // Webhook trigger — auto-generated token
+  webhook?: { enabled?: boolean; token?: string };
 }
 
 export interface StepDef {
@@ -31,7 +36,7 @@ export interface StepDef {
   needs?: string[];
   type?: 'step' | 'gate' | 'http' | 'shell' | 'file-read' | 'file-write' | 'workflow' | 'foreach';
   agent?: { model?: string; systemPrompt?: string };
-  prompt: string;
+  prompt?: string;
   prompt_file?: string;     // reference a .md file in data/stages/ instead of inline prompt
   timeout?: number;
   // Session sharing: steps with the same `session` value share one agent (preserving conversation context).
@@ -172,6 +177,7 @@ export async function loadWorkflows(): Promise<WorkflowDef[]> {
       }
     }
   } catch {}
+  restoreWebhookTokens();
   return Array.from(workflows.values());
 }
 
@@ -378,12 +384,11 @@ async function resolvePrompt(stepDef: StepDef): Promise<string> {
       return await readFile(filePath, 'utf-8');
     } catch (e: any) {
       console.error(`Failed to load stage file "${stepDef.prompt_file}":`, e.message);
-      // Fall back to inline prompt if file fails
       if (stepDef.prompt) return stepDef.prompt;
       throw new Error(`Stage file "${stepDef.prompt_file}" not found and no inline prompt`);
     }
   }
-  return stepDef.prompt;
+  return stepDef.prompt || '';
 }
 
 // List available stage files
@@ -450,7 +455,8 @@ async function reviewOutput(
   const reviewerName = `reviewer-${Date.now().toString(36)}`;
   try {
     await createHeadlessAgent(reviewerName, {
-      model,
+      model: 'claude-haiku-4.5',
+      reasoningEffort: 'low',
       systemPrompt: 'You are a quality reviewer. Evaluate output against criteria. Respond with EXACTLY this JSON format and nothing else: {"pass": true/false, "feedback": "brief explanation"}',
     });
     const reviewPrompt = `Evaluate this output from step "${stepName}" (attempt ${attempt}):\n\n---OUTPUT---\n${output.slice(0, 4000)}\n---END---\n\nCriteria: ${criteria}\n\nRespond with JSON only: {"pass": true/false, "feedback": "..."}`;
@@ -512,7 +518,7 @@ async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void
   // ── Gate step: pause for human approval ──
   if (stepDef.type === 'gate') {
     stepResult.status = 'waiting';
-    stepResult.output = interpolate(stepDef.prompt, interpCtx);
+    stepResult.output = interpolate(stepDef.prompt || '', interpCtx);
     run.status = 'waiting';
     broadcast(run);
 
@@ -717,7 +723,7 @@ async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void
           run, def, inputs: loopInputs, stepResults, runAgents, sharedSessions, targetedAgents,
         };
         // Override the prompt with loop context
-        const origPrompt = bodyDef.prompt;
+        const origPrompt = bodyDef.prompt || '';
         bodyDef.prompt = interpolate(origPrompt, loopInterpCtx);
         await executeStep(bodyDef, bodyCtx);
 
@@ -753,7 +759,7 @@ async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void
     try {
       const rawPrompt = await resolvePrompt(stepDef);
       const prompt = interpolate(rawPrompt, interpCtx);
-      const model = stepDef.agent?.model || 'claude-sonnet-4';
+      const model = stepDef.agent?.model || 'claude-haiku-4.5';
       const timeout = (stepDef.timeout || 120) * 1000;
 
       let activeAgentName: string;
@@ -897,7 +903,7 @@ async function executeStep(stepDef: StepDef, ctx: StepExecContext): Promise<void
             const rawPrompt = await resolvePrompt(fallbackDef);
             const fbPrompt = interpolate(rawPrompt, interpCtx);
             await createHeadlessAgent(fbAgent, {
-              model: fallbackDef.agent?.model || 'claude-sonnet-4',
+              model: fallbackDef.agent?.model || 'claude-haiku-4.5',
               systemPrompt: fallbackDef.agent?.systemPrompt ||
                 'You are a fallback agent. The previous step failed. Complete the task with a simpler approach.',
               source: 'workflow',
@@ -1415,3 +1421,112 @@ function broadcast(run: WorkflowRun) {
 
 export function addRunListener(fn: RunListener) { runListeners.add(fn); }
 export function removeRunListener(fn: RunListener) { runListeners.delete(fn); }
+
+// ─── Cron Scheduler ─────────────────────────────────────────────────
+//
+// Simple cron-style scheduler. Checks every 60s which workflows have
+// a `schedule.cron` field and runs them when the cron matches.
+// Supports: "minute hour day month weekday" (standard 5-field cron).
+
+function cronMatches(cron: string, date: Date): boolean {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const fields = [
+    date.getMinutes(),     // 0-59
+    date.getHours(),       // 0-23
+    date.getDate(),        // 1-31
+    date.getMonth() + 1,   // 1-12
+    date.getDay(),         // 0-6 (Sun=0)
+  ];
+  for (let i = 0; i < 5; i++) {
+    if (!cronFieldMatches(parts[i], fields[i])) return false;
+  }
+  return true;
+}
+
+function cronFieldMatches(field: string, value: number): boolean {
+  if (field === '*') return true;
+  // Handle */N (every N)
+  if (field.startsWith('*/')) {
+    const n = parseInt(field.slice(2), 10);
+    return n > 0 && value % n === 0;
+  }
+  // Handle comma-separated values
+  const values = field.split(',');
+  for (const v of values) {
+    // Handle ranges (e.g., 1-5)
+    if (v.includes('-')) {
+      const [lo, hi] = v.split('-').map(Number);
+      if (value >= lo && value <= hi) return true;
+    } else {
+      if (parseInt(v, 10) === value) return true;
+    }
+  }
+  return false;
+}
+
+let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startScheduler(): void {
+  if (schedulerInterval) return;
+  schedulerInterval = setInterval(() => {
+    const now = new Date();
+    for (const def of workflows.values()) {
+      if (!def.schedule?.cron || def.schedule.enabled === false) continue;
+      if (cronMatches(def.schedule.cron, now)) {
+        pushEvent('workflow', `Cron triggered: ${def.id}`, 'info', def.id);
+        executeWorkflow(def.id, {}).catch(e => {
+          console.error(`Scheduled run of ${def.id} failed:`, e.message);
+        });
+      }
+    }
+  }, 60_000); // check every minute
+}
+
+export function stopScheduler(): void {
+  if (schedulerInterval) { clearInterval(schedulerInterval); schedulerInterval = null; }
+}
+
+// ─── Webhook Tokens ─────────────────────────────────────────────────
+
+const webhookTokens = new Map<string, string>(); // token → workflowId
+
+export function getWebhookTokens(): Map<string, string> { return webhookTokens; }
+
+export function generateWebhookToken(workflowId: string): string {
+  // Remove old token if exists
+  for (const [token, id] of webhookTokens) {
+    if (id === workflowId) { webhookTokens.delete(token); break; }
+  }
+  const token = randomBytes(24).toString('hex');
+  webhookTokens.set(token, workflowId);
+  // Store on the workflow def
+  const def = workflows.get(workflowId);
+  if (def) {
+    if (!def.webhook) def.webhook = { enabled: true };
+    def.webhook.token = token;
+    def.webhook.enabled = true;
+  }
+  return token;
+}
+
+export function resolveWebhookToken(token: string): string | undefined {
+  return webhookTokens.get(token);
+}
+
+export function disableWebhook(workflowId: string): void {
+  for (const [token, id] of webhookTokens) {
+    if (id === workflowId) { webhookTokens.delete(token); break; }
+  }
+  const def = workflows.get(workflowId);
+  if (def?.webhook) def.webhook.enabled = false;
+}
+
+// Restore webhook tokens from loaded workflow defs
+function restoreWebhookTokens(): void {
+  for (const def of workflows.values()) {
+    if (def.webhook?.token && def.webhook.enabled !== false) {
+      webhookTokens.set(def.webhook.token, def.id);
+    }
+  }
+}
