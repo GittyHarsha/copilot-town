@@ -71,7 +71,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
 
   const handleStop = async () => {
     setPendingAction('stopping');
-    try { await api.stopAgent(agent.id); setTimeout(() => onRefresh?.(), 2000); }
+    try { await api.stopAgent(agent.id); setTimeout(() => { setPendingAction(null); onRefresh?.(); }, 2000); }
     catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
@@ -80,7 +80,7 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
     setResumeError('');
     try {
       await api.resumeAgent(agent.id, undefined, undefined, undefined, cmdOverride);
-      setTimeout(() => onRefresh?.(), 2000);
+      setTimeout(() => { setPendingAction(null); onRefresh?.(); }, 2000);
     } catch (err: any) {
       setPendingAction(null);
       try {
@@ -94,13 +94,13 @@ function AgentCard({ agent, onRefresh, onViewHistory, onOpenChat, pinned, onTogg
 
   const handleMoveToPane = async () => {
     setPendingAction('movingToPane');
-    try { await api.moveToPaneAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+    try { await api.moveToPaneAgent(agent.name); setTimeout(() => { setPendingAction(null); onRefresh?.(); }, 3000); }
     catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
   const handleMoveToHeadless = async () => {
     setPendingAction('movingToHeadless');
-    try { await api.moveToHeadlessAgent(agent.name); setTimeout(() => onRefresh?.(), 3000); }
+    try { await api.moveToHeadlessAgent(agent.name); setTimeout(() => { setPendingAction(null); onRefresh?.(); }, 3000); }
     catch (e: any) { setPendingAction(null); setError(e?.message || 'Action failed'); setTimeout(() => setError(null), 3000); }
   };
 
