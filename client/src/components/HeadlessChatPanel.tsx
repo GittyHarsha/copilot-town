@@ -371,7 +371,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className={`h-full flex flex-col relative ${headerless ? 'bg-transparent' : 'bg-bg border-l border-border/50'}`} style={embedded ? undefined : { width: panelWidth }}>
+    <div className={`${embedded ? 'flex-1 min-h-0' : 'h-full'} flex flex-col relative ${headerless ? 'bg-transparent' : 'bg-bg border-l border-border/50'}`} style={embedded ? undefined : { width: panelWidth }}>
 
       {/* ── Resize handle ── */}
       {!embedded && (

@@ -221,7 +221,12 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
   const [filter, setFilter] = useState<'active' | 'all'>('all');
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const [fullscreenAgent, setFullscreenAgent] = useState<string | null>(null);
-  const [fullscreenTarget, setFullscreenTarget] = useState<HTMLDivElement | null>(null);
+  const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
+  const [, forceUpdate] = useState(0);
+  const setFullscreenTarget = useCallback((el: HTMLDivElement | null) => {
+    fullscreenTargetRef.current = el;
+    if (el) forceUpdate(n => n + 1);
+  }, []);
   const [relayTarget, setRelayTarget] = useState<string | null>(null);
   const [relayTo, setRelayTo] = useState('');
   const [relayInput, setRelayInput] = useState('');
@@ -416,8 +421,8 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
                 }}
                 onClick={() => setFocusedIndex(i)}
               >
-                {isFullscreen && fullscreenTarget
-                  ? createPortal(miniChat, fullscreenTarget)
+                {isFullscreen && fullscreenTargetRef.current
+                  ? createPortal(miniChat, fullscreenTargetRef.current)
                   : miniChat}
               </div>
             );
