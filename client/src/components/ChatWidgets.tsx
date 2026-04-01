@@ -2,7 +2,7 @@
  * Shared chat widget components extracted from HeadlessChatPanel.
  * Used by HeadlessChatPanel (full panel) and Sessions page (rich view).
  */
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatDuration } from './ChatMarkdown';
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -30,15 +30,29 @@ export interface UsageInfo {
    Components
    ═══════════════════════════════════════════════════════════════════ */
 
-/** Thinking block — sleek animated accordion */
+/** Thinking block — sleek animated accordion, auto-expands while streaming */
 export function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string; isStreaming: boolean; hasResponse: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+  const [manualToggle, setManualToggle] = useState<boolean | null>(null);
+  const wasStreaming = useRef(false);
+
+  // Auto-expand while reasoning is actively streaming (no response yet).
+  // Once response arrives, auto-collapse — unless user manually toggled.
+  const autoExpanded = isStreaming && !hasResponse;
+  useEffect(() => {
+    if (autoExpanded) wasStreaming.current = true;
+    if (wasStreaming.current && !autoExpanded && manualToggle === null) {
+      // streaming just ended — auto-collapse
+      wasStreaming.current = false;
+    }
+  }, [autoExpanded, manualToggle]);
+
+  const expanded = manualToggle !== null ? manualToggle : autoExpanded;
   const charCount = text.length;
 
   return (
     <div className="mb-2">
       <button
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setManualToggle(prev => prev !== null ? !prev : !expanded)}
         className="flex items-center gap-2 w-full text-left group/think"
       >
         <div className="flex items-center gap-1.5 text-[11px]">
@@ -61,21 +75,32 @@ export function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string
           {charCount > 100 && `${(charCount / 1000).toFixed(1)}k chars`}
         </span>
       </button>
-      <div className={`overflow-hidden transition-all duration-300 ease-out ${expanded ? 'max-h-[400px] opacity-100 mt-1.5' : 'max-h-0 opacity-0'}`}>
-        <div className="text-[11px] text-fg-2/55 bg-violet-500/[0.03] rounded-lg p-3 border border-violet-500/[0.06] whitespace-pre-wrap font-mono leading-relaxed overflow-y-auto max-h-[380px]">
+      <div className={`overflow-hidden transition-all duration-300 ease-out ${expanded ? 'max-h-[500px] opacity-100 mt-1.5' : 'max-h-0 opacity-0'}`}>
+        <div className="text-[11px] text-fg-2/55 bg-violet-500/[0.03] rounded-lg p-3 border border-violet-500/[0.06] whitespace-pre-wrap font-mono leading-relaxed overflow-y-auto max-h-[480px]">
           {text}
+          {isStreaming && !hasResponse && (
+            <span className="inline-block w-[2px] h-3 bg-violet-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/** Inline expandable tool call card */
+/** Inline expandable tool call card with live timer */
 export function InlineToolCall({ tool }: { tool: ToolCall }) {
   const [expanded, setExpanded] = useState(false);
-  const now = Date.now();
-  const elapsed = (tool.endTimestamp || now) - tool.timestamp;
+  const [now, setNow] = useState(Date.now());
   const hasDetails = !!(tool.input || tool.output);
+
+  // Tick timer every 500ms while tool is running
+  useEffect(() => {
+    if (tool.status !== 'running') return;
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [tool.status]);
+
+  const elapsed = (tool.endTimestamp || (tool.status === 'running' ? now : Date.now())) - tool.timestamp;
 
   return (
     <div

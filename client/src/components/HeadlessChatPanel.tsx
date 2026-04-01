@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { api } from '../lib/api';
-import { MarkdownContent, CopyButton, copyToClipboard, relativeTime, formatDuration } from './ChatMarkdown';
+import { MarkdownContent, relativeTime } from './ChatMarkdown';
 import { ThinkingBlock, InlineToolCall, ToolTimeline, type ToolCall, type UsageInfo } from './ChatWidgets';
 
 interface ChatMessage {
@@ -22,6 +22,8 @@ interface Props {
   agentName: string;
   onClose: () => void;
   onResize?: (width: number) => void;
+  /** When true, panel fills parent width (no resize handle, no fixed width) */
+  embedded?: boolean;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -66,7 +68,7 @@ function EmptyState({ onSend }: { onSend: (text: string) => void }) {
    Main Component
    ═══════════════════════════════════════════════════════════════════ */
 
-export default function HeadlessChatPanel({ agentName, onClose, onResize }: Props) {
+export default function HeadlessChatPanel({ agentName, onClose, onResize, embedded }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -75,7 +77,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
   const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
   const [agentMode, setAgentMode] = useState<string>('plan');
   const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
-  const [hoveredMsg, setHoveredMsg] = useState<string | null>(null);
+  // hoveredMsg removed — no more flickery hover actions
   /* ── Search state ── */
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -304,7 +306,32 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        const sid = activeStreamId.current;
+        let sid = activeStreamId.current;
+
+        // Auto-create a placeholder when agent starts a turn (e.g. from relay/external trigger)
+        if (msg.type === 'turn_start' && !sid) {
+          const agentId = `agent-${msgCounter.current++}`;
+          activeStreamId.current = agentId;
+          sid = agentId;
+          streamBuf.current = '';
+          thinkBuf.current = '';
+          toolsBuf.current = [];
+          setSending(true);
+          setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+          return;
+        }
+
+        // If we get streaming data with no active placeholder, create one on-the-fly
+        if (!sid && (msg.type === 'message_delta' || msg.type === 'streaming_delta' || msg.type === 'reasoning_delta' || msg.type === 'tool_start')) {
+          const agentId = `agent-${msgCounter.current++}`;
+          activeStreamId.current = agentId;
+          sid = agentId;
+          streamBuf.current = '';
+          thinkBuf.current = '';
+          toolsBuf.current = [];
+          setSending(true);
+          setMessages(prev => [...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]);
+        }
 
         if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
           streamBuf.current += msg.content || msg.deltaContent || '';
@@ -569,14 +596,16 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
      ═══════════════════════════════════════════════════════════════════ */
 
   return (
-    <div className="h-full bg-bg border-l border-border/50 flex flex-col relative" style={{ width: panelWidth }}>
+    <div className="h-full bg-bg border-l border-border/50 flex flex-col relative" style={embedded ? undefined : { width: panelWidth }}>
 
       {/* ── Resize handle ── */}
+      {!embedded && (
       <div
         className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-500/30 active:bg-blue-500/40 z-10"
         style={{ transition: 'all var(--duration-medium) var(--ease-standard)' }}
         onMouseDown={startDrag}
       />
+      )}
 
       {/* ── Header ── */}
         <div className="flex-shrink-0 border-b border-border/40">
@@ -704,7 +733,6 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
           ) : (
             <div className="px-5 py-4 space-y-4">
               {visibleMessages.map(m => {
-                const isHovered = hoveredMsg === m.id;
                 const isDimmed = searchOpen && searchQuery && !searchMatches.includes(m.id);
                 const isBookmarked = bookmarks.has(m.id);
                 const isCurrentMatch = searchOpen && searchQuery && searchMatches[searchIndex] === m.id;
@@ -723,9 +751,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                 /* ── User message ── */
                 if (m.role === 'user') {
                   return (
-                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
-                      onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
-                      <div className={`max-w-[85%] relative group/user ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
+                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}>
+                      <div className={`max-w-[85%] relative ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
                         {/* Relay sender */}
                         {m.from && m.from !== 'you' && (
                           <div className="text-[10px] text-fg-2/40 mb-1 text-right">
@@ -743,21 +770,23 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                         <div className="px-4 py-2.5 bg-blue-500/[0.15] text-fg text-[13px] leading-relaxed border border-blue-500/[0.2] whitespace-pre-wrap break-words" style={{ borderRadius: '18px 18px 4px 18px' }}>
                           {renderHighlightedText(m.text)}
                         </div>
-                        {/* Hover actions + timestamp */}
-                        <div className={`flex items-center justify-end gap-2 mt-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`} style={{ transitionDuration: 'var(--duration-short)' }}>
-                          <span className="text-[10px] text-fg-2/25 tabular-nums">{relativeTime(m.timestamp)}</span>
-                          <CopyButton text={m.text} />
-                          <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
+                        <div className="flex items-center justify-end gap-2 mt-0.5">
+                          <span className="text-[10px] text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                         </div>
                       </div>
                     </div>
                   );
                 }
 
-                /* ── Agent message (full-width) ── */
+                /* ── Agent message ── */
                 return (
-                  <div key={m.id} id={`msg-${m.id}`} className={`animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-3' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}
-                    onMouseEnter={() => setHoveredMsg(m.id)} onMouseLeave={() => setHoveredMsg(null)}>
+                  <div key={m.id} id={`msg-${m.id}`} className={`flex gap-2.5 animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-2' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}>
+                    {/* Agent avatar */}
+                    <div className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px]"
+                      style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
+                      ⚡
+                    </div>
+                    <div className="flex-1 min-w-0">
                     <div style={{
                       background: 'var(--color-bg-2)',
                       borderRadius: '4px 18px 18px 18px',
@@ -805,20 +834,17 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize }: Prop
                       </div>
                     )}
 
-                    {/* Footer: usage/tokens + actions */}
-                    {!m.streaming && (m.tokens || m.usage || isHovered) && (
+                    {/* Footer: usage/tokens — show live during streaming too */}
+                    {(m.tokens || m.usage) && (
                       <div className="flex items-center gap-3 mt-1.5 text-[10px]">
                         {m.usage?.model && <span className="text-fg-2/25">{m.usage.model}</span>}
-                        {m.tokens && <span className="text-fg-2/20 tabular-nums">{m.tokens.toLocaleString()} out</span>}
+                        {m.tokens && <span className={`tabular-nums ${m.streaming ? 'text-blue-400/40' : 'text-fg-2/20'}`}>{m.tokens.toLocaleString()} out{m.streaming && '…'}</span>}
                         {m.usage?.inputTokens && <span className="text-fg-2/20 tabular-nums">{m.usage.inputTokens.toLocaleString()} in</span>}
-                        {m.usage?.duration && <span className="text-fg-2/20 tabular-nums">{(m.usage.duration / 1000).toFixed(1)}s</span>}
-                        <div className={`ml-auto flex items-center gap-1.5 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`} style={{ transitionDuration: 'var(--duration-short)' }}>
-                          <span className="text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
-                          <CopyButton text={m.text} />
-                          <button onClick={() => toggleBookmark(m.id)} aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark message'} className={`text-[11px] transition-all ${isBookmarked ? 'opacity-100' : 'opacity-50 hover:opacity-80'}`} title="Bookmark">🔖</button>
-                        </div>
+                        {m.usage?.duration && !m.streaming && <span className="text-fg-2/20 tabular-nums">{(m.usage.duration / 1000).toFixed(1)}s</span>}
+                        <span className="ml-auto text-fg-2/20 tabular-nums">{relativeTime(m.timestamp)}</span>
                       </div>
                     )}
+                    </div>
                     </div>
                   </div>
                 );
