@@ -406,7 +406,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
   const effectiveCols = Math.min(cols, Math.max(filtered.length, 1));
 
   return (
-    <div className="flex flex-col flex-1 min-h-0" style={{ height: 'calc(100vh - 120px)' }}>
+    <div className="flex flex-col flex-1 min-h-0 -mx-4 md:-mx-8 -mt-6 md:-mt-8 -mb-6 md:-mb-8 px-4 md:px-8 pt-6 md:pt-8" style={{ height: 'calc(100vh - 57px)' }}>
       {/* ── Header ── */}
       <div className="flex items-center gap-3 mb-3 flex-shrink-0">
         <h2 className="text-sm font-semibold flex items-center gap-2">

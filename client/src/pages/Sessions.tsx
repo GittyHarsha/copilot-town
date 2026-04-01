@@ -445,7 +445,7 @@ export default function Sessions({ agents = [] }: Props) {
   };
 
   return (
-    <div className="flex gap-4 h-[calc(100vh-5.5rem)]">
+    <div className="flex gap-4 -mx-4 md:-mx-8 -mt-6 md:-mt-8 -mb-6 md:-mb-8 px-4 md:px-8 pt-6 md:pt-8" style={{ height: 'calc(100vh - 57px)' }}>
       {/* Left panel — agent/session list */}
       <div className="w-[320px] shrink-0 flex flex-col pr-3" style={{ borderRight: '1px solid var(--color-border)' }}>
         <div className="mb-3">

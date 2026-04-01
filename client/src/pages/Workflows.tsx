@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../lib/api';
 import { MarkdownContent } from '../components/ChatMarkdown';
+import { ThinkingBlock, ToolTimeline, type ToolCall, type UsageInfo } from '../components/ChatWidgets';
+import HeadlessChatPanel from '../components/HeadlessChatPanel';
 import ConfirmDialog from '../components/ConfirmDialog';
 import WorkflowDAG from '../components/WorkflowDAG';
 
@@ -12,9 +14,16 @@ interface StepDefReview {
 }
 
 interface WorkflowStepDef {
-  id: string; name?: string; needs?: string[]; prompt: string;
+  id: string; name?: string; needs?: string[]; prompt?: string;
+  type?: string;
   agent?: { model?: string };
   review?: StepDefReview;
+  http?: { url: string; method?: string };
+  shell?: { command: string };
+  file_read?: { path: string };
+  file_write?: { path: string; content: string };
+  workflow?: { id: string };
+  foreach?: { items: string; as?: string; step: any };
 }
 
 interface WorkflowDef {
@@ -22,6 +31,14 @@ interface WorkflowDef {
   inputs?: Record<string, { description?: string; required?: boolean; default?: string }>;
   steps: WorkflowStepDef[];
   yaml?: string;
+  schedule?: { cron: string; enabled?: boolean };
+  webhook?: { enabled?: boolean; token?: string };
+}
+
+interface Artifact {
+  name: string;
+  path: string;
+  size: number;
 }
 
 interface Iteration {
@@ -34,6 +51,8 @@ interface StepResult {
   error?: string; startedAt?: string; finishedAt?: string; tokens?: number; agentName?: string;
   iteration?: number; iterations?: Iteration[];
   review?: { criteria: string; max_iterations?: number };
+  artifacts?: Artifact[];
+  outputs?: Record<string, any>;
 }
 
 interface WorkflowRun {
@@ -42,10 +61,6 @@ interface WorkflowRun {
   startedAt: string; finishedAt?: string; error?: string;
 }
 
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  text: string;
-}
 
 /* ─── 2. Helpers ────────────────────────────────────────────────── */
 
@@ -80,6 +95,33 @@ const DURATION_BAR_COLORS: Record<string, string> = {
   reviewing: '#a855f7', waiting: '#f59e0b', rewinding: '#fbbf24',
   paused: '#eab308',
 };
+
+const STEP_TYPE_BADGES: Record<string, { icon: string; label: string; color: string }> = {
+  http: { icon: '🌐', label: 'HTTP', color: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20' },
+  shell: { icon: '⚙️', label: 'Shell', color: 'bg-orange-500/15 text-orange-400 border-orange-500/20' },
+  'file-read': { icon: '📖', label: 'Read', color: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/20' },
+  'file-write': { icon: '✏️', label: 'Write', color: 'bg-pink-500/15 text-pink-400 border-pink-500/20' },
+  workflow: { icon: '🔗', label: 'Sub', color: 'bg-violet-500/15 text-violet-400 border-violet-500/20' },
+  foreach: { icon: '🔄', label: 'Loop', color: 'bg-teal-500/15 text-teal-400 border-teal-500/20' },
+  gate: { icon: '🚪', label: 'Gate', color: 'bg-amber-500/15 text-amber-400 border-amber-500/20' },
+};
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Module-level cache for LiveStream state — survives component unmount/remount (tab switches) */
+interface StreamCache {
+  text: string;
+  thinking: string;
+  tools: ToolCall[];
+  intent: string | null;
+  usage: UsageInfo | null;
+  streaming: boolean;
+}
+const streamCache = new Map<string, StreamCache>();
 
 /* ─── 3. Main Workflows Component ───────────────────────────────── */
 
@@ -365,7 +407,7 @@ export default function Workflows() {
 
   // ─── Render ────────────────────────────────────────────────────
   return (
-    <div className="flex h-full bg-bg text-fg">
+    <div className="flex bg-bg text-fg -mx-4 md:-mx-8 -mt-6 md:-mt-8 -mb-6 md:-mb-8" style={{ height: 'calc(100vh - 57px)' }}>
       {/* Left: Sidebar */}
       <div className="w-80 border-r border-border flex flex-col">
         {/* Header */}
@@ -621,6 +663,11 @@ export default function Workflows() {
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium flex items-center gap-2">
                             {step.name || step.id}
+                            {step.type && step.type !== 'step' && STEP_TYPE_BADGES[step.type] && (
+                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] border ${STEP_TYPE_BADGES[step.type].color}`}>
+                                {STEP_TYPE_BADGES[step.type].icon} {STEP_TYPE_BADGES[step.type].label}
+                              </span>
+                            )}
                             {step.review?.criteria && (
                               <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
                                 ✓ criteria
@@ -699,6 +746,23 @@ export default function Workflows() {
                 </div>
               )}
             </div>
+
+            {/* Schedule & Webhook Config */}
+            <div className="mb-6 flex gap-3">
+              {selectedWf.schedule?.cron && (
+                <div className="flex-1 bg-bg-1 border border-border p-3 rounded-lg">
+                  <div className="text-xs font-medium text-fg-2 uppercase tracking-wider mb-1">⏰ Schedule</div>
+                  <div className="text-sm font-mono text-fg-1">{selectedWf.schedule.cron}</div>
+                  <div className="text-[10px] text-fg-2 mt-1">
+                    {selectedWf.schedule.enabled !== false ? '🟢 Active' : '⚪ Disabled'}
+                  </div>
+                </div>
+              )}
+              <WebhookConfig workflowId={selectedWf.id} webhook={selectedWf.webhook} />
+            </div>
+
+            {/* Analytics */}
+            <AnalyticsPanel workflowId={selectedWf.id} />
 
             {/* Input form */}
             {selectedWf.inputs && Object.keys(selectedWf.inputs).length > 0 && (
@@ -946,7 +1010,7 @@ name: Display Name       # optional
 needs: [step-a, step-b]  # DAG dependencies
 prompt: "..."            # agent prompt
 prompt_file: stage.md    # load from data/stages/
-type: step | gate        # gate = human approval
+type: step | gate | http | shell | file-read | file-write | workflow | foreach
 timeout: 120             # seconds
 session: shared-name     # share agent across steps
 target: existing-agent   # run on a pre-existing agent
@@ -962,6 +1026,51 @@ continue_on_fail: true   # don't fail workflow
 review:
   criteria: "..."        # auto-review criteria
   max_iterations: 3`}</pre>
+          </div>
+          <div>
+            <div className="text-fg-1 font-semibold mb-1">Tool Step Types</div>
+            <pre className="text-fg-2 whitespace-pre">{`# HTTP request
+type: http
+http:
+  url: "https://api.example.com/data"
+  method: GET              # GET, POST, PUT, DELETE
+  headers:
+    Authorization: "Bearer ..."
+  body: '{"key": "value"}'
+
+# Shell command
+type: shell
+shell:
+  command: "ls -la"
+  cwd: "/tmp"              # optional working directory
+
+# Read file contents
+type: file-read
+file_read:
+  path: "path/to/file.txt"
+
+# Write file (creates artifact)
+type: file-write
+file_write:
+  path: "report.txt"
+  content: "\${{ steps.X.output }}"
+
+# Sub-workflow
+type: workflow
+workflow:
+  id: other-workflow-id
+  inputs:
+    param: "\${{ steps.X.output }}"
+
+# Foreach loop
+type: foreach
+foreach:
+  items: "\${{ steps.X.outputs.list }}"
+  as: item                 # loop variable name
+  max_items: 50
+  step:
+    id: process-item
+    prompt: "Process \${{ inputs.item }}"`}</pre>
           </div>
           <div>
             <div className="text-fg-1 font-semibold mb-1">Variables</div>
@@ -1003,6 +1112,14 @@ function RunMonitor({
   const [rewindStep, setRewindStep] = useState<string | null>(null);
   const runFinished = run.status === 'complete' || run.status === 'failed';
   const isActive = run.status === 'running' || run.status === 'waiting' || run.status === 'paused';
+
+  // Auto-expand the currently running step so the user always sees activity
+  const activeStepId = run.steps.find(s => s.status === 'running' || s.status === 'reviewing')?.id;
+  useEffect(() => {
+    if (activeStepId && expandedStep !== activeStepId) {
+      setExpandedStep(activeStepId);
+    }
+  }, [activeStepId]);
 
   return (
     <div className="p-6 max-w-4xl">
@@ -1106,6 +1223,8 @@ function RunMonitor({
         {run.steps.map((step, i) => {
           const isActive = step.status === 'running' || step.status === 'reviewing';
           const isRewinding = step.status === 'rewinding';
+          const defStep = workflowDef?.steps.find(s => s.id === step.id);
+          const stepType = defStep?.type;
           return (
             <div
               key={step.id}
@@ -1128,6 +1247,11 @@ function RunMonitor({
                   <div className="text-sm font-medium" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span className="text-fg-2 mr-1">#{i + 1}</span>
                     {step.name || step.id}
+                    {stepType && stepType !== 'step' && STEP_TYPE_BADGES[stepType] && (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] border ${STEP_TYPE_BADGES[stepType].color}`}>
+                        {STEP_TYPE_BADGES[stepType].icon} {STEP_TYPE_BADGES[stepType].label}
+                      </span>
+                    )}
                     {(step.iteration || 0) > 1 && (
                       <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30">
                         attempt {step.iteration}/{(step.iterations?.length || step.iteration || 1)}
@@ -1230,15 +1354,51 @@ function RunMonitor({
 
                   {/* Current/final output */}
                   {step.output && step.status !== 'waiting' ? (
-                    <pre className="text-sm text-fg-1 whitespace-pre-wrap font-mono leading-relaxed max-h-96 overflow-y-auto">
-                      {step.output}
-                    </pre>
+                    <div className="text-sm text-fg-1 leading-relaxed max-h-96 overflow-y-auto">
+                      <MarkdownContent content={step.output} />
+                    </div>
                   ) : step.status === 'running' ? (
-                    <div className="text-sm text-fg-2 animate-pulse">Processing...</div>
+                    null /* LiveStream below handles the running state */
                   ) : step.status === 'reviewing' ? (
                     <div className="text-sm text-purple-400 animate-pulse">🔍 Reviewing output against criteria...</div>
                   ) : step.status !== 'waiting' && (
                     <div className="text-sm text-fg-2">No output</div>
+                  )}
+
+                  {/* Parsed outputs */}
+                  {step.outputs && Object.keys(step.outputs).length > 0 && (
+                    <details className="mt-2">
+                      <summary className="text-[10px] text-fg-2 cursor-pointer hover:text-fg-1 uppercase tracking-wider">
+                        📊 Parsed Outputs ({Object.keys(step.outputs).length} fields)
+                      </summary>
+                      <pre className="text-xs text-fg-2 font-mono mt-1 bg-bg-2/50 p-2 rounded max-h-32 overflow-y-auto">
+                        {JSON.stringify(step.outputs, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+
+                  {/* Artifacts */}
+                  {step.artifacts && step.artifacts.length > 0 && (
+                    <div className="mt-3 bg-bg-2/50 border border-border rounded-lg p-3">
+                      <div className="text-xs font-medium text-fg-2 mb-2 uppercase tracking-wider flex items-center gap-1.5">
+                        📎 Artifacts ({step.artifacts.length})
+                      </div>
+                      <div className="space-y-1">
+                        {step.artifacts.map((art: Artifact) => (
+                          <a
+                            key={art.name}
+                            href={api.getArtifactUrl(run.runId, step.id, art.name)}
+                            download={art.name}
+                            className="flex items-center gap-2 px-2 py-1.5 bg-bg-1 border border-border rounded hover:border-border-1 transition-colors group"
+                          >
+                            <span className="text-sm">📄</span>
+                            <span className="text-xs text-fg-1 flex-1 truncate font-mono">{art.name}</span>
+                            <span className="text-[10px] text-fg-2">{formatBytes(art.size)}</span>
+                            <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">⬇ Download</span>
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   )}
 
                   {/* Success Criteria */}
@@ -1309,7 +1469,7 @@ function RunMonitor({
 
                   {/* Rewind button — only on complete/failed steps when run is finished */}
                   {runFinished && (step.status === 'complete' || step.status === 'failed') && (
-                    <div className="mt-3">
+                    <div className="mt-3 flex items-center gap-2">
                       {rewindStep === step.id ? (
                         <RewindPanel
                           runId={run.runId}
@@ -1317,13 +1477,18 @@ function RunMonitor({
                           onClose={() => setRewindStep(null)}
                         />
                       ) : (
-                        <button
-                          onClick={() => setRewindStep(step.id)}
-                          className="px-3 py-1.5 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-colors"
-                          style={{ borderRadius: 'var(--shape-full)' }}
-                        >
-                          ↩ Rewind
-                        </button>
+                        <>
+                          <button
+                            onClick={() => setRewindStep(step.id)}
+                            className="px-3 py-1.5 text-xs bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-colors"
+                            style={{ borderRadius: 'var(--shape-full)' }}
+                          >
+                            ↩ Rewind
+                          </button>
+                          {step.agentName && (
+                            <PromoteButton runId={run.runId} stepId={step.id} agentName={step.agentName} />
+                          )}
+                        </>
                       )}
                     </div>
                   )}
@@ -1384,10 +1549,24 @@ function RunMonitor({
 /* ─── 6. LiveStream Component ───────────────────────────────────── */
 
 function LiveStream({ agentName, isActive }: { agentName: string; isActive: boolean }) {
-  const [text, setText] = useState('');
+  // Restore from cache on mount (survives tab switches)
+  const cached = streamCache.get(agentName);
+  const [text, setText] = useState(cached?.text || '');
+  const [thinking, setThinking] = useState(cached?.thinking || '');
+  const [tools, setTools] = useState<ToolCall[]>(cached?.tools || []);
+  const [intent, setIntent] = useState<string | null>(cached?.intent || null);
+  const [usage, setUsage] = useState<UsageInfo | null>(cached?.usage || null);
+  const [streaming, setStreaming] = useState(cached?.streaming || false);
   const wsRef = useRef<WebSocket | null>(null);
-  const textRef = useRef('');
+  const textRef = useRef(cached?.text || '');
+  const thinkRef = useRef(cached?.thinking || '');
+  const toolsRef = useRef<ToolCall[]>(cached?.tools || []);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Persist to cache whenever state changes
+  useEffect(() => {
+    streamCache.set(agentName, { text, thinking, tools, intent, usage, streaming });
+  }, [agentName, text, thinking, tools, intent, usage, streaming]);
 
   useEffect(() => {
     if (!isActive || !agentName) return;
@@ -1395,20 +1574,51 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${location.host}/ws/headless?agent=${encodeURIComponent(agentName)}`);
     wsRef.current = ws;
-    textRef.current = '';
-    setText('');
+    // Don't reset state — keep cached data, append new events
 
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
-          const delta = msg.delta || msg.text || '';
-          textRef.current += delta;
+          textRef.current += msg.content || msg.deltaContent || msg.delta || msg.text || '';
           setText(textRef.current);
-        } else if (msg.type === 'response') {
-          const full = msg.text || msg.response || '';
-          textRef.current = full;
-          setText(full);
+          setStreaming(true);
+        } else if (msg.type === 'reasoning_delta') {
+          thinkRef.current += msg.content || msg.deltaContent || '';
+          setThinking(thinkRef.current);
+          setStreaming(true);
+        } else if (msg.type === 'tool_start') {
+          const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
+          toolsRef.current = [...toolsRef.current, { tool: msg.tool, status: 'running', timestamp: Date.now(), input }];
+          setTools([...toolsRef.current]);
+          setStreaming(true);
+        } else if (msg.type === 'tool_complete') {
+          const output = (msg.output || msg.result) ? (typeof (msg.output || msg.result) === 'string' ? (msg.output || msg.result) : JSON.stringify(msg.output || msg.result)) : undefined;
+          toolsRef.current = toolsRef.current.map(t =>
+            t.tool === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output } : t
+          );
+          setTools([...toolsRef.current]);
+        } else if (msg.type === 'intent') {
+          setIntent(msg.intent || null);
+        } else if (msg.type === 'usage') {
+          setUsage({ model: msg.model, inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, cost: msg.cost, duration: msg.duration });
+        } else if (msg.type === 'subagent_start') {
+          toolsRef.current = [...toolsRef.current, { tool: `🤖 ${msg.name || 'subagent'}`, status: 'running', timestamp: Date.now() }];
+          setTools([...toolsRef.current]);
+        } else if (msg.type === 'subagent_complete') {
+          toolsRef.current = toolsRef.current.map(t =>
+            t.tool === `🤖 ${msg.name}` && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now() } : t
+          );
+          setTools([...toolsRef.current]);
+        } else if (msg.type === 'response' || msg.type === 'turn_end') {
+          if (msg.type === 'response') {
+            textRef.current = msg.content || msg.text || msg.response || textRef.current;
+            setText(textRef.current);
+            if (msg.thinking) { thinkRef.current = msg.thinking; setThinking(msg.thinking); }
+          }
+          toolsRef.current = toolsRef.current.map(t => t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: t.endTimestamp || Date.now() } : t);
+          setTools([...toolsRef.current]);
+          setStreaming(false);
         }
       } catch {}
     };
@@ -1424,24 +1634,68 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight;
     }
-  }, [text]);
+  }, [text, thinking, tools]);
 
-  if (!text) return null;
+  const hasContent = text || thinking || tools.length > 0;
 
   return (
     <div className="mt-3">
-      <div className="flex items-center gap-2 mb-1">
+      {/* Header with live indicator + intent */}
+      <div className="flex items-center gap-2 mb-1.5">
         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
         <span className="text-xs text-emerald-400 font-medium">● Live</span>
         <span className="text-[10px] text-fg-2">{agentName}</span>
+        {intent && (
+          <span className="text-[10px] text-blue-400/60 truncate max-w-[200px] flex items-center gap-1 ml-auto">
+            <span className="w-1 h-1 rounded-full bg-blue-400/50 animate-pulse flex-shrink-0" />
+            {intent}
+          </span>
+        )}
       </div>
+
       <div
         ref={containerRef}
-        className="bg-bg border border-border rounded-lg p-3 max-h-64 overflow-y-auto"
+        className="bg-bg border border-border rounded-lg p-3 max-h-80 overflow-y-auto space-y-2"
       >
-        <pre className="text-xs text-fg-1 whitespace-pre-wrap font-mono leading-relaxed">
-          {text}
-        </pre>
+        {/* Thinking block */}
+        {thinking && (
+          <ThinkingBlock text={thinking} isStreaming={streaming} hasResponse={!!text} />
+        )}
+
+        {/* Tool timeline */}
+        {tools.length > 0 && <ToolTimeline tools={tools} />}
+
+        {/* Response text */}
+        {text && (
+          <div className="text-[13px] leading-relaxed text-fg/90">
+            <MarkdownContent content={text} />
+            {streaming && (
+              <span className="inline-block w-[2px] h-4 bg-blue-400/60 ml-0.5 animate-pulse rounded-full align-text-bottom" />
+            )}
+          </div>
+        )}
+
+        {/* Waiting indicator — shows during connect and before content arrives */}
+        {!hasContent && (
+          <div className="flex items-center gap-2 py-2">
+            <div className="flex gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            <span className="text-[11px] text-fg-2/40">Agent working…</span>
+          </div>
+        )}
+
+        {/* Usage footer */}
+        {usage && !streaming && (
+          <div className="flex items-center gap-3 pt-1.5 text-[10px] border-t border-border/30">
+            {usage.model && <span className="text-fg-2/30">{usage.model}</span>}
+            {usage.outputTokens && <span className="text-fg-2/25 tabular-nums">{usage.outputTokens.toLocaleString()} out</span>}
+            {usage.inputTokens && <span className="text-fg-2/25 tabular-nums">{usage.inputTokens.toLocaleString()} in</span>}
+            {usage.duration && <span className="text-fg-2/25 tabular-nums">{(usage.duration / 1000).toFixed(1)}s</span>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1450,110 +1704,9 @@ function LiveStream({ agentName, isActive }: { agentName: string; isActive: bool
 /* ─── 7. SteerPanel Component ───────────────────────────────────── */
 
 function SteerPanel({ agentName, onClose }: { agentName: string; onClose: () => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState('');
-  const wsRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef('');
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Connect WebSocket
-  useEffect(() => {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${location.host}/ws/headless?agent=${encodeURIComponent(agentName)}`);
-    wsRef.current = ws;
-
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
-          const delta = msg.delta || msg.text || '';
-          streamRef.current += delta;
-          setStreaming(streamRef.current);
-        } else if (msg.type === 'response') {
-          const full = msg.text || msg.response || streamRef.current;
-          if (full) {
-            setMessages(prev => [...prev, { role: 'assistant', text: full }]);
-          }
-          streamRef.current = '';
-          setStreaming('');
-        }
-      } catch {}
-    };
-
-    return () => {
-      ws.close();
-      wsRef.current = null;
-    };
-  }, [agentName]);
-
-  // Auto-scroll
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streaming]);
-
-  const send = () => {
-    const text = input.trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    setMessages(prev => [...prev, { role: 'user', text }]);
-    wsRef.current.send(JSON.stringify({ prompt: text }));
-    streamRef.current = '';
-    setStreaming('');
-    setInput('');
-  };
-
   return (
-    <div className="bg-bg border border-border-1 rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-bg-1 border-b border-border">
-        <span className="text-xs font-medium text-fg-1 flex items-center gap-1.5">
-          🔗 Connected to {agentName}
-        </span>
-        <button
-          onClick={onClose}
-          className="text-fg-2 hover:text-fg-1 text-xs transition-colors"
-        >
-          ✕
-        </button>
-      </div>
-
-      {/* Messages */}
-      <div className="max-h-48 overflow-y-auto px-3 py-2 space-y-2">
-        {messages.map((msg, i) => (
-          <div key={i} className={`text-xs ${msg.role === 'user' ? 'text-blue-300' : 'text-fg-1'}`}>
-            <span className="font-medium text-[10px] uppercase text-fg-2 mr-1">
-              {msg.role === 'user' ? 'you' : 'agent'}:
-            </span>
-            <span className="whitespace-pre-wrap font-mono">{msg.text}</span>
-          </div>
-        ))}
-        {streaming && (
-          <div className="text-xs text-fg-1">
-            <span className="font-medium text-[10px] uppercase text-fg-2 mr-1">agent:</span>
-            <span className="whitespace-pre-wrap font-mono">{streaming}</span>
-            <span className="animate-pulse">▊</span>
-          </div>
-        )}
-        <div ref={chatEndRef} />
-      </div>
-
-      {/* Input */}
-      <div className="flex items-center gap-2 px-3 py-2 border-t border-border">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-          placeholder="Send a message..."
-          className="flex-1 bg-bg-1 border border-border-1 rounded px-2 py-1.5 text-xs text-fg font-mono focus:outline-none focus:border-blue-500"
-        />
-        <button
-          onClick={send}
-          className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-        >
-          Send
-        </button>
-      </div>
+    <div className="mt-2 rounded-lg overflow-hidden border border-border" style={{ height: 420 }}>
+      <HeadlessChatPanel agentName={agentName} onClose={onClose} embedded />
     </div>
   );
 }
@@ -1713,5 +1866,180 @@ function GateApproval({ runId, stepId, message }: { runId: string; stepId: strin
       onCancel={() => setAlertState(null)}
     />
     </>
+  );
+}
+
+/* ─── 9. AnalyticsPanel Component ───────────────────────────────── */
+
+function AnalyticsPanel({ workflowId }: { workflowId: string }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.getWorkflowAnalytics(workflowId);
+      setData(res);
+    } catch {}
+    setLoading(false);
+  }, [workflowId]);
+
+  useEffect(() => { if (open) load(); }, [open, load]);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mb-6 text-xs text-fg-2 hover:text-fg-1 flex items-center gap-1.5 transition-colors"
+      >
+        📊 Show Analytics
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-6 bg-bg-1 border border-border p-4 rounded-lg">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium text-fg-1 uppercase tracking-wider flex items-center gap-1.5">
+          📊 Analytics
+        </h3>
+        <button onClick={() => setOpen(false)} className="text-xs text-fg-2 hover:text-fg-1">✕</button>
+      </div>
+      {loading ? (
+        <div className="text-xs text-fg-2 animate-pulse">Loading...</div>
+      ) : !data || data.runs === 0 ? (
+        <div className="text-xs text-fg-2">No runs yet</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-4 gap-3 mb-3">
+            <div className="bg-bg-2 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-fg">{data.runs}</div>
+              <div className="text-[10px] text-fg-2 uppercase">Total Runs</div>
+            </div>
+            <div className="bg-bg-2 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-emerald-400">{data.successRate}%</div>
+              <div className="text-[10px] text-fg-2 uppercase">Success Rate</div>
+            </div>
+            <div className="bg-bg-2 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-fg">{data.totalTokens.toLocaleString()}</div>
+              <div className="text-[10px] text-fg-2 uppercase">Total Tokens</div>
+            </div>
+            <div className="bg-bg-2 p-3 rounded-lg text-center">
+              <div className="text-xl font-bold text-fg">{formatDuration(data.avgDurationMs)}</div>
+              <div className="text-[10px] text-fg-2 uppercase">Avg Duration</div>
+            </div>
+          </div>
+          <div className="flex gap-2 text-xs">
+            <span className="text-emerald-400">✓ {data.completed} completed</span>
+            <span className="text-red-400">✗ {data.failed} failed</span>
+          </div>
+          {data.recentRuns?.length > 0 && (
+            <div className="mt-3">
+              <div className="text-[10px] text-fg-2 uppercase tracking-wider mb-1">Recent Runs</div>
+              <div className="space-y-1">
+                {data.recentRuns.slice(0, 5).map((r: any) => (
+                  <div key={r.runId} className="flex items-center gap-2 text-[11px]">
+                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_COLORS[r.status]}`} />
+                    <span className="text-fg-2 font-mono flex-1 truncate">{r.runId}</span>
+                    <span className="text-fg-2">{r.tokens?.toLocaleString() || 0} tok</span>
+                    <span className="text-fg-2">{r.finishedAt ? formatDuration(new Date(r.finishedAt).getTime() - new Date(r.startedAt).getTime()) : '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── 10. WebhookConfig Component ───────────────────────────────── */
+
+function WebhookConfig({ workflowId, webhook }: { workflowId: string; webhook?: { enabled?: boolean; token?: string } }) {
+  const [token, setToken] = useState(webhook?.token || '');
+  const [generating, setGenerating] = useState(false);
+
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const res = await api.generateWebhook(workflowId);
+      setToken(res.token);
+    } catch {}
+    setGenerating(false);
+  };
+
+  const disable = async () => {
+    try {
+      await api.disableWebhook(workflowId);
+      setToken('');
+    } catch {}
+  };
+
+  return (
+    <div className="flex-1 bg-bg-1 border border-border p-3 rounded-lg">
+      <div className="text-xs font-medium text-fg-2 uppercase tracking-wider mb-1">🔗 Webhook</div>
+      {token ? (
+        <>
+          <div className="flex items-center gap-1 mt-1">
+            <code className="text-[10px] text-fg-1 bg-bg-2 px-2 py-1 rounded font-mono truncate flex-1">
+              /api/workflows/webhook/{token.slice(0, 12)}...
+            </code>
+            <button
+              onClick={() => navigator.clipboard.writeText(`${location.origin}/api/workflows/webhook/${token}`)}
+              className="text-[10px] text-fg-2 hover:text-fg-1 px-1"
+              title="Copy URL"
+            >📋</button>
+            <button onClick={disable} className="text-[10px] text-red-400 hover:text-red-300 px-1" title="Disable">✕</button>
+          </div>
+          <div className="text-[10px] text-emerald-400 mt-1">🟢 Active</div>
+        </>
+      ) : (
+        <button
+          onClick={generate}
+          disabled={generating}
+          className="text-[10px] text-fg-2 hover:text-fg-1 mt-1 transition-colors"
+        >
+          {generating ? '...' : '+ Generate webhook URL'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ─── 12. PromoteButton Component ───────────────────────────────── */
+
+function PromoteButton({ runId, stepId, agentName }: { runId: string; stepId: string; agentName: string }) {
+  const [promoting, setPromoting] = useState(false);
+  const [promoted, setPromoted] = useState(false);
+
+  const handlePromote = async () => {
+    setPromoting(true);
+    try {
+      await api.promoteStepAgent(runId, stepId);
+      setPromoted(true);
+    } catch {}
+    setPromoting(false);
+  };
+
+  if (promoted) {
+    return (
+      <span className="px-3 py-1.5 text-xs text-emerald-400 border border-emerald-500/30 bg-emerald-500/10" style={{ borderRadius: 'var(--shape-full)' }}>
+        ✓ Promoted
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={handlePromote}
+      disabled={promoting}
+      className="px-3 py-1.5 text-xs bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/30 transition-colors disabled:opacity-50"
+      style={{ borderRadius: 'var(--shape-full)' }}
+      title={`Promote ${agentName} to permanent town agent`}
+    >
+      {promoting ? '...' : '🏠 Promote Agent'}
+    </button>
   );
 }
