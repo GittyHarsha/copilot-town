@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { api, type AgentData } from '../lib/api';
 import { MiniMarkdownContent, CopyButton, relativeTime } from '../components/ChatMarkdown';
 import { useHeadlessChat, type ChatMessage } from '../hooks/useHeadlessChat';
@@ -317,6 +318,7 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
   const [filter, setFilter] = useState<'active' | 'all'>('all');
   const [focusedIndex, setFocusedIndex] = useState<number>(-1);
   const [fullscreenAgent, setFullscreenAgent] = useState<string | null>(null);
+  const [fullscreenTarget, setFullscreenTarget] = useState<HTMLDivElement | null>(null);
   const [relayTarget, setRelayTarget] = useState<string | null>(null);
   const [relayTo, setRelayTo] = useState('');
   const [relayInput, setRelayInput] = useState('');
@@ -483,20 +485,12 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
             alignContent: 'start',
           }}
         >
-          {filtered.map((agent, i) => (
-            <div
-              key={agent.name}
-              style={{
-                outline: focusedIndex === i ? '2px solid #3b82f6' : 'none',
-                outlineOffset: -2,
-                borderRadius: 'var(--shape-lg)',
-                height: '100%',
-              }}
-              onClick={() => setFocusedIndex(i)}
-            >
+          {filtered.map((agent, i) => {
+            const isFullscreen = fullscreenAgent === agent.name;
+            const miniChat = (
               <MiniChat
                 agent={agent}
-                onExpand={() => setFullscreenAgent(agent.name)}
+                onExpand={() => setFullscreenAgent(isFullscreen ? null : agent.name)}
                 displayAgents={filtered}
                 relayTarget={relayTarget}
                 setRelayTarget={setRelayTarget}
@@ -505,8 +499,26 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
                 relayInput={relayInput}
                 setRelayInput={setRelayInput}
               />
-            </div>
-          ))}
+            );
+            return (
+              <div
+                key={agent.name}
+                style={{
+                  outline: focusedIndex === i ? '2px solid #3b82f6' : 'none',
+                  outlineOffset: -2,
+                  borderRadius: 'var(--shape-lg)',
+                  height: '100%',
+                  // Hide grid cell when fullscreen (keep mounted for hook state)
+                  ...(isFullscreen ? { visibility: 'hidden' as const, pointerEvents: 'none' as const } : {}),
+                }}
+                onClick={() => setFocusedIndex(i)}
+              >
+                {isFullscreen && fullscreenTarget
+                  ? createPortal(miniChat, fullscreenTarget)
+                  : miniChat}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
@@ -564,19 +576,8 @@ export default function LiveGrid({ onOpenChat }: { onOpenChat?: (name: string) =
                 ✕ Close
               </button>
             </div>
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <MiniChat
-                agent={agent}
-                onExpand={() => setFullscreenAgent(null)}
-                displayAgents={filtered}
-                relayTarget={relayTarget}
-                setRelayTarget={setRelayTarget}
-                relayTo={relayTo}
-                setRelayTo={setRelayTo}
-                relayInput={relayInput}
-                setRelayInput={setRelayInput}
-              />
-            </div>
+            {/* Portal target — MiniChat renders here via createPortal */}
+            <div ref={setFullscreenTarget} style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }} />
           </div>
         );
       })()}
