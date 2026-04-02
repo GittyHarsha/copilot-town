@@ -138,6 +138,8 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
     return raw.slice(0, 80);
   })();
 
+  const isTruncated = tool.output && (typeof tool.output === 'string' ? tool.output.length > 2000 : JSON.stringify(tool.output).length > 2000);
+
   return (
     <div
       className={`group/tool rounded-md transition-colors ${hasDetails ? 'cursor-pointer hover:bg-bg-3/30' : ''}`}
@@ -180,6 +182,11 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
             <div className="text-fg-1/70 text-[10px] leading-relaxed whitespace-pre-wrap break-all max-h-[200px] overflow-y-auto rounded bg-bg/50 px-2 py-1">
               <span className="text-emerald-400/60 select-none">← </span>
               {typeof tool.output === 'string' ? tool.output.slice(0, 2000) : JSON.stringify(tool.output, null, 2).slice(0, 2000)}
+              {isTruncated && (
+                <span className="block mt-1 text-[9px] text-fg-2/30 italic">
+                  ⋯ truncated ({typeof tool.output === 'string' ? tool.output.length.toLocaleString() : JSON.stringify(tool.output).length.toLocaleString()} chars total)
+                </span>
+              )}
             </div>
           )}
         </div>

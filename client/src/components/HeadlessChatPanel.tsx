@@ -81,7 +81,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   /* ── Shared chat hook (WS, streaming, messages, actions) ── */
   const ownChat = useHeadlessChat(externalChat ? null : agentName);
   const chat = externalChat || ownChat;
-  const { messages, connected, sending, historyLoaded, liveIntent, liveUsage, agentMode, pendingPermission, reconnectCountdown } = chat;
+  const { messages, connected, sending, historyLoaded, liveIntent, liveUsage, agentMode, pendingPermission, reconnectCountdown, turnStartedAt } = chat;
 
   const [input, setInput] = useState('');
   /* ── Search state ── */
@@ -105,6 +105,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   const [elapsedDisplay, setElapsedDisplay] = useState('');
   /* ── Scroll-to-bottom visibility ── */
   const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [modeConfirmed, setModeConfirmed] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -112,6 +113,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   const dragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
+  const resizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   /* ── Auto-scroll (only when user is near the bottom) ── */
   const isNearBottom = useRef(true);
@@ -189,22 +191,28 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [searchOpen, searchIndex, searchMatches]);
 
-  /* ── Elapsed time counter ── */
+  /* ── Elapsed time counter — starts from turn_start, not send click ── */
   useEffect(() => {
     if (!sending) {
       setElapsedDisplay('');
       return;
     }
-    const startTime = Date.now();
-    setElapsedDisplay('0s');
+    if (!turnStartedAt) {
+      // Sending but turn hasn't started yet — show "…"
+      setElapsedDisplay('…');
+      return;
+    }
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const elapsed = Math.floor((Date.now() - turnStartedAt) / 1000);
       const mins = Math.floor(elapsed / 60);
       const secs = elapsed % 60;
       setElapsedDisplay(mins > 0 ? `${mins}:${secs.toString().padStart(2, '0')}` : `${secs}s`);
     }, 1000);
+    // Set initial value immediately
+    const elapsed = Math.floor((Date.now() - turnStartedAt) / 1000);
+    setElapsedDisplay(elapsed > 0 ? `${elapsed}s` : '0s');
     return () => clearInterval(interval);
-  }, [sending]);
+  }, [sending, turnStartedAt]);
 
   /* ── Persist bookmarks ── */
   useEffect(() => {
@@ -405,13 +413,17 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 {(['plan', 'autopilot'] as const).map(m => (
                   <button
                     key={m}
-                    onClick={() => chat.changeMode(m)}
+                    onClick={async () => {
+                      await chat.changeMode(m);
+                      setModeConfirmed(true);
+                      setTimeout(() => setModeConfirmed(false), 600);
+                    }}
                     disabled={!connected}
                     aria-label={`Set mode to ${m}`}
                     aria-pressed={agentMode === m}
                     className={`text-[10px] px-2.5 py-1 rounded-md transition-all font-medium ${
                       agentMode === m
-                        ? 'bg-bg-3 text-fg shadow-sm border border-border/40'
+                        ? `bg-bg-3 text-fg shadow-sm border border-border/40 ${modeConfirmed ? 'ring-1 ring-emerald-400/40' : ''}`
                         : 'text-fg-2/50 hover:text-fg-2 border border-transparent'
                     } disabled:opacity-30`}
                   >{m}</button>
@@ -452,18 +464,18 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
 
         {/* ── Streaming status bar — shows immediately when sending, not just after turn_start ── */}
         {sending && (
-          <div className="flex items-center gap-2 px-5 py-2 bg-blue-500/[0.03] border-b border-blue-500/10 text-[11px] flex-shrink-0">
-            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+          <div className={`flex items-center gap-2 bg-blue-500/[0.03] border-b border-blue-500/10 flex-shrink-0 ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-5 py-2 text-[11px]'}`}>
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
             <span className="text-blue-400/70 truncate">{liveIntent || 'Responding…'}</span>
             <span className="ml-auto text-fg-2/30 tabular-nums">{elapsedDisplay}</span>
-            {liveUsage?.outputTokens && <span className="text-fg-2/30 tabular-nums">{liveUsage.outputTokens.toLocaleString()} tok</span>}
+            {!compact && liveUsage?.outputTokens && <span className="text-fg-2/30 tabular-nums">{liveUsage.outputTokens.toLocaleString()} tok</span>}
           </div>
         )}
 
         {/* ── Disconnected banner with countdown ── */}
         {!connected && !sending && historyLoaded && (
-          <div className="flex items-center gap-2 px-5 py-1.5 bg-amber-500/[0.06] border-b border-amber-500/15 text-[11px] flex-shrink-0">
-            <span className="w-2 h-2 rounded-full bg-amber-400/70 animate-pulse" />
+          <div className={`flex items-center gap-2 bg-amber-500/[0.06] border-b border-amber-500/15 flex-shrink-0 ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-5 py-1.5 text-[11px]'}`}>
+            <span className="w-2 h-2 rounded-full bg-amber-400/70 animate-pulse flex-shrink-0" />
             <span className="text-amber-400/70">
               {reconnectCountdown ? `Reconnecting in ${reconnectCountdown}s…` : 'Reconnecting…'}
             </span>
@@ -522,10 +534,13 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
             <div className="flex items-center justify-center h-full text-fg-2/30 text-xs">Loading…</div>
           ) : (
             <div className={headerless ? 'px-2.5 py-2 space-y-2' : 'px-5 py-4 space-y-4'}>
-              {visibleMessages.map(m => {
+              {visibleMessages.map((m, idx) => {
                 const isDimmed = searchOpen && searchQuery && !searchMatches.includes(m.id);
                 const isBookmarked = bookmarks.has(m.id);
                 const isCurrentMatch = searchOpen && searchQuery && searchMatches[searchIndex] === m.id;
+                const matchHighlight = isCurrentMatch ? 'ring-2 ring-yellow-400/60 rounded-lg shadow-[0_0_12px_rgba(250,204,21,0.15)]' : '';
+                const prevMsg = idx > 0 ? visibleMessages[idx - 1] : null;
+                const isGrouped = prevMsg && prevMsg.role === m.role && m.role !== 'system' && (m.timestamp - prevMsg.timestamp) < 60_000;
 
                 /* ── System message ── */
                 if (m.role === 'system') {
@@ -541,7 +556,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 /* ── User message ── */
                 if (m.role === 'user') {
                   return (
-                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}>
+                    <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${matchHighlight}`}>
                       <div className={`max-w-[85%] relative ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
                         {/* Relay sender */}
                         {m.from && m.from !== 'you' && (
@@ -573,10 +588,10 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
 
                 /* ── Agent message ── */
                 return (
-                  <div key={m.id} id={`msg-${m.id}`} className={`flex gap-2.5 animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-2' : ''} ${isCurrentMatch ? 'ring-1 ring-yellow-400/40 rounded-lg' : ''}`}>
-                    {/* Agent avatar — hidden in compact mode */}
+                  <div key={m.id} id={`msg-${m.id}`} className={`group/agent flex gap-2.5 animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-2' : ''} ${matchHighlight} ${isGrouped ? (compact ? 'mt-0' : 'mt-1') : ''}`}>
+                    {/* Agent avatar — hidden in compact mode, invisible spacer for grouped messages */}
                     {!compact && (
-                      <div className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px]"
+                      <div className={`w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px] ${isGrouped ? 'invisible' : ''}`}
                         style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
                         ⚡
                       </div>
@@ -635,9 +650,9 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                       </div>
                     )}
 
-                    {/* Footer: usage/tokens — hidden in compact mode */}
-                    {!compact && (m.tokens || m.usage) && (
-                      <div className="flex items-center gap-3 text-[10px] px-1">
+                    {/* Footer: usage/tokens — show on hover in compact mode, always in full mode */}
+                    {(m.tokens || m.usage) && (
+                      <div className={`flex items-center gap-3 text-[10px] px-1 ${compact ? 'opacity-0 group-hover/agent:opacity-100 transition-opacity h-0 group-hover/agent:h-auto overflow-hidden' : ''}`}>
                         {m.usage?.model && <span className="text-fg-2/25">{m.usage.model}</span>}
                         {m.tokens && <span className={`tabular-nums ${m.streaming ? 'text-blue-400/40' : 'text-fg-2/20'}`}>{m.tokens.toLocaleString()} out{m.streaming && '…'}</span>}
                         {m.usage?.inputTokens && <span className="text-fg-2/20 tabular-nums">{m.usage.inputTokens.toLocaleString()} in</span>}
@@ -743,8 +758,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               onKeyDown={handleKeyDown}
               onInput={e => {
                 const t = e.currentTarget;
-                t.style.height = 'auto';
-                t.style.height = Math.min(t.scrollHeight, headerless ? 60 : 140) + 'px';
+                clearTimeout(resizeTimer.current);
+                resizeTimer.current = setTimeout(() => {
+                  t.style.height = 'auto';
+                  t.style.height = Math.min(t.scrollHeight, headerless ? 60 : 140) + 'px';
+                }, 16);
               }}
             />
             <button

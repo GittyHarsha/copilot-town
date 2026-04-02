@@ -48,6 +48,7 @@ export interface UseHeadlessChatReturn {
   agentMode: string;
   pendingPermission: { id: string; tool: string; args?: any } | null;
   reconnectCountdown: number | null;
+  turnStartedAt: number | null;
 
   /** Send a message. Optional action: 'enqueue' (queue), 'steer' (interrupt). */
   send: (text: string, action?: 'enqueue' | 'steer') => void;
@@ -90,6 +91,7 @@ export function useHeadlessChat(
   const [agentMode, setAgentMode] = useState<string>('autopilot');
   const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
   const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
 
   /* ── Refs ── */
   const wsRef = useRef<WebSocket | null>(null);
@@ -172,6 +174,7 @@ export function useHeadlessChat(
           thinkBuf.current = '';
           toolsBuf.current = [];
           setSending(true);
+          setTurnStartedAt(Date.now());
           setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
           return;
         }
@@ -185,6 +188,7 @@ export function useHeadlessChat(
           thinkBuf.current = '';
           toolsBuf.current = [];
           setSending(true);
+          setTurnStartedAt(Date.now());
           setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
         }
 
@@ -244,10 +248,11 @@ export function useHeadlessChat(
           setLiveIntent(null);
           setLiveUsage(null);
           setSending(false);
+          setTurnStartedAt(null);
         } else if (msg.type === 'aborted') {
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setLiveUsage(null); setSending(false);
+          setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
           setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '⏹ Response aborted', timestamp: Date.now() }]);
         } else if (msg.type === 'enqueued') {
           setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '📋 Queued — runs when idle', timestamp: Date.now() }]);
@@ -269,7 +274,7 @@ export function useHeadlessChat(
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: `Error: ${msg.message}`, streaming: false } : m));
           else setMessages(prev => [...prev, { id: `err-${msgCounter.current++}`, role: 'system', text: `⚠ ${msg.message}`, timestamp: Date.now() }]);
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setSending(false);
+          setLiveIntent(null); setSending(false); setTurnStartedAt(null);
         } else if (msg.type === 'turn_end') {
           if (sid && streamBuf.current) {
             const text = streamBuf.current;
@@ -282,7 +287,7 @@ export function useHeadlessChat(
             setMessages(prev => prev.map(m => m.id === sid ? { ...m, streaming: false } : m));
           }
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-          setLiveIntent(null); setLiveUsage(null); setSending(false);
+          setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
         } else if (msg.type === 'user_message') {
           const prompt = msg.prompt || '';
           const from = prompt.startsWith('[Message from ') ? prompt.match(/\[Message from (.+?)\]/)?.[1] : undefined;
@@ -453,6 +458,8 @@ export function useHeadlessChat(
     setLiveIntent(null);
     setLiveUsage(null);
     setPendingPermission(null);
+    setTurnStartedAt(null);
+    setReconnectCountdown(null);
     activeStreamId.current = null;
     streamBuf.current = '';
     thinkBuf.current = '';
@@ -463,7 +470,7 @@ export function useHeadlessChat(
     messages, setMessages,
     connected, sending, historyLoaded,
     liveIntent, liveUsage, agentMode,
-    pendingPermission, reconnectCountdown,
+    pendingPermission, reconnectCountdown, turnStartedAt,
     send, abort, compact, changeMode, respondPermission,
     inputHistory: inputHistoryRef,
     historyIndex: historyIndexRef,

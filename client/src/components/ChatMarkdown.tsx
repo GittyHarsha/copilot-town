@@ -47,7 +47,7 @@ export function CodeBlock({ children, className }: { children?: ReactNode; class
       <code ref={textRef} className={className}>{children}</code>
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-3/80 text-fg-2/60 hover:text-fg border border-border/40 opacity-0 group-hover/code:opacity-100 transition-opacity"
+        className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-3/80 text-fg-2/60 hover:text-fg border border-border/40 opacity-100 sm:opacity-0 sm:group-hover/code:opacity-100 transition-opacity"
       >{copied ? '✓' : 'Copy'}</button>
     </div>
   );
