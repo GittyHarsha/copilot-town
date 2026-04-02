@@ -81,7 +81,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   /* ── Shared chat hook (WS, streaming, messages, actions) ── */
   const ownChat = useHeadlessChat(externalChat ? null : agentName);
   const chat = externalChat || ownChat;
-  const { messages, connected, sending, liveIntent, liveUsage, agentMode, pendingPermission } = chat;
+  const { messages, connected, sending, historyLoaded, liveIntent, liveUsage, agentMode, pendingPermission, reconnectCountdown } = chat;
 
   const [input, setInput] = useState('');
   /* ── Search state ── */
@@ -450,13 +450,23 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
         </div>
       )}
 
-        {/* ── Streaming status bar ── */}
+        {/* ── Streaming status bar — shows immediately when sending, not just after turn_start ── */}
         {sending && (
           <div className="flex items-center gap-2 px-5 py-2 bg-blue-500/[0.03] border-b border-blue-500/10 text-[11px] flex-shrink-0">
             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
             <span className="text-blue-400/70 truncate">{liveIntent || 'Responding…'}</span>
             <span className="ml-auto text-fg-2/30 tabular-nums">{elapsedDisplay}</span>
             {liveUsage?.outputTokens && <span className="text-fg-2/30 tabular-nums">{liveUsage.outputTokens.toLocaleString()} tok</span>}
+          </div>
+        )}
+
+        {/* ── Disconnected banner with countdown ── */}
+        {!connected && !sending && historyLoaded && (
+          <div className="flex items-center gap-2 px-5 py-1.5 bg-amber-500/[0.06] border-b border-amber-500/15 text-[11px] flex-shrink-0">
+            <span className="w-2 h-2 rounded-full bg-amber-400/70 animate-pulse" />
+            <span className="text-amber-400/70">
+              {reconnectCountdown ? `Reconnecting in ${reconnectCountdown}s…` : 'Reconnecting…'}
+            </span>
           </div>
         )}
 
@@ -505,8 +515,11 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
 
         {/* ── Messages ── */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
-          {messages.length === 0 ? (
+          {messages.length === 0 && historyLoaded ? (
             <EmptyState onSend={(text) => { chat.send(text); }} compact={headerless} />
+          ) : messages.length === 0 ? (
+            /* History still loading — show subtle placeholder instead of EmptyState flash */
+            <div className="flex items-center justify-center h-full text-fg-2/30 text-xs">Loading…</div>
           ) : (
             <div className={headerless ? 'px-2.5 py-2 space-y-2' : 'px-5 py-4 space-y-4'}>
               {visibleMessages.map(m => {
@@ -636,6 +649,32 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                   </div>
                 );
               })}
+              {/* Immediate "Thinking…" feedback when sending but no agent message placeholder yet */}
+              {sending && !messages.some(m => m.role === 'agent' && m.streaming) && (
+                <div className={`flex gap-2.5 animate-fade-in ${compact ? '' : ''}`}>
+                  {!compact && (
+                    <div className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px]"
+                      style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
+                      ⚡
+                    </div>
+                  )}
+                  <div style={{
+                    background: 'var(--color-bg-2)',
+                    borderRadius: compact ? '4px 14px 14px 14px' : '4px 18px 18px 18px',
+                    padding: compact ? '6px 10px' : '12px 14px',
+                    border: '1px solid var(--color-border)',
+                  }}>
+                    <div className="flex items-center gap-2 py-1">
+                      <div className="flex gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                      <span className="text-[11px] text-fg-2/30">Thinking…</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {isScrolledUp && (
@@ -667,7 +706,9 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               <div className="text-xs font-medium text-fg">Permission required</div>
               <div className="text-[11px] text-fg-2 font-mono truncate mt-0.5">{pendingPermission.tool}</div>
               {pendingPermission.args && (
-                <div className="text-[10px] text-fg-2/40 truncate mt-0.5 font-mono">{JSON.stringify(pendingPermission.args).slice(0, 100)}</div>
+                <div className="text-[10px] text-fg-2/40 mt-0.5 font-mono whitespace-pre-wrap break-all max-h-[120px] overflow-y-auto rounded bg-bg/50 px-2 py-1">
+                  {JSON.stringify(pendingPermission.args, null, 2)}
+                </div>
               )}
             </div>
             <button onClick={() => chat.respondPermission(true)}
@@ -685,8 +726,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
         <div className={headerless ? 'border-t border-border/30 px-2 py-1.5 flex-shrink-0' : 'border-t border-border/30 p-5 flex-shrink-0 bg-bg-1/80'}>
           {!connected && !headerless && (
             <div className="text-[11px] text-amber-400/60 bg-amber-400/[0.04] rounded-lg px-3 py-2 mb-2.5 border border-amber-400/[0.08] flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60" />
-              Not connected — reconnecting…
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400/60 animate-pulse" />
+              {reconnectCountdown ? `Reconnecting in ${reconnectCountdown}s…` : 'Reconnecting…'}
             </div>
           )}
           <div className={headerless ? 'flex items-center gap-1.5' : 'flex items-end gap-2.5'}>

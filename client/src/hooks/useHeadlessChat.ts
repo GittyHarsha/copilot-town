@@ -42,10 +42,12 @@ export interface UseHeadlessChatReturn {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   connected: boolean;
   sending: boolean;
+  historyLoaded: boolean;
   liveIntent: string | null;
   liveUsage: UsageInfo | null;
   agentMode: string;
   pendingPermission: { id: string; tool: string; args?: any } | null;
+  reconnectCountdown: number | null;
 
   /** Send a message. Optional action: 'enqueue' (queue), 'steer' (interrupt). */
   send: (text: string, action?: 'enqueue' | 'steer') => void;
@@ -82,10 +84,12 @@ export function useHeadlessChat(
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [liveIntent, setLiveIntent] = useState<string | null>(null);
   const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
   const [agentMode, setAgentMode] = useState<string>('autopilot');
   const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
+  const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
 
   /* ── Refs ── */
   const wsRef = useRef<WebSocket | null>(null);
@@ -108,36 +112,47 @@ export function useHeadlessChat(
 
   /* ── Load conversation history ── */
   useEffect(() => {
-    if (!agentName || !loadHistory) return;
+    if (!agentName || !loadHistory) { setHistoryLoaded(true); return; }
     (async () => {
       try {
         const data = await api.getAgentMessages(agentName);
-        if (!data?.messages) return;
+        if (!data?.messages) { setHistoryLoaded(true); return; }
+        const seen = new Set<string>();
         const history: ChatMessage[] = [];
         for (const m of data.messages) {
+          // Deduplicate by server-assigned ID
+          if (m.id && seen.has(m.id)) continue;
+          if (m.id) seen.add(m.id);
+
           if (m.type === 'user.message') {
             const text = m.prompt || m.content || m.text || '';
-            if (!text) {
-              history.push({ id: m.id || `h-${msgCounter.current++}`, role: 'user', text: '(message not available)', from: 'you', timestamp: new Date(m.timestamp || 0).getTime() });
-              continue;
-            }
+            if (!text) continue; // Skip empty messages entirely
             history.push({
               id: m.id || `h-${msgCounter.current++}`, role: 'user', text,
               from: text.startsWith('[Message from ') ? text.match(/\[Message from (.+?)\]/)?.[1] : 'you',
               timestamp: new Date(m.timestamp || 0).getTime(),
             });
           } else if (m.type === 'assistant.message') {
+            const text = m.content || m.text || '';
+            if (!text && !(m.thinking || m.reasoningText)) continue; // Skip empty agent messages
             history.push({
-              id: m.id || `h-${msgCounter.current++}`, role: 'agent',
-              text: m.content || m.text || '',
+              id: m.id || `h-${msgCounter.current++}`, role: 'agent', text,
               thinking: m.thinking || m.reasoningText || undefined,
               tokens: m.outputTokens,
               timestamp: new Date(m.timestamp || 0).getTime(),
             });
           }
         }
-        setMessages(trimMessages(history));
-      } catch {}
+        // Merge: deduplicate history against any live messages already in state
+        setMessages(prev => {
+          if (prev.length === 0) return trimMessages(history);
+          const liveIds = new Set(prev.map(m => m.id));
+          const deduped = history.filter(h => !liveIds.has(h.id));
+          return trimMessages([...deduped, ...prev]);
+        });
+      } catch {} finally {
+        setHistoryLoaded(true);
+      }
     })();
   }, [agentName, loadHistory, trimMessages]);
 
@@ -286,13 +301,12 @@ export function useHeadlessChat(
     wireWs(ws);
     ws.onopen = () => {
       setConnected(true);
+      setReconnectCountdown(null);
       reconnectDelay.current = 1000;
       if (pendingSendRef.current) {
         const prompt = pendingSendRef.current;
         pendingSendRef.current = null;
-        const agentId = `a-${msgCounter.current++}`;
-        setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
-        activeStreamId.current = agentId;
+        // Don't create placeholder eagerly — server events will trigger it
         streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
         setSending(true);
         ws.send(JSON.stringify({ prompt }));
@@ -301,8 +315,31 @@ export function useHeadlessChat(
     ws.onclose = () => {
       setConnected(false);
       wsRef.current = null;
+      // Preserve any partial streaming response before reconnecting
+      if (activeStreamId.current && streamBuf.current) {
+        const partialId = activeStreamId.current;
+        const partialText = streamBuf.current + '\n\n_(connection lost — reconnecting…)_';
+        const partialThinking = thinkBuf.current || undefined;
+        const partialTools = toolsBuf.current.length ? [...toolsBuf.current] : undefined;
+        setMessages(prev => prev.map(m =>
+          m.id === partialId ? { ...m, text: partialText, thinking: partialThinking, tools: partialTools, streaming: false } : m
+        ));
+        activeStreamId.current = null;
+        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+        setSending(false);
+      }
       clearTimeout(reconnectTimer.current);
-      reconnectTimer.current = setTimeout(() => connectWs(), reconnectDelay.current);
+      const delay = reconnectDelay.current;
+      // Start countdown for UI display
+      setReconnectCountdown(Math.ceil(delay / 1000));
+      const countdownInterval = setInterval(() => {
+        setReconnectCountdown(prev => prev !== null && prev > 1 ? prev - 1 : null);
+      }, 1000);
+      reconnectTimer.current = setTimeout(() => {
+        clearInterval(countdownInterval);
+        setReconnectCountdown(null);
+        connectWs();
+      }, delay);
       reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 15000);
     };
   }, [agentName, wireWs, trimMessages]);
@@ -362,16 +399,24 @@ export function useHeadlessChat(
       return;
     }
 
-    if (sending) return;
+    if (sending) {
+      // Provide visual feedback that send is blocked
+      setMessages(prev => [...prev, {
+        id: `sys-${msgCounter.current++}`, role: 'system',
+        text: 'Still waiting for response — message not sent. Use ⏎ Steer to interrupt.',
+        timestamp: Date.now(),
+      }]);
+      return;
+    }
     if (isOpen) {
-      const agentId = `a-${msgCounter.current++}`;
-      setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
-      activeStreamId.current = agentId;
-      streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+      // Don't create placeholder eagerly — wait for first streaming data to arrive.
+      // Just mark as sending so the UI shows immediate "Thinking…" feedback.
       setSending(true);
+      streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
       ws!.send(JSON.stringify({ prompt: text }));
     } else {
       pendingSendRef.current = text;
+      setSending(true);
       ensureWs();
     }
   }, [sending, ensureWs, trimMessages]);
@@ -404,6 +449,7 @@ export function useHeadlessChat(
   useEffect(() => {
     setMessages([]);
     setSending(false);
+    setHistoryLoaded(false);
     setLiveIntent(null);
     setLiveUsage(null);
     setPendingPermission(null);
@@ -415,9 +461,9 @@ export function useHeadlessChat(
 
   return {
     messages, setMessages,
-    connected, sending,
+    connected, sending, historyLoaded,
     liveIntent, liveUsage, agentMode,
-    pendingPermission,
+    pendingPermission, reconnectCountdown,
     send, abort, compact, changeMode, respondPermission,
     inputHistory: inputHistoryRef,
     historyIndex: historyIndexRef,

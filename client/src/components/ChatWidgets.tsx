@@ -91,9 +91,15 @@ export function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string
 
 /** Inline expandable tool call card with live timer — shows what the tool did */
 export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+  const isRunning = tool.status === 'running';
+  const [expanded, setExpanded] = useState(isRunning);
   const [now, setNow] = useState(Date.now());
   const hasDetails = !!(tool.input || tool.output);
+
+  // Auto-expand while running, auto-collapse when done
+  useEffect(() => {
+    if (isRunning) setExpanded(true);
+  }, [isRunning]);
 
   useEffect(() => {
     if (tool.status !== 'running') return;
@@ -108,7 +114,6 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
     if (!tool.input) return tool.description || null;
     try {
       const parsed = typeof tool.input === 'string' ? JSON.parse(tool.input) : tool.input;
-      // Common tool patterns — extract the most useful field
       if (parsed.command) return parsed.description || (typeof parsed.command === 'string' ? parsed.command.slice(0, 120) : null);
       if (parsed.pattern) return `/${parsed.pattern}/ ${parsed.path || parsed.glob || ''}`.trim();
       if (parsed.path && parsed.old_str) return `edit ${parsed.path}`;
@@ -128,13 +133,10 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
   const outputSummary = (() => {
     if (!tool.output) return null;
     const raw = typeof tool.output === 'string' ? tool.output : JSON.stringify(tool.output);
-    // Count lines for file-like output
     const lines = raw.split('\n');
     if (lines.length > 3) return `${lines.length} lines`;
     return raw.slice(0, 80);
   })();
-
-  const isRunning = tool.status === 'running';
 
   return (
     <div
