@@ -351,6 +351,13 @@ wssHeadless.on('connection', async (ws, req) => {
     return;
   }
 
+  // Validate agent name: alphanumeric, hyphens, underscores, 1-80 chars
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(agentName)) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Invalid agent name: only a-z, 0-9, hyphens, underscores allowed (max 80 chars)' }));
+    ws.close();
+    return;
+  }
+
   console.log(`Headless WS connected to agent "${agentName}"`);
 
   // Register as a stream listener for live token-by-token output
@@ -423,9 +430,29 @@ wssHeadless.on('connection', async (ws, req) => {
         return;
       }
 
-      if (!msg.prompt) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Missing prompt field' }));
+      if (!msg.prompt || typeof msg.prompt !== 'string') {
+        ws.send(JSON.stringify({ type: 'error', message: 'Missing or invalid prompt field (must be a non-empty string)' }));
         return;
+      }
+
+      // Limit prompt length (100KB should be more than enough)
+      if (msg.prompt.length > 100_000) {
+        ws.send(JSON.stringify({ type: 'error', message: `Prompt too long (${msg.prompt.length} chars, max 100000)` }));
+        return;
+      }
+
+      // Validate attachments if present
+      if (msg.attachments != null) {
+        if (!Array.isArray(msg.attachments)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'attachments must be an array' }));
+          return;
+        }
+        for (const att of msg.attachments) {
+          if (!att || typeof att.type !== 'string' || typeof att.value !== 'string') {
+            ws.send(JSON.stringify({ type: 'error', message: 'Each attachment must have { type: string, value: string }' }));
+            return;
+          }
+        }
       }
 
       let agent = getHeadlessAgent(agentName);
@@ -476,13 +503,17 @@ wssHeadless.on('connection', async (ws, req) => {
         agent.userPrompts.push({ prompt: msg.prompt, timestamp: new Date().toISOString() });
         persistUserPrompts(agentName, agent.userPrompts);
 
+        // Client can request a custom timeout (30s–600s), default 600s
+        const timeoutMs = Math.max(30_000, Math.min(600_000,
+          typeof msg.timeout === 'number' ? msg.timeout * 1000 : 600_000));
+
         try {
           const sendOpts: any = { prompt: msg.prompt };
           if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
 
           // sendAndWait blocks until done — response is sent via streaming events
           // (assistant.message → response event). This just ensures we catch errors.
-          await agent.session.sendAndWait(sendOpts, 600_000);
+          await agent.session.sendAndWait(sendOpts, timeoutMs);
           agent.status = 'idle';
           broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
         } catch (e: any) {
@@ -496,7 +527,7 @@ wssHeadless.on('connection', async (ws, req) => {
               if (agent) {
                 ws.send(JSON.stringify({ type: 'system', message: '✓ New session ready' }));
                 const sendOpts2: any = { prompt: msg.prompt };
-                await agent.session.sendAndWait(sendOpts2, 600_000);
+                await agent.session.sendAndWait(sendOpts2, timeoutMs);
                 agent.status = 'idle';
                 broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
               } else {
