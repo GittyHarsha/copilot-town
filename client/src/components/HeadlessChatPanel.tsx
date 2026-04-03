@@ -115,19 +115,17 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   const dragStartWidth = useRef(0);
   const resizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  /* ── Auto-scroll (only on new messages, not message updates) ── */
+  /* ── Auto-scroll: follow content if user is at the bottom, stop if they scrolled up ── */
   const isNearBottom = useRef(true);
   const isUserScrolled = useRef(false);
-  const prevMsgCount = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Only auto-scroll when new messages are added, not when existing ones are updated
-    const newCount = messages.length;
-    if (newCount > prevMsgCount.current && isNearBottom.current && !isUserScrolled.current) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    // If user is at/near the bottom, keep following all updates (new messages + streaming deltas)
+    // If user scrolled up intentionally, leave them alone
+    if (isNearBottom.current && !isUserScrolled.current) {
+      el.scrollTop = el.scrollHeight;
     }
-    prevMsgCount.current = newCount;
   }, [messages]);
 
   /* ── Scroll listener — tracks position for auto-scroll + scroll-to-bottom button ── */

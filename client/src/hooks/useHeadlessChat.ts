@@ -256,8 +256,8 @@ export function useHeadlessChat(
           );
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'response') {
-          // Finalize the message display but keep activeStreamId alive —
-          // if more tools arrive before turn_end, they attach to the same bubble.
+          // Update the message with final content but keep streaming alive —
+          // more tools can arrive before turn_end. Only turn_end finalizes.
           if (activeStreamId.current) {
             const text = msg.content || streamBuf.current;
             const thinking = msg.thinking || thinkBuf.current || undefined;
@@ -267,13 +267,11 @@ export function useHeadlessChat(
               : undefined;
             streamBuf.current = text;
             setMessages(prev => prev.map(m => m.id === activeStreamId.current ? {
-              ...m, text, thinking, tokens, tools, streaming: false,
+              ...m, text, thinking, tokens, tools,
             } : m));
           }
           setLiveIntent(null);
           setLiveUsage(null);
-          setSending(false);
-          setTurnStartedAt(null);
         } else if (msg.type === 'aborted') {
           abortedRef.current = true;
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
