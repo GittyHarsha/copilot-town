@@ -1,12 +1,16 @@
 import { getClient, type CopilotSession } from './copilot-sdk.js';
-import { approveAll, defineTool } from '@github/copilot-sdk';
+import { approveAll } from '@github/copilot-sdk';
 import { getAllAgents } from './agents.js';
 import { pushEvent } from './events.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, resolve as resolvePath } from 'path';
+import { fileURLToPath } from 'url';
 
 const HOME = process.env.USERPROFILE || process.env.HOME || '';
 const SESSION_MAP_FILE = join(HOME, '.copilot', 'agent-sessions.json');
+const _thisDir = fileURLToPath(new URL('.', import.meta.url));
+const MCP_COLLAB_SCRIPT = resolvePath(_thisDir, '..', 'mcp-collab.ts');
+const PORT = process.env.PORT || '3848';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -210,6 +214,7 @@ export async function createHeadlessAgent(
     onPermissionRequest: approveAll,
     systemMessage: buildSystemMessage(name, options?.role || options?.systemPrompt),
     hooks: buildHooks(agent),
+    mcpServers: buildMcpServers(name),
   };
   if (options?.reasoningEffort) {
     sessionConfig.reasoningEffort = options.reasoningEffort;
@@ -226,8 +231,6 @@ export async function createHeadlessAgent(
   // Wire streaming events to listeners
   wireStreamingEvents(session, name, agent);
 
-  // Register collaboration tools on the session
-  registerAgentTools(session, name);
   _headlessAgents.set(name, agent);
   registerHeadlessInSessionFile(name, sessionId);
 
@@ -710,11 +713,11 @@ export async function attachHeadless(
     streaming: true,
     onPermissionRequest: approveAll,
     hooks: buildHooks(agent),
+    mcpServers: buildMcpServers(name),
   } as any);
 
   agent.session = session;
   wireStreamingEvents(session, name, agent);
-  registerAgentTools(session, name);
   _headlessAgents.set(name, agent);
 
   // Update agent-sessions.json: mark as headless
@@ -795,118 +798,23 @@ export function isHeadless(name: string): boolean {
   return _headlessAgents.has(name);
 }
 
-// ── Collaboration Tools ──────────────────────────────────────────
+// ── Collaboration MCP Server Config ──────────────────────────────
 
 /**
- * Register tools on a headless agent session so it can interact with the town.
+ * Build the mcpServers config to inject into session creation/resume.
+ * This spawns a stdio MCP server process per agent that exposes
+ * get_agents, relay_message, share_note, read_notes, set_status tools.
  */
-function registerAgentTools(session: CopilotSession, agentName: string) {
-  session.registerTools([
-    defineTool('get_agents', {
-      description: 'Get the list of all agents in Copilot Town with their status, type, and current task.',
-      parameters: {},
-      handler: async () => {
-        const agents = getAllAgents();
-        return agents.map(a => ({
-          name: a.name,
-          status: a.status,
-          type: (a as any).type || 'pane',
-          task: (a as any).task || null,
-          model: (a as any).model || null,
-          sessionId: a.sessionId?.slice(0, 8),
-          isMe: a.name === agentName,
-        }));
-      },
-    }),
-    defineTool('relay_message', {
-      description: 'Send a message to another agent and get their response. Use this to ask questions, share information, or coordinate tasks with teammates.',
-      parameters: {
-        to: { type: 'string', description: 'Target agent name (exact match from get_agents)' },
-        message: { type: 'string', description: 'Your message to the agent. Be specific — they have no context about your conversation.' },
-      },
-      handler: async (params: any) => {
-        const SAFE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
-        if (!SAFE_NAME_RE.test(params.to)) {
-          return 'Invalid agent name';
-        }
-        const http = await import('http');
-        return new Promise<string>((resolve) => {
-          const body = JSON.stringify({ from: agentName, to: params.to, message: params.message });
-          const req = http.request({
-            hostname: '127.0.0.1', port: 3848,
-            path: '/api/agents/relay', method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-          }, (res) => {
-            let data = '';
-            res.on('data', c => data += c);
-            res.on('end', () => {
-              try {
-                const result = JSON.parse(data);
-                if (result.response) resolve(`Response from ${params.to}: ${result.response}`);
-                else resolve(`Message delivered to ${params.to}`);
-              } catch { resolve(`Relay sent to ${params.to}`); }
-            });
-          });
-          req.on('error', () => resolve(`Failed to relay to ${params.to}`));
-          req.write(body);
-          req.end();
-        });
-      },
-    }),
-    defineTool('share_note', {
-      description: 'Share a note with the team — a key-value pair any agent can read.',
-      parameters: {
-        key: { type: 'string', description: 'Note key' },
-        value: { type: 'string', description: 'Note content' },
-      },
-      handler: async (params: any) => {
-        try {
-          const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
-          if (!raw.notes) raw.notes = {};
-          raw.notes[params.key] = {
-            value: params.value,
-            author: agentName,
-            updatedAt: new Date().toISOString(),
-          };
-          writeFileSync(SESSION_MAP_FILE, JSON.stringify(raw, null, 2));
-          return `Note "${params.key}" shared`;
-        } catch (e: any) {
-          return `Failed to share note: ${e.message}`;
-        }
-      },
-    }),
-    defineTool('read_notes', {
-      description: 'Read shared notes from the team.',
-      parameters: {
-        key: { type: 'string', description: 'Note key (optional — omit for all notes)' },
-      },
-      handler: async (params: any) => {
-        try {
-          const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
-          const notes = raw.notes || {};
-          if (params.key) {
-            const note = notes[params.key];
-            return note ? `${params.key}: ${note.value} (by ${note.author})` : 'Note not found';
-          }
-          return Object.entries(notes)
-            .map(([k, v]: any) => `${k}: ${v.value.slice(0, 100)} (by ${v.author})`)
-            .join('\n') || 'No notes';
-        } catch {
-          return 'Failed to read notes';
-        }
-      },
-    }),
-    defineTool('set_status', {
-      description: 'Set your current task/status text for the dashboard.',
-      parameters: {
-        task: { type: 'string', description: 'What you are currently working on' },
-      },
-      handler: async (params: any) => {
-        pushEvent('task', `${agentName}: ${params.task}`, 'info', agentName);
-        return `Status set: "${params.task}"`;
-      },
-    }),
-  ]);
+function buildMcpServers(agentName: string): Record<string, any> {
+  return {
+    'copilot-town': {
+      type: 'local',
+      command: 'npx',
+      args: ['tsx', MCP_COLLAB_SCRIPT],
+      env: { AGENT_NAME: agentName, COPILOT_TOWN_PORT: PORT },
+      tools: ['*'],
+    },
+  };
 }
 
 // ── Persistence Helper ───────────────────────────────────────────
