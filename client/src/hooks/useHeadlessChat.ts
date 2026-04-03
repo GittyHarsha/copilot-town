@@ -210,7 +210,12 @@ export function useHeadlessChat(
           const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
           const description = msg.description || undefined;
           toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, toolCallId: msg.toolCallId, description, status: 'running', timestamp: Date.now(), input }];
-          if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
+          if (sid) {
+            const tools = [...toolsBuf.current];
+            // Re-enable streaming if a tool starts after response finalized the bubble
+            setSending(true);
+            setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools, streaming: true } : m));
+          }
         } else if (msg.type === 'tool_complete') {
           const output = msg.output ?? msg.result;
           const outputStr = output ? (typeof output === 'string' ? output : JSON.stringify(output)) : (msg.error ? `Error: ${msg.error}` : undefined);
@@ -238,8 +243,8 @@ export function useHeadlessChat(
           );
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'response') {
-          // Update message content but DON'T clear activeStreamId — turn_end does that.
-          // The SDK may fire response (assistant.message) mid-turn before more tools run.
+          // Finalize the message display but keep activeStreamId alive —
+          // if more tools arrive before turn_end, they attach to the same bubble.
           if (sid) {
             const text = msg.content || streamBuf.current;
             const thinking = msg.thinking || thinkBuf.current || undefined;
@@ -249,9 +254,13 @@ export function useHeadlessChat(
               : undefined;
             streamBuf.current = text;
             setMessages(prev => prev.map(m => m.id === sid ? {
-              ...m, text, thinking, tokens, tools, streaming: true,
+              ...m, text, thinking, tokens, tools, streaming: false,
             } : m));
           }
+          setLiveIntent(null);
+          setLiveUsage(null);
+          setSending(false);
+          setTurnStartedAt(null);
         } else if (msg.type === 'aborted') {
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
