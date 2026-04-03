@@ -203,19 +203,8 @@ const MiniChat = memo(function MiniChat({
           <button
             onClick={() => {
               setWaking(true);
-              chat.setMessages(prev => [
-                ...prev,
-                { id: `sys-wake-${Date.now()}`, role: 'system' as const, text: '⏳ Waking agent…', timestamp: Date.now() },
-              ]);
-              api.relayMessage('dashboard', agent.name, 'wake up')
-                .then(() => { setForceConnect(true); setWaking(false); })
-                .catch((e: any) => {
-                  chat.setMessages(prev => [
-                    ...prev,
-                    { id: `err-wake-${Date.now()}`, role: 'system' as const, text: `⚠ Failed to wake: ${e.message}`, timestamp: Date.now() },
-                  ]);
-                  setWaking(false);
-                });
+              setForceConnect(true);
+              setWaking(false);
             }}
             className="px-4 py-2 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/20 text-xs font-medium transition-all active:scale-95"
           >

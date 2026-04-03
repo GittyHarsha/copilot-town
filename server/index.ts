@@ -370,7 +370,13 @@ wssHeadless.on('connection', async (ws, req) => {
   addStreamListener(agentName, streamHandler);
 
   // Send current agent status so the client can sync its loading state
-  const currentAgent = getHeadlessAgent(agentName);
+  // If the agent isn't in memory, try auto-reviving from persisted sessions
+  let currentAgent = getHeadlessAgent(agentName);
+  if (!currentAgent) {
+    try {
+      currentAgent = await getOrReviveHeadless(agentName) || undefined;
+    } catch { /* ignore – agent may not exist */ }
+  }
   if (currentAgent) {
     ws.send(JSON.stringify({
       type: 'status_sync',
