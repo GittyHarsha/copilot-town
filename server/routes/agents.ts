@@ -279,9 +279,16 @@ router.get('/:id/messages', async (req, res) => {
         const messages = await getHeadlessMessages(agent.name);
         return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
       } catch (histErr: any) {
-        console.error(`[messages] Failed to get messages for "${agent.name}":`, histErr?.message || histErr);
-        // Agent can't be revived — return empty
-        return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [] });
+        console.error(`[messages] getHeadlessMessages failed for "${agent.name}":`, histErr?.message || histErr);
+        // Fallback: lightweight session message fetch (no full agent revive)
+        try {
+          console.log(`[messages] Falling back to getSessionMessages for "${agent.name}" (${agent.sessionId.slice(0, 8)})`);
+          const messages = await getSessionMessages(agent.sessionId);
+          return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+        } catch (fallbackErr: any) {
+          console.error(`[messages] Fallback also failed for "${agent.name}":`, fallbackErr?.message || fallbackErr);
+          return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [], error: fallbackErr?.message });
+        }
       }
     }
 
