@@ -70,21 +70,58 @@ export function broadcastToAgent(name: string, event: any) {
 // ── System Prompt Builder ────────────────────────────────────────
 
 function buildSystemMessage(name: string, role?: string) {
+  // Gather live context so the agent knows exactly who's around
+  const agents = getAllAgents();
+  const others = agents
+    .filter(a => a.name !== name)
+    .map(a => {
+      const status = a.status || 'unknown';
+      const type = (a as any).type || 'pane';
+      const task = (a as any).task || '';
+      return `  - ${a.name} (${type}, ${status})${task ? ` — ${task}` : ''}`;
+    });
+
+  // Gather shared notes
+  let notesSummary = '';
+  try {
+    const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+    const notes = raw.notes || {};
+    const noteEntries = Object.entries(notes).slice(0, 10);
+    if (noteEntries.length > 0) {
+      notesSummary = '\n\n## Shared Notes\n' + noteEntries
+        .map(([k, v]: any) => `  - **${k}**: ${v.value.slice(0, 200)} (by ${v.author})`)
+        .join('\n');
+    }
+  } catch {}
+
   const identity = `You are "${name}", an AI agent in Copilot Town — a multi-agent collaboration environment.`;
-  const instructions = [
-    'You can see other agents via the get_agents tool and message them via relay_message.',
-    'Share knowledge with share_note and read it with read_notes.',
-    'Update your status with set_status so the dashboard shows your activity.',
-    'Be concise and action-oriented. Collaborate proactively.',
-  ].join('\n');
-  const roleSection = role ? `\nYour role: ${role}` : '';
+  const roleSection = role ? `\n\n**Your role:** ${role}` : '';
+
+  const teamSection = others.length > 0
+    ? `\n\n## Your Team (${others.length} agents)\n${others.join('\n')}`
+    : '\n\n## Your Team\nNo other agents are online yet.';
+
+  const instructions = `
+## How to Collaborate
+
+**Talk to agents** — use relay_message(to, message). Messages are delivered instantly. The other agent's response comes back in the tool result.
+**Check who's around** — use get_agents to refresh the live roster.
+**Share findings** — use share_note(key, value) to post information any agent can read.
+**Read shared info** — use read_notes() to see what others have shared.
+**Show your work** — use set_status(task) so the dashboard shows what you're doing.
+
+### Communication Tips
+- Address agents by name: relay_message(to="researcher", message="What did you find about X?")
+- Be specific in messages — the recipient has no context about your conversation.
+- When asked to coordinate, proactively reach out rather than waiting.
+- Share results via notes so the whole team benefits.`;
 
   return {
     mode: 'customize' as const,
     sections: {
       identity: { action: 'replace' as const, content: identity + roleSection },
     },
-    content: `\n## Copilot Town Collaboration\n${instructions}`,
+    content: teamSection + notesSummary + '\n' + instructions,
   };
 }
 
@@ -760,7 +797,7 @@ export function isHeadless(name: string): boolean {
 function registerAgentTools(session: CopilotSession, agentName: string) {
   session.registerTools([
     defineTool('get_agents', {
-      description: 'Get the list of all agents in Copilot Town with their status.',
+      description: 'Get the list of all agents in Copilot Town with their status, type, and current task.',
       parameters: {},
       handler: async () => {
         const agents = getAllAgents();
@@ -768,15 +805,18 @@ function registerAgentTools(session: CopilotSession, agentName: string) {
           name: a.name,
           status: a.status,
           type: (a as any).type || 'pane',
+          task: (a as any).task || null,
+          model: (a as any).model || null,
           sessionId: a.sessionId?.slice(0, 8),
+          isMe: a.name === agentName,
         }));
       },
     }),
     defineTool('relay_message', {
-      description: 'Send a message to another agent in Copilot Town.',
+      description: 'Send a message to another agent and get their response. Use this to ask questions, share information, or coordinate tasks with teammates.',
       parameters: {
-        to: { type: 'string', description: 'Target agent name' },
-        message: { type: 'string', description: 'Message to send' },
+        to: { type: 'string', description: 'Target agent name (exact match from get_agents)' },
+        message: { type: 'string', description: 'Your message to the agent. Be specific — they have no context about your conversation.' },
       },
       handler: async (params: any) => {
         const SAFE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
