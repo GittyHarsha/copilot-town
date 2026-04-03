@@ -142,10 +142,26 @@ Headless agents run Copilot sessions via the SDK — no terminal pane required. 
 - **Chat** via the inline chat panel (Dashboard) or the **Live Grid** (mission control for all headless agents)
 - **Promote/demote** — move pane agents to headless and back with MCP tools
 - **SDK controls** — enqueue prompts (`Ctrl+Q`), steer mid-turn (just hit Enter), abort, compact context
-- **Auto-revive** — stopped headless agents are automatically revived when you send them a message
-- **Streaming** — real-time token streaming, thinking indicators, tool usage badges
+- **Auto-revive** — stopped headless agents are automatically revived when you open their chat or click ⚡ Wake Agent
+- **Streaming** — real-time token streaming with auto-scroll that follows output while you're at the bottom, pauses when you scroll up
+- **Thinking indicators** — elapsed timer shows how long the agent has been thinking, with a slow-response warning after 30 seconds
+- **Message attribution** — relay messages from other agents show `↗ from agent-name`; dashboard messages display cleanly without labels
 
-The **Live Grid** (`2`) shows all headless agents in a configurable grid (1–4 columns), with per-cell chat, status indicators, and expand-to-full-panel.
+### Agent Collaboration
+
+Headless agents get **5 collaboration tools** via a built-in MCP server (`mcp-collab.ts`) that launches automatically per session:
+
+| Tool | Description |
+|------|-------------|
+| `get_agents` | List all agents with status, type, model, and current task |
+| `relay_message` | Send a message to another agent and get their response |
+| `share_note` | Post a key-value note for the entire team to read |
+| `read_notes` | Read shared team notes |
+| `set_status` | Update your status on the dashboard |
+
+Each headless agent also receives a **team-aware system prompt** with a live roster of all agents, shared notes summary, and collaboration guidelines. Agents use tools directly — no scripts, no workarounds.
+
+The **Live Grid** (`2`) shows all headless agents in a configurable grid (1–4 columns), with per-cell chat, status indicators, wake button for stopped agents, and expand-to-full-panel.
 
 ## Workflows
 
@@ -236,6 +252,7 @@ copilot-town/
 │   └── copilot-town.ps1     # CLI wrapper for start/stop/open/status
 ├── server/
 │   ├── index.ts             # Express + 3 WebSocket servers (status, terminal, headless)
+│   ├── mcp-collab.ts        # MCP stdio server for headless agent collaboration tools
 │   ├── routes/              # REST API (agents, psmux, relays, sessions, workflows, …)
 │   └── services/
 │       ├── agents.ts        # Discovery engine, status detection, lifecycle
@@ -255,6 +272,7 @@ copilot-town/
 - **Session-first identity** — `agent.id` = Copilot session UUID. Templates are optional roles, not identities
 - **Silent server** — `ensure-server.cjs` spawns the server with `detached: false` on Windows (no console flash) and responds to MCP `initialize` immediately (no blocking)
 - **Auto-wake relay** — when relaying to a stopped agent, the hub auto-resumes it in a new pane, polls for copilot prompt readiness, then delivers the message
+- **MCP collaboration** — headless agents get team tools via a per-session stdio MCP server (`mcp-collab.ts`), not SDK `registerTools()` (which only stores local handlers). This ensures tools persist across session revives
 - **PID-based pane detection** — on register, the MCP bridge sends `process.ppid` and the server walks the process tree to match against pane PIDs (cross-platform: Win32_Process on Windows, `ps -o ppid` on Unix)
 - **Auto-titling** — psmux windows are automatically renamed to match agent names on spawn, resume, and periodic sync
 - **Pane layout tracking** — `psmux_layout` in `agent-sessions.json` maps pane targets to agent names, surviving pane renumbering
