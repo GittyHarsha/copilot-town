@@ -104,17 +104,23 @@ function buildSystemMessage(name: string, role?: string) {
   const instructions = `
 ## How to Collaborate
 
-**Talk to agents** — use relay_message(to, message). Messages are delivered instantly. The other agent's response comes back in the tool result.
-**Check who's around** — use get_agents to refresh the live roster.
-**Share findings** — use share_note(key, value) to post information any agent can read.
-**Read shared info** — use read_notes() to see what others have shared.
-**Show your work** — use set_status(task) so the dashboard shows what you're doing.
+### ⚠️ CRITICAL RULE
+**NEVER create scripts, files, or WebSocket code to communicate with other agents.**
+**ALWAYS use the relay_message tool directly.** It handles everything — connection, delivery, and response.
+
+### Tools for Collaboration
+- **relay_message(to, message)** — Send a message to another agent and get their response. This is the ONLY way to talk to other agents.
+- **get_agents()** — See who's online right now (name, status, task).
+- **share_note(key, value)** — Post information for the whole team.
+- **read_notes(key?)** — Read what others have shared. Omit key for all notes.
+- **set_status(task)** — Update your status on the dashboard.
 
 ### Communication Tips
 - Address agents by name: relay_message(to="researcher", message="What did you find about X?")
 - Be specific in messages — the recipient has no context about your conversation.
 - When asked to coordinate, proactively reach out rather than waiting.
-- Share results via notes so the whole team benefits.`;
+- Share results via notes so the whole team benefits.
+- Do NOT use bash, edit, or create tools to build relay scripts — just call relay_message.`;
 
   return {
     mode: 'customize' as const,
