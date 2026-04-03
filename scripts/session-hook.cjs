@@ -29,23 +29,14 @@ function ensureLaunchers() {
     const isWin = process.platform === 'win32';
     if (isWin) {
       const cmdPath = path.join(COPILOT_DIR, 'copilot-town.cmd');
-      const ps1Src = path.join(PLUGIN_ROOT, 'scripts', 'copilot-town.ps1');
-      const content = `@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "${ps1Src}" %*\r\n`;
+      const ctlScript = path.join(PLUGIN_ROOT, 'scripts', 'ctl.cjs');
+      const content = `@echo off\r\nnode "${ctlScript}" %*\r\n`;
       // Always overwrite — plugin path may change between installs
       fs.writeFileSync(cmdPath, content);
     } else {
       const shPath = path.join(COPILOT_DIR, 'copilot-town');
-      const ps1Src = path.join(PLUGIN_ROOT, 'scripts', 'copilot-town.ps1');
-      // Use bash wrapper that calls start.ps1 via node for Unix
-      const startScript = path.join(PLUGIN_ROOT, 'start.sh');
-      let content;
-      if (fs.existsSync(startScript)) {
-        content = `#!/bin/sh\nexec "${startScript}" "$@"\n`;
-      } else {
-        // Fallback: call node ensure-server.cjs --start
-        const ensure = path.join(PLUGIN_ROOT, 'scripts', 'ensure-server.cjs');
-        content = `#!/bin/sh\ncase "\${1:-status}" in\n  start)\n    cd "${PLUGIN_ROOT}" && npx tsx server/index.ts &\n    echo "[copilot-town] Server starting on port \${COPILOT_TOWN_PORT:-3848}"\n    ;;\n  stop)\n    PID=$(lsof -ti:\${COPILOT_TOWN_PORT:-3848} 2>/dev/null)\n    [ -n "$PID" ] && kill "$PID" && echo "[copilot-town] Stopped (PID $PID)" || echo "[copilot-town] Not running"\n    ;;\n  open)\n    open "http://localhost:\${COPILOT_TOWN_PORT:-3848}" 2>/dev/null || xdg-open "http://localhost:\${COPILOT_TOWN_PORT:-3848}" 2>/dev/null\n    ;;\n  status)\n    lsof -i:\${COPILOT_TOWN_PORT:-3848} >/dev/null 2>&1 && echo "[copilot-town] Running on port \${COPILOT_TOWN_PORT:-3848}" || echo "[copilot-town] Not running"\n    ;;\n  *) echo "Usage: copilot-town {start|stop|open|status}";;\nesac\n`;
-      }
+      const ctlScript = path.join(PLUGIN_ROOT, 'scripts', 'ctl.cjs');
+      const content = `#!/bin/sh\nnode "${ctlScript}" "$@"\n`;
       fs.writeFileSync(shPath, content, { mode: 0o755 });
     }
   } catch {
