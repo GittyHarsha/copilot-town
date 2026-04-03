@@ -361,6 +361,15 @@ wssHeadless.on('connection', async (ws, req) => {
   };
   addStreamListener(agentName, streamHandler);
 
+  // Send current agent status so the client can sync its loading state
+  const currentAgent = getHeadlessAgent(agentName);
+  if (currentAgent) {
+    ws.send(JSON.stringify({
+      type: 'status_sync',
+      agentStatus: currentAgent.status,
+    }));
+  }
+
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());

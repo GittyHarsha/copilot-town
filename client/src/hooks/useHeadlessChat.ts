@@ -300,6 +300,15 @@ export function useHeadlessChat(
           }
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
           setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
+        } else if (msg.type === 'status_sync') {
+          // Server sends agent status on connect — sync client state
+          if (msg.agentStatus === 'running') {
+            // Agent is mid-response (another client triggered it) — show loading
+            if (!sending) setSending(true);
+          } else {
+            // Agent is idle/stopped — ensure we're not stuck loading
+            if (sending && !activeStreamId.current) setSending(false);
+          }
         } else if (msg.type === 'user_message') {
           const prompt = msg.prompt || '';
           const from = prompt.startsWith('[Message from ') ? prompt.match(/\[Message from (.+?)\]/)?.[1] : undefined;
@@ -307,7 +316,7 @@ export function useHeadlessChat(
         }
       } catch {}
     };
-  }, [agentName, trimMessages]);
+  }, [agentName, trimMessages, sending]);
 
   /* ── WebSocket connection with auto-reconnect ── */
   const connectWs = useCallback(() => {
@@ -343,8 +352,11 @@ export function useHeadlessChat(
         ));
         activeStreamId.current = null;
         streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-        setSending(false);
       }
+      // Always clear sending on disconnect — we can't guarantee turn_end will arrive
+      // after reconnect since the stream listener was removed server-side.
+      setSending(false);
+      setTurnStartedAt(null);
       clearTimeout(reconnectTimer.current);
       const delay = reconnectDelay.current;
       // Start countdown for UI display
@@ -385,6 +397,31 @@ export function useHeadlessChat(
       setAgentMode(mode === 'interactive' ? 'autopilot' : mode);
     }).catch(() => {});
   }, [agentName]);
+
+  /* ── Sending timeout safety net ──
+   * If `sending` stays true for 120s without any streaming event clearing it,
+   * force-reset to idle so the user isn't stuck in a loading state forever.
+   */
+  useEffect(() => {
+    if (!sending) return;
+    const timeout = setTimeout(() => {
+      setSending(false);
+      setTurnStartedAt(null);
+      if (activeStreamId.current) {
+        setMessages(prev => prev.map(m =>
+          m.id === activeStreamId.current ? { ...m, streaming: false } : m
+        ));
+        activeStreamId.current = null;
+        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+      }
+      setMessages(prev => [...prev, {
+        id: `sys-${msgCounter.current++}`, role: 'system' as const,
+        text: '⚠ Response timed out — you can send again.',
+        timestamp: Date.now(),
+      }]);
+    }, 120_000);
+    return () => clearTimeout(timeout);
+  }, [sending]);
 
   /* ── Actions ── */
   const send = useCallback((text: string, action?: 'enqueue' | 'steer') => {
