@@ -1100,6 +1100,10 @@ export async function rerunFromStep(
   // ── Reset target + downstream steps to pending ──
   for (const step of run.steps) {
     if (resetSet.has(step.id)) {
+      // Destroy old agent so executeStep can create a fresh one
+      if (step.agentName) {
+        try { await destroyHeadlessAgent(step.agentName); } catch { /* already gone */ }
+      }
       step.status = 'pending';
       step.output = '';
       step.error = undefined;
@@ -1356,6 +1360,11 @@ export async function rerunSingleStep(
         // Agent gone — fall through to fresh re-execution
       }
     }
+  }
+
+  // Destroy old agent so executeStep can create a fresh one
+  if (targetStep.agentName) {
+    try { await destroyHeadlessAgent(targetStep.agentName); } catch { /* already gone */ }
   }
 
   // Reset just this step
