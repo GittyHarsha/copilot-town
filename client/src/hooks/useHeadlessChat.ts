@@ -105,6 +105,10 @@ export function useHeadlessChat(
   const historyIndexRef = useRef<number>(-1);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectDelay = useRef(1000);
+  const sendingRef = useRef(false);
+
+  /* helper: keep sendingRef in sync with state (for use in wireWs without deps) */
+  useEffect(() => { sendingRef.current = sending; }, [sending]);
 
   /* helper: trim messages if maxMessages set */
   const trimMessages = useCallback((msgs: ChatMessage[]) => {
@@ -303,11 +307,9 @@ export function useHeadlessChat(
         } else if (msg.type === 'status_sync') {
           // Server sends agent status on connect — sync client state
           if (msg.agentStatus === 'running') {
-            // Agent is mid-response (another client triggered it) — show loading
-            if (!sending) setSending(true);
+            if (!sendingRef.current) setSending(true);
           } else {
-            // Agent is idle/stopped — ensure we're not stuck loading
-            if (sending && !activeStreamId.current) setSending(false);
+            if (sendingRef.current && !activeStreamId.current) setSending(false);
           }
         } else if (msg.type === 'user_message') {
           const prompt = msg.prompt || '';
@@ -316,7 +318,7 @@ export function useHeadlessChat(
         }
       } catch {}
     };
-  }, [agentName, trimMessages, sending]);
+  }, [agentName, trimMessages]);
 
   /* ── WebSocket connection with auto-reconnect ── */
   const connectWs = useCallback(() => {
