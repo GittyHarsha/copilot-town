@@ -274,12 +274,14 @@ router.get('/:id/messages', async (req, res) => {
   try {
     // Headless agents: structured messages with thinking, tool calls, tokens
     if (agent.type === 'headless') {
-      const { getHeadlessMessages, getHeadlessAgent } = await import('../services/headless.js');
-      // Only load messages if agent is actually alive in memory (avoid reviving just for history)
-      const live = getHeadlessAgent(agent.name);
-      if (!live) return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [] });
-      const messages = await getHeadlessMessages(agent.name);
-      return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+      const { getHeadlessMessages } = await import('../services/headless.js');
+      try {
+        const messages = await getHeadlessMessages(agent.name);
+        return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+      } catch {
+        // Agent can't be revived — return empty
+        return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [] });
+      }
     }
 
     // Pane agents: raw SDK session messages
