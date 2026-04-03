@@ -278,7 +278,8 @@ router.get('/:id/messages', async (req, res) => {
       try {
         const messages = await getHeadlessMessages(agent.name);
         return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
-      } catch {
+      } catch (histErr: any) {
+        console.error(`[messages] Failed to get messages for "${agent.name}":`, histErr?.message || histErr);
         // Agent can't be revived — return empty
         return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [] });
       }

@@ -3,6 +3,7 @@ import { MarkdownContent, relativeTime } from './ChatMarkdown';
 import { ThinkingBlock, InlineToolCall, ToolTimeline, type ToolCall, type UsageInfo } from './ChatWidgets';
 import { useHeadlessChat, type ChatMessage, type UseHeadlessChatReturn } from '../hooks/useHeadlessChat';
 import { api } from '../lib/api';
+import { getCachedModels, fetchModels, type ModelInfo } from '../lib/models';
 
 export type { ChatMessage, UseHeadlessChatReturn } from '../hooks/useHeadlessChat';
 
@@ -21,6 +22,36 @@ interface Props {
 /* ═══════════════════════════════════════════════════════════════════
    Helpers
    ═══════════════════════════════════════════════════════════════════ */
+
+const SLASH_COMMANDS = [
+  { cmd: 'compact', icon: '🗜️', label: 'Compress context', desc: 'Reduce token usage by summarizing history' },
+  { cmd: 'clear',   icon: '🗑️', label: 'Clear chat',       desc: 'Remove all messages from view' },
+  { cmd: 'abort',   icon: '⏹️', label: 'Stop response',    desc: 'Cancel the current generation' },
+  { cmd: 'mode',    icon: '🎛️', label: 'Change mode',      desc: 'interactive / plan / autopilot', suffix: ' ' },
+  { cmd: 'model',   icon: '🧠', label: 'Switch model',     desc: 'e.g. claude-sonnet-4', suffix: ' ' },
+  { cmd: 'help',    icon: '📖', label: 'Show help',        desc: 'List all available commands' },
+] as const;
+
+const MODE_OPTIONS = [
+  { value: 'interactive', icon: '💬', desc: 'You approve each action' },
+  { value: 'plan',        icon: '📋', desc: 'Agent plans, you approve execution' },
+  { value: 'autopilot',   icon: '🚀', desc: 'Agent works autonomously' },
+] as const;
+
+const TIER_ICONS: Record<string, string> = { premium: '💎', standard: '⚡', fast: '🏎️' };
+
+/** Parses the current input to determine what slash menu to show */
+function parseSlashInput(input: string) {
+  if (!input.startsWith('/')) return { phase: 'none' as const };
+  const rest = input.slice(1);
+  const spaceIdx = rest.indexOf(' ');
+  if (spaceIdx === -1) return { phase: 'command' as const, query: rest.toLowerCase() };
+  const cmd = rest.slice(0, spaceIdx).toLowerCase();
+  const arg = rest.slice(spaceIdx + 1).toLowerCase();
+  if (cmd === 'model') return { phase: 'model' as const, query: arg };
+  if (cmd === 'mode')  return { phase: 'mode' as const, query: arg };
+  return { phase: 'none' as const };
+}
 
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -106,6 +137,36 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   /* ── Scroll-to-bottom visibility ── */
   const [isScrolledUp, setIsScrolledUp] = useState(false);
   const [modeConfirmed, setModeConfirmed] = useState(false);
+
+  const [slashIdx, setSlashIdx] = useState(0);
+  const [models, setModels] = useState<ModelInfo[]>(() => getCachedModels());
+
+  // Fetch models on mount so they're ready for /model sub-menu
+  useEffect(() => { fetchModels().then(setModels); }, []);
+
+  const slashParsed = useMemo(() => parseSlashInput(input), [input]);
+
+  // Build the unified options list for the slash menu
+  const slashOptions = useMemo(() => {
+    if (slashParsed.phase === 'command') {
+      return SLASH_COMMANDS
+        .filter(c => c.cmd.startsWith(slashParsed.query))
+        .map(c => ({ key: c.cmd, icon: c.icon, label: `/${c.cmd}`, desc: c.desc, fill: `/${c.cmd}${c.suffix ?? ''}`, execute: !c.suffix }));
+    }
+    if (slashParsed.phase === 'mode') {
+      return MODE_OPTIONS
+        .filter(m => m.value.startsWith(slashParsed.query))
+        .map(m => ({ key: m.value, icon: m.icon, label: m.value, desc: m.desc, fill: `/mode ${m.value}`, execute: true }));
+    }
+    if (slashParsed.phase === 'model') {
+      return models
+        .filter(m => m.value.includes(slashParsed.query) || m.label.toLowerCase().includes(slashParsed.query))
+        .map(m => ({ key: m.value, icon: TIER_ICONS[m.tier] || '⚡', label: m.label, desc: m.value, fill: `/model ${m.value}`, execute: true }));
+    }
+    return [];
+  }, [slashParsed, models]);
+
+  const showSlashMenu = slashOptions.length > 0;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -342,6 +403,23 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   }, [chat, agentName, agentMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    /* ── Slash menu navigation ── */
+    if (showSlashMenu) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % slashOptions.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setSlashIdx(i => (i - 1 + slashOptions.length) % slashOptions.length); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const picked = slashOptions[slashIdx];
+        if (picked) {
+          if (picked.execute) { handleSlashCommand(picked.fill); setInput(''); }
+          else { setInput(picked.fill); }
+          setSlashIdx(0);
+        }
+        return;
+      }
+      if (e.key === 'Escape') { setInput(''); setSlashIdx(0); return; }
+    }
+
     /* ── Input history navigation ── */
     if (e.key === 'ArrowUp' && !input && !e.shiftKey) {
       e.preventDefault();
@@ -768,6 +846,38 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               {reconnectCountdown ? `Reconnecting in ${reconnectCountdown}s…` : 'Reconnecting…'}
             </div>
           )}
+          {/* ── Slash command autocomplete ── */}
+          {showSlashMenu && (
+            <div className="mb-1.5 rounded-lg border border-border/50 bg-bg-1 shadow-lg overflow-hidden max-h-[280px] overflow-y-auto"
+                 style={{ backdropFilter: 'blur(12px)' }}>
+              <div className="px-2.5 py-1.5 border-b border-border/30 sticky top-0 bg-bg-1/95 z-10">
+                <span className="text-[10px] text-fg-2/40 font-medium tracking-wide uppercase">
+                  {slashParsed.phase === 'model' ? 'Models' : slashParsed.phase === 'mode' ? 'Modes' : 'Commands'}
+                </span>
+              </div>
+              {slashOptions.map((opt, i) => (
+                <button key={opt.key}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition-colors ${
+                    i === slashIdx ? 'bg-blue-500/10 text-fg' : 'text-fg-2 hover:bg-bg-2/60 hover:text-fg'
+                  }`}
+                  onMouseEnter={() => setSlashIdx(i)}
+                  onClick={() => {
+                    if (opt.execute) { handleSlashCommand(opt.fill); setInput(''); }
+                    else { setInput(opt.fill); }
+                    setSlashIdx(0);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <span className="text-sm w-5 text-center">{opt.icon}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="text-[12px] font-medium">{opt.label}</span>
+                    <span className="text-[11px] text-fg-2/50 ml-2">{opt.desc}</span>
+                  </span>
+                  {i === slashIdx && <span className="text-[10px] text-fg-2/30">↵</span>}
+                </button>
+              ))}
+            </div>
+          )}
           <div className={headerless ? 'flex items-center gap-1.5' : 'flex items-end gap-2.5'}>
             <textarea
               ref={inputRef}
@@ -778,7 +888,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               rows={1}
               value={input}
               disabled={!!pendingPermission}
-              onChange={e => { setInput(e.target.value); chat.historyIndex.current = -1; }}
+              onChange={e => { setInput(e.target.value); chat.historyIndex.current = -1; setSlashIdx(0); }}
               onKeyDown={handleKeyDown}
               onInput={e => {
                 const t = e.currentTarget;
