@@ -126,9 +126,14 @@ export function useHeadlessChat(
   /* ── Load conversation history ── */
   useEffect(() => {
     if (!agentName || !loadHistory) { setHistoryLoaded(true); return; }
+    let cancelled = false;
+    const controller = new AbortController();
+    // Timeout: if history fetch takes >10s, give up and show empty state
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     (async () => {
       try {
         const data = await api.getAgentMessages(agentName);
+        if (cancelled) return;
         if (!data?.messages) { setHistoryLoaded(true); return; }
         const seen = new Set<string>();
         const history: ChatMessage[] = [];
@@ -164,9 +169,11 @@ export function useHeadlessChat(
           return trimMessages([...deduped, ...prev]);
         });
       } catch {} finally {
-        setHistoryLoaded(true);
+        clearTimeout(timeout);
+        if (!cancelled) setHistoryLoaded(true);
       }
     })();
+    return () => { cancelled = true; controller.abort(); clearTimeout(timeout); };
   }, [agentName, loadHistory, trimMessages]);
 
   /* ── WebSocket message handler ── */
@@ -273,6 +280,14 @@ export function useHeadlessChat(
           }
           setLiveIntent(null);
           setLiveUsage(null);
+          // Safety net: if turn_end doesn't arrive within 5s after response, finalize anyway
+          setTimeout(() => {
+            if (activeStreamId.current) {
+              setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, streaming: false } : m));
+              activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+              setSending(false); setTurnStartedAt(null);
+            }
+          }, 5000);
         } else if (msg.type === 'aborted') {
           abortedRef.current = true;
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
