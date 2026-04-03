@@ -62,6 +62,10 @@ export function addStreamListener(name: string, listener: StreamListener) {
 export function removeStreamListener(name: string, listener: StreamListener) {
   _streamListeners.get(name)?.delete(listener);
 }
+export function broadcastToAgent(name: string, event: any) {
+  const listeners = _streamListeners.get(name);
+  if (listeners) listeners.forEach(fn => fn(event));
+}
 
 // ── System Prompt Builder ────────────────────────────────────────
 
@@ -289,6 +293,33 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
   // Session mode changes
   sess.on('session.mode_changed', (e: any) => {
     emit({ type: 'mode_changed', mode: e?.data?.mode });
+  });
+
+  // Permission request forwarding
+  sess.on('permission.request', (e: any) => {
+    const d = e?.data || e || {};
+    emit({
+      type: 'permission_request',
+      requestId: d.requestId || d.id,
+      tool: d.toolName || d.tool || d.name,
+      args: d.arguments || d.args,
+    });
+  });
+
+  // Error event forwarding
+  sess.on('agent.error', (e: any) => {
+    const d = e?.data || e || {};
+    emit({ type: 'error', message: d.message || d.error || 'Agent error' });
+  });
+
+  sess.on('tool.error', (e: any) => {
+    const d = e?.data || e || {};
+    emit({
+      type: 'tool_error',
+      tool: d.toolName || d.tool || d.name,
+      toolCallId: d.toolCallId,
+      error: d.message || d.error || 'Tool execution failed',
+    });
   });
 }
 

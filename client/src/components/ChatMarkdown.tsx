@@ -26,7 +26,10 @@ export function relativeTime(ts: number): string {
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  return `${h}h ${m}m`;
 }
 
 /* ─── Code block with copy button ─────────────────────────── */
@@ -34,6 +37,7 @@ export function formatDuration(ms: number): string {
 export function CodeBlock({ children, className }: { children?: ReactNode; className?: string }) {
   const textRef = useRef<HTMLElement>(null);
   const [copied, setCopied] = useState(false);
+  const language = className?.replace(/^(language-|hljs )/, '').split(' ')[0];
 
   const handleCopy = () => {
     const text = textRef.current?.textContent || '';
@@ -45,10 +49,15 @@ export function CodeBlock({ children, className }: { children?: ReactNode; class
   return (
     <div className="group/code relative">
       <code ref={textRef} className={className}>{children}</code>
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 text-[10px] px-1.5 py-0.5 rounded bg-bg-3/80 text-fg-2/60 hover:text-fg border border-border/40 opacity-100 sm:opacity-0 sm:group-hover/code:opacity-100 transition-opacity"
-      >{copied ? '✓' : 'Copy'}</button>
+      <div className="absolute top-2 right-2 flex items-center gap-1.5">
+        {language && language !== 'undefined' && (
+          <span className="text-[9px] text-fg-2/30 font-mono">{language}</span>
+        )}
+        <button
+          onClick={handleCopy}
+          className="text-[10px] px-1.5 py-0.5 rounded bg-bg-3/80 text-fg-2/60 hover:text-fg border border-border/40 opacity-100 sm:opacity-0 sm:group-hover/code:opacity-100 transition-opacity"
+        >{copied ? '✓' : 'Copy'}</button>
+      </div>
     </div>
   );
 }
@@ -89,9 +98,29 @@ export const MarkdownContent = memo(function MarkdownContent({ content }: { cont
           if (isBlock) return <CodeBlock className={className}>{children}</CodeBlock>;
           return <code className="text-[11px] px-1 py-0.5 rounded bg-bg-3/60 text-pink-400/90 border border-border/30 font-mono" {...rest}>{children}</code>;
         },
-        a: ({ href, children }) => (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">{children}</a>
-        ),
+        a: ({ href, children, ...props }: any) => {
+          if (href && /^(javascript|vbscript|data(?!:image)):/i.test(href)) {
+            return <span>{children}</span>;
+          }
+          return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline" {...props}>{children}</a>;
+        },
+        img: ({ src, alt, ...props }: any) => {
+          if (!src) return null;
+          if (!/^https?:\/\//.test(src) && !src.startsWith('data:image/')) {
+            return <span className="text-fg-2/60">[Image: {alt || src}]</span>;
+          }
+          return (
+            <img
+              src={src}
+              alt={alt || ''}
+              loading="lazy"
+              className="max-w-full rounded my-1"
+              style={{ maxHeight: 400 }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              {...props}
+            />
+          );
+        },
         table: ({ children }) => (
           <div className="overflow-x-auto my-2"><table className="text-[11px] border-collapse w-full">{children}</table></div>
         ),

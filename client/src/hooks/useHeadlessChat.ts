@@ -89,9 +89,12 @@ export function useHeadlessChat(
   const [liveIntent, setLiveIntent] = useState<string | null>(null);
   const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
   const [agentMode, setAgentMode] = useState<string>('autopilot');
-  const [pendingPermission, setPendingPermission] = useState<{ id: string; tool: string; args?: any } | null>(null);
+  const [pendingPermissions, setPendingPermissions] = useState<Array<{ id: string; tool: string; args?: any }>>([]);
   const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
   const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+
+  // Derived: first pending permission for backward compat with UI
+  const pendingPermission = pendingPermissions[0] || null;
 
   /* ── Refs ── */
   const wsRef = useRef<WebSocket | null>(null);
@@ -106,6 +109,9 @@ export function useHeadlessChat(
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const reconnectDelay = useRef(1000);
   const sendingRef = useRef(false);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const abortedRef = useRef(false);
+  const lastEventRef = useRef<number>(0);
 
   /* helper: keep sendingRef in sync with state (for use in wireWs without deps) */
   useEffect(() => { sendingRef.current = sending; }, [sending]);
@@ -167,10 +173,12 @@ export function useHeadlessChat(
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
+        lastEventRef.current = Date.now();
         let sid = activeStreamId.current;
 
         // Auto-create placeholder on turn_start (e.g. from relay/external trigger)
         if (msg.type === 'turn_start') {
+          abortedRef.current = false;
           if (!sid) {
             const agentId = `agent-${msgCounter.current++}`;
             activeStreamId.current = agentId;
@@ -186,6 +194,7 @@ export function useHeadlessChat(
         }
 
         // Auto-create placeholder if streaming data arrives with no active stream
+        if (abortedRef.current) return; // Ignore trailing events after abort
         if (!sid && (msg.type === 'message_delta' || msg.type === 'streaming_delta' || msg.type === 'reasoning_delta' || msg.type === 'tool_start')) {
           const agentId = `agent-${msgCounter.current++}`;
           activeStreamId.current = agentId;
@@ -249,7 +258,7 @@ export function useHeadlessChat(
         } else if (msg.type === 'response') {
           // Finalize the message display but keep activeStreamId alive —
           // if more tools arrive before turn_end, they attach to the same bubble.
-          if (sid) {
+          if (activeStreamId.current) {
             const text = msg.content || streamBuf.current;
             const thinking = msg.thinking || thinkBuf.current || undefined;
             const tokens = msg.outputTokens;
@@ -257,7 +266,7 @@ export function useHeadlessChat(
               ? toolsBuf.current.map(t => ({ ...t, status: t.status === 'running' ? 'done' as const : t.status, endTimestamp: t.endTimestamp || Date.now() }))
               : undefined;
             streamBuf.current = text;
-            setMessages(prev => prev.map(m => m.id === sid ? {
+            setMessages(prev => prev.map(m => m.id === activeStreamId.current ? {
               ...m, text, thinking, tokens, tools, streaming: false,
             } : m));
           }
@@ -266,6 +275,7 @@ export function useHeadlessChat(
           setSending(false);
           setTurnStartedAt(null);
         } else if (msg.type === 'aborted') {
+          abortedRef.current = true;
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
           setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
@@ -283,7 +293,7 @@ export function useHeadlessChat(
             setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: `Mode → ${m}`, timestamp: Date.now() }]);
           }
         } else if (msg.type === 'permission_request') {
-          setPendingPermission({ id: msg.requestId, tool: msg.tool, args: msg.args });
+          setPendingPermissions(prev => [...prev, { id: msg.requestId, tool: msg.tool, args: msg.args }]);
         } else if (msg.type === 'system') {
           setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: msg.message, timestamp: Date.now() }]);
         } else if (msg.type === 'error') {
@@ -292,15 +302,15 @@ export function useHeadlessChat(
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
           setLiveIntent(null); setSending(false); setTurnStartedAt(null);
         } else if (msg.type === 'turn_end') {
-          if (sid && streamBuf.current) {
+          if (activeStreamId.current && streamBuf.current) {
             const text = streamBuf.current;
             const thinking = thinkBuf.current || undefined;
             const tools = toolsBuf.current.length > 0
               ? toolsBuf.current.map(t => ({ ...t, status: 'done' as const, endTimestamp: t.endTimestamp || Date.now() }))
               : undefined;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, text, thinking, tools, streaming: false } : m));
-          } else if (sid) {
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, streaming: false } : m));
+            setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text, thinking, tools, streaming: false } : m));
+          } else if (activeStreamId.current) {
+            setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, streaming: false } : m));
           }
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
           setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
@@ -323,7 +333,11 @@ export function useHeadlessChat(
   /* ── WebSocket connection with auto-reconnect ── */
   const connectWs = useCallback(() => {
     if (!agentName) return;
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     const ws = new WebSocket(`${WS_BASE}?agent=${encodeURIComponent(agentName)}`);
     wsRef.current = ws;
     wireWs(ws);
@@ -337,6 +351,8 @@ export function useHeadlessChat(
         // Don't create placeholder eagerly — server events will trigger it
         streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
         setSending(true);
+        lastEventRef.current = Date.now();
+        abortedRef.current = false;
         ws.send(JSON.stringify({ prompt }));
       }
     };
@@ -363,11 +379,11 @@ export function useHeadlessChat(
       const delay = reconnectDelay.current;
       // Start countdown for UI display
       setReconnectCountdown(Math.ceil(delay / 1000));
-      const countdownInterval = setInterval(() => {
+      countdownIntervalRef.current = setInterval(() => {
         setReconnectCountdown(prev => prev !== null && prev > 1 ? prev - 1 : null);
       }, 1000);
       reconnectTimer.current = setTimeout(() => {
-        clearInterval(countdownInterval);
+        clearInterval(countdownIntervalRef.current);
         setReconnectCountdown(null);
         connectWs();
       }, delay);
@@ -380,13 +396,14 @@ export function useHeadlessChat(
     connectWs();
     return () => {
       clearTimeout(reconnectTimer.current);
+      clearInterval(countdownIntervalRef.current);
       wsRef.current?.close();
       wsRef.current = null;
     };
   }, [connectWs, agentName]);
 
   const ensureWs = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return wsRef.current;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return wsRef.current;
     connectWs();
     return wsRef.current!;
   }, [connectWs]);
@@ -406,23 +423,28 @@ export function useHeadlessChat(
    */
   useEffect(() => {
     if (!sending) return;
-    const timeout = setTimeout(() => {
-      setSending(false);
-      setTurnStartedAt(null);
-      if (activeStreamId.current) {
-        setMessages(prev => prev.map(m =>
-          m.id === activeStreamId.current ? { ...m, streaming: false } : m
-        ));
-        activeStreamId.current = null;
-        streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+    const check = () => {
+      const elapsed = Date.now() - lastEventRef.current;
+      if (elapsed > 120_000) {
+        // No event for 120s — truly stuck
+        setSending(false);
+        setTurnStartedAt(null);
+        if (activeStreamId.current) {
+          setMessages(prev => prev.map(m =>
+            m.id === activeStreamId.current ? { ...m, streaming: false } : m
+          ));
+          activeStreamId.current = null;
+          streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+        }
+        setMessages(prev => [...prev, {
+          id: `sys-${msgCounter.current++}`, role: 'system' as const,
+          text: '⚠ No response for 2 minutes — you can send again.',
+          timestamp: Date.now(),
+        }]);
       }
-      setMessages(prev => [...prev, {
-        id: `sys-${msgCounter.current++}`, role: 'system' as const,
-        text: '⚠ Response timed out — you can send again.',
-        timestamp: Date.now(),
-      }]);
-    }, 120_000);
-    return () => clearTimeout(timeout);
+    };
+    const interval = setInterval(check, 10_000); // Check every 10s
+    return () => clearInterval(interval);
   }, [sending]);
 
   /* ── Actions ── */
@@ -443,6 +465,7 @@ export function useHeadlessChat(
 
     if (action === 'enqueue') {
       if (isOpen) ws.send(JSON.stringify({ action: 'enqueue', prompt: text }));
+      else setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '⚠ Not connected — message not queued', timestamp: Date.now() }]);
       return;
     }
     if (action === 'steer') {
@@ -468,11 +491,15 @@ export function useHeadlessChat(
       // Don't create placeholder eagerly — wait for first streaming data to arrive.
       // Just mark as sending so the UI shows immediate "Thinking…" feedback.
       setSending(true);
+      lastEventRef.current = Date.now();
+      abortedRef.current = false;
       streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
       ws!.send(JSON.stringify({ prompt: text }));
     } else {
       pendingSendRef.current = text;
       setSending(true);
+      lastEventRef.current = Date.now();
+      abortedRef.current = false;
       ensureWs();
     }
   }, [sending, ensureWs, trimMessages]);
@@ -496,10 +523,11 @@ export function useHeadlessChat(
   }, [agentName]);
 
   const respondPermission = useCallback((approved: boolean) => {
-    if (!pendingPermission || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ action: 'permission_response', requestId: pendingPermission.id, approved }));
-    setPendingPermission(null);
-  }, [pendingPermission]);
+    if (pendingPermissions.length === 0 || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const perm = pendingPermissions[0];
+    wsRef.current.send(JSON.stringify({ action: 'permission_response', requestId: perm.id, approved }));
+    setPendingPermissions(prev => prev.slice(1));
+  }, [pendingPermissions]);
 
   /* ── Reset on agent change ── */
   useEffect(() => {
@@ -508,7 +536,7 @@ export function useHeadlessChat(
     setHistoryLoaded(false);
     setLiveIntent(null);
     setLiveUsage(null);
-    setPendingPermission(null);
+    setPendingPermissions([]);
     setTurnStartedAt(null);
     setReconnectCountdown(null);
     activeStreamId.current = null;

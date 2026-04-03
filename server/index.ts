@@ -339,6 +339,7 @@ wssTerminal.on('connection', (ws, req) => {
 // Server streams: { type: 'turn_start'|'message_delta'|'reasoning'|'usage'|'response'|'error', ... }
 
 const wssHeadless = new WebSocketServer({ noServer: true });
+const agentSendLocks = new Map<string, Promise<void>>();
 
 wssHeadless.on('connection', async (ws, req) => {
   const url = new URL(req.url || '', `http://localhost:${PORT}`);
@@ -355,7 +356,7 @@ wssHeadless.on('connection', async (ws, req) => {
   // Register as a stream listener for live token-by-token output
   const { addStreamListener, removeStreamListener, getHeadlessAgent, getOrReviveHeadless,
           enqueueToHeadless, steerHeadless, abortHeadless, compactHeadless, persistUserPrompts,
-          setHeadlessMode } = await import('./services/headless.js');
+          setHeadlessMode, broadcastToAgent } = await import('./services/headless.js');
   const streamHandler = (event: any) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   };
@@ -408,6 +409,20 @@ wssHeadless.on('connection', async (ws, req) => {
         return;
       }
 
+      // ── Permission response ──
+      if (action === 'permission_response') {
+        try {
+          let agent = getHeadlessAgent(agentName);
+          if (agent?.session) {
+            // TODO: verify exact SDK method name — may be respondPermission, answerPermission, etc.
+            await (agent.session as any).respondPermission(msg.requestId, msg.approved);
+          }
+        } catch (e: any) {
+          ws.send(JSON.stringify({ type: 'error', message: `Permission response failed: ${e.message}` }));
+        }
+        return;
+      }
+
       if (!msg.prompt) {
         ws.send(JSON.stringify({ type: 'error', message: 'Missing prompt field' }));
         return;
@@ -446,53 +461,74 @@ wssHeadless.on('connection', async (ws, req) => {
       }
 
       // ── Normal send — default ──
-      agent.status = 'running';
-      agent.lastMessageAt = new Date().toISOString();
-      agent.messageCount++;
-      agent.userPrompts.push({ prompt: msg.prompt, timestamp: new Date().toISOString() });
-      persistUserPrompts(agentName, agent.userPrompts);
+      // Acquire per-agent send lock to prevent concurrent sendAndWait corruption
+      while (agentSendLocks.has(agentName)) {
+        await agentSendLocks.get(agentName);
+      }
+      let releaseLock: () => void;
+      agentSendLocks.set(agentName, new Promise(r => releaseLock = r));
 
       try {
-        const sendOpts: any = { prompt: msg.prompt };
-        if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
+        agent.status = 'running';
+        broadcastToAgent(agentName, { type: 'status_changed', status: 'running' });
+        agent.lastMessageAt = new Date().toISOString();
+        agent.messageCount++;
+        agent.userPrompts.push({ prompt: msg.prompt, timestamp: new Date().toISOString() });
+        persistUserPrompts(agentName, agent.userPrompts);
 
-        // sendAndWait blocks until done — response is sent via streaming events
-        // (assistant.message → response event). This just ensures we catch errors.
-        await agent.session.sendAndWait(sendOpts, 600_000);
-        agent.status = 'idle';
-      } catch (e: any) {
-        const errMsg = e.message || '';
-        // Auto-revive: if session expired, create a fresh one and retry
-        if (errMsg.includes('Session not found') || errMsg.includes('session_expired')) {
-          ws.send(JSON.stringify({ type: 'system', message: '⏳ Session expired — creating fresh session…' }));
-          try {
-            const { createHeadlessAgent: createAgent } = await import('./services/headless.js');
-            agent = await createAgent(agentName);
-            if (agent) {
-              ws.send(JSON.stringify({ type: 'system', message: '✓ New session ready' }));
-              const sendOpts2: any = { prompt: msg.prompt };
-              await agent.session.sendAndWait(sendOpts2, 600_000);
-              agent.status = 'idle';
-            } else {
-              ws.send(JSON.stringify({ type: 'error', message: 'Failed to create fresh session' }));
-            }
-          } catch (retryErr: any) {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'error', message: retryErr.message }));
-            }
-          }
-        } else {
+        try {
+          const sendOpts: any = { prompt: msg.prompt };
+          if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
+
+          // sendAndWait blocks until done — response is sent via streaming events
+          // (assistant.message → response event). This just ensures we catch errors.
+          await agent.session.sendAndWait(sendOpts, 600_000);
           agent.status = 'idle';
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'error', message: e.message }));
+          broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
+        } catch (e: any) {
+          const errMsg = e.message || '';
+          // Auto-revive: if session expired, create a fresh one and retry
+          if (errMsg.includes('Session not found') || errMsg.includes('session_expired')) {
+            ws.send(JSON.stringify({ type: 'system', message: '⏳ Session expired — creating fresh session…' }));
+            try {
+              const { createHeadlessAgent: createAgent } = await import('./services/headless.js');
+              agent = await createAgent(agentName);
+              if (agent) {
+                ws.send(JSON.stringify({ type: 'system', message: '✓ New session ready' }));
+                const sendOpts2: any = { prompt: msg.prompt };
+                await agent.session.sendAndWait(sendOpts2, 600_000);
+                agent.status = 'idle';
+                broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
+              } else {
+                ws.send(JSON.stringify({ type: 'error', message: 'Failed to create fresh session' }));
+              }
+            } catch (retryErr: any) {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'error', message: retryErr.message }));
+              }
+            }
+          } else {
+            agent.status = 'idle';
+            broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'error', message: e.message }));
+            }
           }
         }
+      } finally {
+        agentSendLocks.delete(agentName);
+        releaseLock!();
       }
     } catch (e: any) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'error', message: `Parse error: ${e.message}` }));
       }
     }
+  });
+
+  ws.on('error', (err) => {
+    removeStreamListener(agentName, streamHandler);
+    console.error(`Headless WS error for "${agentName}":`, err.message);
   });
 
   ws.on('close', () => {

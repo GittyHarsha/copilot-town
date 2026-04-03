@@ -14,11 +14,12 @@ export interface ToolCall {
   toolCallId?: string;
   name?: string;
   description?: string;
-  status: 'running' | 'done';
+  status: 'running' | 'done' | 'error' | 'denied' | 'cancelled';
   timestamp: number;
   endTimestamp?: number;
   input?: string;
   output?: string;
+  errorMessage?: string;
 }
 
 export interface UsageInfo {
@@ -77,6 +78,15 @@ export function ThinkingBlock({ text, isStreaming, hasResponse }: { text: string
         <span className="text-[10px] text-fg-2/25 tabular-nums">
           {charCount > 100 && `${(charCount / 1000).toFixed(1)}k chars`}
         </span>
+        {expanded && text && (
+          <button
+            onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(text); }}
+            className="text-[9px] text-fg-2/40 hover:text-fg-2 ml-1"
+            title="Copy thinking"
+          >
+            📋
+          </button>
+        )}
       </button>
       <div className={`overflow-hidden transition-all duration-300 ease-out ${expanded ? 'max-h-[500px] opacity-100 mt-1.5' : 'max-h-0 opacity-0'}`}>
         <div className="text-[11px] text-fg-2/55 bg-violet-500/[0.03] rounded-lg p-3 border border-violet-500/[0.06] whitespace-pre-wrap font-mono leading-relaxed overflow-y-auto max-h-[480px]">
@@ -153,9 +163,19 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
     >
       {/* Main row: status icon + tool name + summary + duration */}
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="flex-shrink-0" style={{ color: isRunning ? '#3b82f6' : '#22c55e', fontSize: compact ? '0.6rem' : '0.7rem' }}>
-          {isRunning ? '⏳' : '✓'}
-        </span>
+        {(() => {
+          const statusIcon = tool.status === 'running' ? '⏳'
+            : tool.status === 'error' ? '✗'
+            : tool.status === 'denied' ? '🔒'
+            : tool.status === 'cancelled' ? '⊘'
+            : '✓';
+          const statusColor = tool.status === 'running' ? 'text-amber-400'
+            : tool.status === 'error' ? 'text-red-400'
+            : tool.status === 'denied' ? 'text-amber-500'
+            : tool.status === 'cancelled' ? 'text-fg-2/40'
+            : 'text-emerald-400';
+          return <span className={`flex-shrink-0 ${statusColor}`} style={{ fontSize: compact ? '0.6rem' : '0.7rem' }}>{statusIcon}</span>;
+        })()}
         <span className="text-blue-400/80 flex-shrink-0 font-semibold">{tool.tool}</span>
         {inputSummary && (
           <span className="text-fg-2/50 truncate min-w-0 flex-1">{inputSummary}</span>
@@ -190,6 +210,11 @@ export function InlineToolCall({ tool, compact }: { tool: ToolCall; compact?: bo
               )}
             </div>
           )}
+          {tool.errorMessage && (
+            <div className="text-[10px] text-red-400/80 mt-0.5 font-mono truncate" title={tool.errorMessage}>
+              {tool.errorMessage.slice(0, 200)}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -201,7 +226,7 @@ export function ToolTimeline({ tools, compact }: { tools: ToolCall[]; compact?: 
   return (
     <div className="flex flex-col gap-0.5 my-1">
       {tools.map((t, i) => (
-        <InlineToolCall key={`${t.tool}-${i}`} tool={t} compact={compact} />
+        <InlineToolCall key={t.toolCallId || `tool-${i}`} tool={t} compact={compact} />
       ))}
     </div>
   );

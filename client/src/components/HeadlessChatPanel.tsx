@@ -115,14 +115,19 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   const dragStartWidth = useRef(0);
   const resizeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  /* ── Auto-scroll (only when user is near the bottom) ── */
+  /* ── Auto-scroll (only on new messages, not message updates) ── */
   const isNearBottom = useRef(true);
+  const isUserScrolled = useRef(false);
+  const prevMsgCount = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (isNearBottom.current) {
+    // Only auto-scroll when new messages are added, not when existing ones are updated
+    const newCount = messages.length;
+    if (newCount > prevMsgCount.current && isNearBottom.current && !isUserScrolled.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
+    prevMsgCount.current = newCount;
   }, [messages]);
 
   /* ── Scroll listener — tracks position for auto-scroll + scroll-to-bottom button ── */
@@ -131,8 +136,10 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
     if (!el) return;
     const onScroll = () => {
       const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-      isNearBottom.current = gap <= 150;
-      setIsScrolledUp(gap > 150);
+      isNearBottom.current = gap <= 200;
+      setIsScrolledUp(gap > 200);
+      // Track intentional user scroll-up to prevent auto-scroll yanking
+      isUserScrolled.current = gap > 200;
     };
     el.addEventListener('scroll', onScroll);
     return () => el.removeEventListener('scroll', onScroll);
@@ -498,10 +505,10 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === 'ArrowDown') {
                   e.preventDefault();
-                  setSearchIndex(i => (i + 1) % Math.max(1, searchMatches.length));
+                  setSearchIndex(i => searchMatches.length > 0 ? (i + 1) % searchMatches.length : 0);
                 } else if (e.key === 'ArrowUp') {
                   e.preventDefault();
-                  setSearchIndex(i => (i - 1 + searchMatches.length) % Math.max(1, searchMatches.length));
+                  setSearchIndex(i => searchMatches.length > 0 ? (i - 1 + searchMatches.length) % searchMatches.length : 0);
                 } else if (e.key === 'Escape') {
                   setSearchOpen(false);
                   setSearchQuery('');
@@ -515,6 +522,18 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 {searchMatches.length > 0 ? `${searchIndex + 1} of ${searchMatches.length}` : 'No matches'}
               </span>
             )}
+            <button
+              onClick={() => setSearchIndex(i => searchMatches.length > 0 ? (i - 1 + searchMatches.length) % searchMatches.length : 0)}
+              disabled={searchMatches.length === 0}
+              aria-label="Previous match"
+              className={`text-fg-2/40 hover:text-fg w-5 h-5 flex items-center justify-center rounded hover:bg-bg-2 transition-all flex-shrink-0 text-[10px] ${searchMatches.length === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
+            >↑</button>
+            <button
+              onClick={() => setSearchIndex(i => searchMatches.length > 0 ? (i + 1) % searchMatches.length : 0)}
+              disabled={searchMatches.length === 0}
+              aria-label="Next match"
+              className={`text-fg-2/40 hover:text-fg w-5 h-5 flex items-center justify-center rounded hover:bg-bg-2 transition-all flex-shrink-0 text-[10px] ${searchMatches.length === 0 ? 'opacity-30 cursor-not-allowed' : ''}`}
+            >↓</button>
             <button
               onClick={() => { setSearchOpen(false); setSearchQuery(''); setSearchIndex(0); }}
               aria-label="Close search"
@@ -589,9 +608,9 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                 /* ── Agent message ── */
                 return (
                   <div key={m.id} id={`msg-${m.id}`} className={`group/agent flex gap-2.5 animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${isBookmarked ? 'border-l-2 border-amber-400/50 pl-2' : ''} ${matchHighlight} ${isGrouped ? (compact ? 'mt-0' : 'mt-1') : ''}`}>
-                    {/* Agent avatar — hidden in compact mode, invisible spacer for grouped messages */}
+                    {/* Agent avatar — hidden for grouped messages to eliminate spacing */}
                     {!compact && (
-                      <div className={`w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px] ${isGrouped ? 'invisible' : ''}`}
+                      <div className={`w-7 h-7 rounded-full flex-shrink-0 mt-0.5 flex items-center justify-center text-[12px] ${isGrouped ? 'hidden' : ''}`}
                         style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15))', border: '1px solid rgba(139,92,246,0.2)' }}>
                         ⚡
                       </div>
@@ -685,7 +704,13 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                         <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '150ms' }} />
                         <span className="w-1.5 h-1.5 rounded-full bg-fg-2/30 animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
-                      <span className="text-[11px] text-fg-2/30">Thinking…</span>
+                      <span className="text-[11px] text-fg-2/30">
+                        {turnStartedAt ? (() => {
+                          const elapsed = Math.floor((Date.now() - turnStartedAt) / 1000);
+                          if (elapsed > 30) return `Thinking… ${elapsed}s (may be slow)`;
+                          return `Thinking… ${elapsed}s`;
+                        })() : 'Thinking…'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -694,7 +719,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
           )}
           {isScrolledUp && (
             <button
-              onClick={() => { isNearBottom.current = true; scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }}
+              onClick={() => { isNearBottom.current = true; isUserScrolled.current = false; scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }); }}
               style={{
                 position: 'sticky', bottom: 12, alignSelf: 'center',
                 width: 40, height: 40, borderRadius: '50%',
@@ -751,18 +776,19 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
               className={headerless
                 ? 'flex-1 bg-bg border border-border rounded-lg px-2.5 py-1.5 text-[11px] text-fg resize-none focus:outline-none focus:border-blue-500/30 min-h-[28px] max-h-[60px] transition-colors placeholder:text-fg-2/40'
                 : 'flex-1 input-m3 px-4 py-3 text-[13px] text-fg resize-none focus:outline-none min-h-[44px] max-h-[140px] transition-all placeholder:text-fg-2/40'}
-              placeholder={sending ? (headerless ? '↯ Steer…' : 'Type to steer or Ctrl+Q to queue…') : `Message ${agentName}…`}
+              placeholder={pendingPermission ? 'Approve or deny the permission request above…' : sending ? (headerless ? '↯ Steer…' : 'Type to steer or Ctrl+Q to queue…') : `Message ${agentName}…`}
               rows={1}
               value={input}
-              onChange={e => { setInput(e.target.value); historyIndex.current = -1; }}
+              disabled={!!pendingPermission}
+              onChange={e => { setInput(e.target.value); chat.historyIndex.current = -1; }}
               onKeyDown={handleKeyDown}
               onInput={e => {
                 const t = e.currentTarget;
-                clearTimeout(resizeTimer.current);
-                resizeTimer.current = setTimeout(() => {
+                cancelAnimationFrame(resizeTimer.current as unknown as number);
+                resizeTimer.current = requestAnimationFrame(() => {
                   t.style.height = 'auto';
                   t.style.height = Math.min(t.scrollHeight, headerless ? 60 : 140) + 'px';
-                }, 16);
+                }) as unknown as ReturnType<typeof setTimeout>;
               }}
             />
             <button
@@ -782,7 +808,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                       : 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 border-none'
                   } disabled:opacity-20`}
               onClick={() => { if (input.trim().startsWith('/')) { handleSlashCommand(input); setInput(''); return; } if (sending) { input.trim() ? (chat.send(input, 'steer'), setInput('')) : chat.abort(); } else { chat.send(input); setInput(''); } }}
-              disabled={!input.trim() && !sending}
+              disabled={!!pendingPermission || (!input.trim() && !sending)}
               aria-label={sending ? (input.trim() ? 'Steer' : 'Stop') : 'Send message'}
               title={sending ? (input.trim() ? 'Steer (redirect agent)' : 'Stop') : 'Send'}
             >
