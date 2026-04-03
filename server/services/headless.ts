@@ -345,6 +345,12 @@ export async function sendToHeadless(
   agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
   persistUserPrompts(name, agent.userPrompts);
 
+  // Broadcast user message to WS listeners so dashboard shows the incoming prompt
+  // Extract sender from the [Message from X] envelope if present
+  const senderMatch = message.match(/^\[Message from (.+?)\]\n/);
+  const fromName = senderMatch?.[1] || 'relay';
+  broadcastToAgent(name, { type: 'user_message', prompt: message, from: fromName });
+
   const doSend = async (a: HeadlessAgent): Promise<HeadlessResponse> => {
     const timeoutMs = options?.timeoutMs || 120_000;
     const sendOpts: any = { prompt: message };

@@ -98,6 +98,7 @@ export function useHeadlessChat(
 
   /* ── Refs ── */
   const wsRef = useRef<WebSocket | null>(null);
+  const clientId = useRef(`client-${Math.random().toString(36).slice(2, 10)}`);
   const msgCounter = useRef(0);
   const streamBuf = useRef('');
   const thinkBuf = useRef('');
@@ -320,9 +321,14 @@ export function useHeadlessChat(
             if (sendingRef.current && !activeStreamId.current) setSending(false);
           }
         } else if (msg.type === 'user_message') {
+          // Skip user_message broadcast from ourselves (we already added it locally)
+          if (msg.senderId && msg.senderId === clientId.current) return;
           const prompt = msg.prompt || '';
-          const from = prompt.startsWith('[Message from ') ? prompt.match(/\[Message from (.+?)\]/)?.[1] : undefined;
-          setMessages(prev => trimMessages([...prev, { id: `ext-${msgCounter.current++}`, role: 'user', text: prompt, from: from || 'external', timestamp: Date.now() }]));
+          // Use server-provided 'from' field; fall back to parsing [Message from X] envelope
+          const from = msg.from || (prompt.startsWith('[Message from ') ? prompt.match(/\[Message from (.+?)\]/)?.[1] : undefined) || 'external';
+          // Strip the [Message from X] envelope for display
+          const displayText = prompt.replace(/^\[Message from .+?\]\n/, '');
+          setMessages(prev => trimMessages([...prev, { id: `ext-${msgCounter.current++}`, role: 'user', text: displayText, from, timestamp: Date.now() }]));
         }
       } catch {}
     };
@@ -492,7 +498,7 @@ export function useHeadlessChat(
       lastEventRef.current = Date.now();
       abortedRef.current = false;
       streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
-      ws!.send(JSON.stringify({ prompt: text }));
+      ws!.send(JSON.stringify({ prompt: text, clientId: clientId.current }));
     } else {
       pendingSendRef.current = text;
       setSending(true);

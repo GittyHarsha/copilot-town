@@ -498,6 +498,8 @@ wssHeadless.on('connection', async (ws, req) => {
       try {
         agent.status = 'running';
         broadcastToAgent(agentName, { type: 'status_changed', status: 'running' });
+        // Broadcast user message to all WS listeners (other dashboard tabs see it)
+        broadcastToAgent(agentName, { type: 'user_message', prompt: msg.prompt, from: msg.from || 'dashboard', senderId: msg.clientId });
         agent.lastMessageAt = new Date().toISOString();
         agent.messageCount++;
         agent.userPrompts.push({ prompt: msg.prompt, timestamp: new Date().toISOString() });
