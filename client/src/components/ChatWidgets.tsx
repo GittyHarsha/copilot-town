@@ -11,6 +11,7 @@ import { formatDuration } from './ChatMarkdown';
 
 export interface ToolCall {
   tool: string;
+  toolCallId?: string;
   name?: string;
   description?: string;
   status: 'running' | 'done';

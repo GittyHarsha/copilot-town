@@ -166,16 +166,18 @@ export function useHeadlessChat(
         let sid = activeStreamId.current;
 
         // Auto-create placeholder on turn_start (e.g. from relay/external trigger)
-        if (msg.type === 'turn_start' && !sid) {
-          const agentId = `agent-${msgCounter.current++}`;
-          activeStreamId.current = agentId;
-          sid = agentId;
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setSending(true);
-          setTurnStartedAt(Date.now());
-          setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
+        if (msg.type === 'turn_start') {
+          if (!sid) {
+            const agentId = `agent-${msgCounter.current++}`;
+            activeStreamId.current = agentId;
+            sid = agentId;
+            streamBuf.current = '';
+            thinkBuf.current = '';
+            toolsBuf.current = [];
+            setSending(true);
+            setTurnStartedAt(Date.now());
+            setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
+          }
           return;
         }
 
@@ -207,13 +209,18 @@ export function useHeadlessChat(
         } else if (msg.type === 'tool_start') {
           const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
           const description = msg.description || undefined;
-          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, description, status: 'running', timestamp: Date.now(), input }];
+          toolsBuf.current = [...toolsBuf.current, { tool: msg.tool, toolCallId: msg.toolCallId, description, status: 'running', timestamp: Date.now(), input }];
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'tool_complete') {
-          const output = (msg.output || msg.result) ? (typeof (msg.output || msg.result) === 'string' ? (msg.output || msg.result) : JSON.stringify(msg.output || msg.result)) : undefined;
-          toolsBuf.current = toolsBuf.current.map(t =>
-            t.tool === msg.tool && t.status === 'running' ? { ...t, status: 'done' as const, endTimestamp: Date.now(), output } : t
-          );
+          const output = msg.output ?? msg.result;
+          const outputStr = output ? (typeof output === 'string' ? output : JSON.stringify(output)) : (msg.error ? `Error: ${msg.error}` : undefined);
+          // Match by toolCallId first, fall back to tool name
+          toolsBuf.current = toolsBuf.current.map(t => {
+            if (t.status !== 'running') return t;
+            if (msg.toolCallId && t.toolCallId === msg.toolCallId) return { ...t, status: 'done' as const, endTimestamp: Date.now(), output: outputStr };
+            if (!msg.toolCallId && t.tool === msg.tool && t.status === 'running') return { ...t, status: 'done' as const, endTimestamp: Date.now(), output: outputStr };
+            return t;
+          });
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'intent') {
           setLiveIntent(msg.intent || null);
@@ -231,24 +238,20 @@ export function useHeadlessChat(
           );
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'response') {
+          // Update message content but DON'T clear activeStreamId — turn_end does that.
+          // The SDK may fire response (assistant.message) mid-turn before more tools run.
           if (sid) {
+            const text = msg.content || streamBuf.current;
+            const thinking = msg.thinking || thinkBuf.current || undefined;
+            const tokens = msg.outputTokens;
+            const tools = toolsBuf.current.length > 0
+              ? toolsBuf.current.map(t => ({ ...t, status: t.status === 'running' ? 'done' as const : t.status, endTimestamp: t.endTimestamp || Date.now() }))
+              : undefined;
+            streamBuf.current = text;
             setMessages(prev => prev.map(m => m.id === sid ? {
-              ...m,
-              text: msg.content || streamBuf.current,
-              thinking: msg.thinking || thinkBuf.current || undefined,
-              tokens: msg.outputTokens,
-              tools: toolsBuf.current.length > 0 ? toolsBuf.current.map(t => ({ ...t, status: 'done' as const, endTimestamp: t.endTimestamp || Date.now() })) : undefined,
-              streaming: false,
+              ...m, text, thinking, tokens, tools, streaming: true,
             } : m));
           }
-          activeStreamId.current = null;
-          streamBuf.current = '';
-          thinkBuf.current = '';
-          toolsBuf.current = [];
-          setLiveIntent(null);
-          setLiveUsage(null);
-          setSending(false);
-          setTurnStartedAt(null);
         } else if (msg.type === 'aborted') {
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];

@@ -248,17 +248,32 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
     const d = e?.data || {};
     emit({
       type: 'tool_start',
+      toolCallId: d.toolCallId,
       tool: d.toolName || d.name,
       description: d.description,
-      input: d.input ?? d.parameters ?? d.args,
+      input: d.arguments ?? d.input ?? d.parameters ?? d.args,
     });
   });
   sess.on('tool.execution_complete', (e: any) => {
     const d = e?.data || {};
+    // SDK result is { content, detailedContent, contents } — extract the best text
+    let output: string | undefined;
+    if (d.result) {
+      if (typeof d.result === 'string') {
+        output = d.result;
+      } else {
+        output = d.result.detailedContent || d.result.content || JSON.stringify(d.result);
+      }
+    } else if (d.output) {
+      output = typeof d.output === 'string' ? d.output : JSON.stringify(d.output);
+    }
     emit({
       type: 'tool_complete',
+      toolCallId: d.toolCallId,
       tool: d.toolName || d.name,
-      output: d.output ?? d.result,
+      output,
+      error: d.error,
+      success: d.success,
     });
   });
   sess.on('assistant.intent', (e: any) => {
