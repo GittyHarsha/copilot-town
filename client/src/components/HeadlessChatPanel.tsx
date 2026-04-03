@@ -575,8 +575,8 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                   return (
                     <div key={m.id} id={`msg-${m.id}`} className={`flex justify-end animate-message-slide-up transition-opacity duration-200 ${isDimmed ? 'opacity-30' : ''} ${matchHighlight}`}>
                       <div className={`max-w-[85%] relative ${isBookmarked ? 'border-r-2 border-amber-400/50 pr-3' : ''}`}>
-                        {/* Relay sender */}
-                        {m.from && m.from !== 'you' && (
+                        {/* Relay sender — only show for agent-to-agent messages */}
+                        {m.from && m.from !== 'you' && m.from !== 'dashboard' && m.from !== 'external' && (
                           <div className="text-[10px] text-fg-2/40 mb-1 text-right">
                             ↗ from <span className="text-blue-400/60 font-medium">{m.from}</span>
                           </div>
