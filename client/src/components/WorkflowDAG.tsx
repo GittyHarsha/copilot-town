@@ -106,6 +106,12 @@ const pulseKeyframes = `
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
+@keyframes dag-particle {
+  0% { offset-distance: 0%; opacity: 0; }
+  5% { opacity: 1; }
+  95% { opacity: 1; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
 `;
 
 /* ─── Component ───────────────────────────────────────────────────── */
@@ -163,6 +169,9 @@ export default function WorkflowDAG({ steps, stepResults, onStepClick }: Workflo
   }, [steps, posMap]);
 
   const getStatus = (id: string) => resultMap.get(id)?.status ?? 'pending';
+  const getTokens = (id: string) => resultMap.get(id)?.tokens;
+
+  const formatTokens = (t: number) => t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`;
 
   // Build tooltip content
   const tooltipContent = useMemo(() => {
@@ -216,18 +225,32 @@ export default function WorkflowDAG({ steps, stepResults, onStepClick }: Workflo
 
           const cx1 = x1 + (x2 - x1) * 0.4;
           const cx2 = x1 + (x2 - x1) * 0.6;
+          const pathId = `edge-${from}-${to}`;
+          const tgtStatus = getStatus(to);
+          const isActive = tgtStatus === 'running' || tgtStatus === 'reviewing';
 
           return (
-            <path
-              key={`${from}-${to}`}
-              d={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
-              fill="none"
-              stroke={edgeColor}
-              strokeWidth={2}
-              strokeOpacity={srcStatus === 'pending' ? 0.4 : 0.8}
-              markerEnd={`url(#arrow-${srcStatus})`}
-              style={{ transition: 'stroke 0.4s ease, stroke-opacity 0.4s ease' }}
-            />
+            <g key={pathId}>
+              <path
+                id={pathId}
+                d={`M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`}
+                fill="none"
+                stroke={edgeColor}
+                strokeWidth={2}
+                strokeOpacity={srcStatus === 'pending' ? 0.4 : 0.8}
+                markerEnd={`url(#arrow-${srcStatus})`}
+                style={{ transition: 'stroke 0.4s ease, stroke-opacity 0.4s ease' }}
+              />
+              {/* Animated particle along edge when target is running */}
+              {isActive && srcStatus === 'complete' && (
+                <>
+                  <circle r={3} fill={STATUS_COLORS.running} opacity={0.9}
+                    style={{ offsetPath: `path("M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}")`, animation: 'dag-particle 1.5s ease-in-out infinite' }} />
+                  <circle r={3} fill={STATUS_COLORS.running} opacity={0.9}
+                    style={{ offsetPath: `path("M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}")`, animation: 'dag-particle 1.5s ease-in-out infinite 0.75s' }} />
+                </>
+              )}
+            </g>
           );
         })}
 
@@ -334,6 +357,27 @@ export default function WorkflowDAG({ steps, stepResults, onStepClick }: Workflo
               >
                 {label.length > 14 ? label.slice(0, 13) + '…' : label}
               </text>
+
+              {/* Token badge */}
+              {(() => {
+                const tokens = getTokens(pos.id);
+                if (!tokens) return null;
+                const isComplete = status === 'complete';
+                const badgeText = isComplete ? `✓ ${formatTokens(tokens)}` : formatTokens(tokens);
+                return (
+                  <text
+                    x={NODE_W - 8} y={NODE_H - 6}
+                    textAnchor="end"
+                    fill={isComplete ? '#22c55e' : '#3b82f6'}
+                    fontSize={8}
+                    fontFamily="system-ui, sans-serif"
+                    fontWeight={600}
+                    opacity={0.7}
+                  >
+                    {badgeText}
+                  </text>
+                );
+              })()}
             </g>
           );
         })}

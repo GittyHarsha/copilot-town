@@ -300,6 +300,17 @@ router.get('/:id/messages', async (req, res) => {
   }
 });
 
+// Heartbeat — update agent's lastSeen timestamp
+router.post('/:id/heartbeat', async (req, res) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  if (agent.type === 'headless') {
+    const { heartbeatAgent } = await import('../services/headless.js');
+    heartbeatAgent(agent.name);
+  }
+  res.json({ ok: true, lastSeen: Date.now() });
+});
+
 // Send message to agent's pane
 router.post('/:id/message', (req, res) => {
   const agent = getAgent(req.params.id);

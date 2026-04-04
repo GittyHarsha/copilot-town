@@ -708,9 +708,12 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
                           </div>
                         )}
 
-                        {/* Tools section */}
+                        {/* Tools section — sticky when actively running */}
                         {m.tools && m.tools.length > 0 && (
-                          <div className={m.text ? 'mb-2 pb-2 border-b border-border/30' : ''}>
+                          <div className={m.text ? 'mb-2 pb-2 border-b border-border/30' : ''}
+                            style={m.streaming && m.tools.some(t => t.status === 'running')
+                              ? { position: 'sticky', top: 0, zIndex: 5, background: 'var(--color-bg-2)', paddingTop: 4, paddingBottom: 4, marginTop: -4 }
+                              : undefined}>
                             <ToolTimeline tools={m.tools} compact={compact} />
                           </div>
                         )}

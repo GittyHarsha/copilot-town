@@ -22,6 +22,7 @@ export interface HeadlessAgent {
   status: 'running' | 'idle' | 'stopped';
   createdAt: string;
   lastMessageAt: string | null;
+  lastSeen: string;
   messageCount: number;
   reasoningEffort?: string;
   agentMode?: string;
@@ -201,6 +202,7 @@ export async function createHeadlessAgent(
     status: 'idle',
     createdAt: new Date().toISOString(),
     lastMessageAt: null,
+    lastSeen: new Date().toISOString(),
     messageCount: 0,
     reasoningEffort: options?.reasoningEffort,
     source: options?.source || 'user',
@@ -254,6 +256,7 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
   const emit = (payload: any) => {
     const listeners = _streamListeners.get(name);
     if (listeners?.size) for (const fn of listeners) fn(payload);
+    agent.lastSeen = new Date().toISOString();
   };
 
   sess.on('assistant.turn_start', () => {
@@ -390,6 +393,7 @@ export async function sendToHeadless(
 
   agent.status = 'running';
   agent.lastMessageAt = new Date().toISOString();
+  agent.lastSeen = agent.lastMessageAt;
   agent.messageCount++;
   agent.userPrompts.push({ prompt: message, timestamp: new Date().toISOString() });
   persistUserPrompts(name, agent.userPrompts);
@@ -499,6 +503,7 @@ export async function steerHeadless(name: string, message: string): Promise<stri
   const messageId = await agent.session.send({ prompt: message } as any);
   agent.status = 'running';
   agent.lastMessageAt = new Date().toISOString();
+  agent.lastSeen = agent.lastMessageAt;
   agent.messageCount++;
   pushEvent('steer', `Steered "${name}" with new prompt`, 'info', name);
   return messageId;
@@ -707,6 +712,7 @@ export async function attachHeadless(
     status: 'idle',
     createdAt: new Date().toISOString(),
     lastMessageAt: null,
+    lastSeen: new Date().toISOString(),
     messageCount: 0,
     toolActivity: [],
     userPrompts: loadUserPrompts(name),
@@ -799,6 +805,19 @@ export function listHeadlessAgents(): HeadlessAgent[] {
 
 export function isHeadless(name: string): boolean {
   return _headlessAgents.has(name);
+}
+
+/** Update agent heartbeat timestamp. Called by MCP tools and message sends. */
+export function heartbeatAgent(name: string): void {
+  const agent = _headlessAgents.get(name);
+  if (agent) agent.lastSeen = new Date().toISOString();
+}
+
+/** Check if an agent is stale (no heartbeat in 15s). */
+export function isAgentStale(name: string): boolean {
+  const agent = _headlessAgents.get(name);
+  if (!agent) return true;
+  return Date.now() - new Date(agent.lastSeen).getTime() > 15_000;
 }
 
 // ── Collaboration MCP Server Config ──────────────────────────────
