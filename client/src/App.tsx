@@ -18,18 +18,16 @@ fetchModels();
 
 const Towns = lazy(() => import('./pages/Towns'));
 const Sessions = lazy(() => import('./pages/Sessions'));
-const Graph = lazy(() => import('./pages/Graph'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Workflows = lazy(() => import('./pages/Workflows'));
 const LiveGrid = lazy(() => import('./pages/LiveGrid'));
-type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'graph' | 'workflows' | 'settings';
+type Page = 'dashboard' | 'live' | 'panes' | 'sessions' | 'workflows' | 'settings';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏘️' },
   { id: 'live', label: 'Live', icon: '⚡' },
   { id: 'panes', label: 'Panes', icon: '▦' },
   { id: 'sessions', label: 'Sessions', icon: '💬' },
-  { id: 'graph', label: 'Graph', icon: '⊙' },
   { id: 'workflows', label: 'Workflows', icon: '⛓' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
@@ -138,7 +136,7 @@ function AppInner() {
         setShowShortcuts(true);
         return;
       }
-      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'graph', '6': 'workflows', '7': 'settings' };
+      const pageMap: Record<string, Page> = { '1': 'dashboard', '2': 'live', '3': 'panes', '4': 'sessions', '5': 'workflows', '6': 'settings' };
       if (pageMap[e.key]) { e.preventDefault(); setPage(pageMap[e.key]); }
       if (e.key === 'r' || e.key === 'R') { e.preventDefault(); refreshAgents(); }
     };
@@ -316,7 +314,6 @@ function AppInner() {
                 {page === 'live' && <LiveGrid onOpenChat={openChat} />}
                 {page === 'panes' && <Towns />}
                 {page === 'sessions' && <Sessions agents={agents} />}
-                {page === 'graph' && <Graph onNavigate={handleNavigate} />}
                 {page === 'workflows' && <Workflows />}
 
                 {page === 'settings' && <Settings />}
