@@ -266,35 +266,58 @@ router.get('/:id/output', (req, res) => {
 });
 
 // Get agent's conversation history via SDK
+// Supports pagination: ?limit=N&offset=M (returns last N chat messages)
+// Only user.message and assistant.message are counted for pagination;
+// tool.call/tool.result are excluded so limit=5 means 5 visible turns.
+// Without params, returns all messages (backward-compatible).
 router.get('/:id/messages', async (req, res) => {
   const agent = await getAgentAsync(req.params.id);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   if (!agent.sessionId) return res.status(400).json({ error: 'Agent has no session ID' });
+
+  const limit = parseInt(req.query.limit as string) || 0;   // 0 = all
+  const offset = parseInt(req.query.offset as string) || 0;  // from end
+
+  const CHAT_TYPES = new Set(['user.message', 'assistant.message']);
+
+  /** Filter to chat-visible messages, then slice for pagination.
+   *  offset=0, limit=5 → last 5 chat messages
+   *  offset=5, limit=5 → the 5 chat messages before those */
+  function paginate(all: any[]) {
+    const chatOnly = all.filter((m: any) => CHAT_TYPES.has(m.type));
+    const total = chatOnly.length;
+    if (!limit) return { messages: chatOnly, total, hasMore: false };
+    const end = total - offset;
+    const start = Math.max(0, end - limit);
+    return { messages: chatOnly.slice(start, Math.max(end, 0)), total, hasMore: start > 0 };
+  }
 
   try {
     // Headless agents: structured messages with thinking, tool calls, tokens
     if (agent.type === 'headless') {
       const { getHeadlessMessages } = await import('../services/headless.js');
       try {
-        const messages = await getHeadlessMessages(agent.name);
-        return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+        const all = await getHeadlessMessages(agent.name);
+        const { messages, total, hasMore } = paginate(all);
+        return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, total, hasMore, messages });
       } catch (histErr: any) {
         console.error(`[messages] getHeadlessMessages failed for "${agent.name}":`, histErr?.message || histErr);
-        // Fallback: lightweight session message fetch (no full agent revive)
         try {
           console.log(`[messages] Falling back to getSessionMessages for "${agent.name}" (${agent.sessionId.slice(0, 8)})`);
-          const messages = await getSessionMessages(agent.sessionId);
-          return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, messages });
+          const all = await getSessionMessages(agent.sessionId);
+          const { messages, total, hasMore } = paginate(all);
+          return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, total, hasMore, messages });
         } catch (fallbackErr: any) {
           console.error(`[messages] Fallback also failed for "${agent.name}":`, fallbackErr?.message || fallbackErr);
-          return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, messages: [], error: fallbackErr?.message });
+          return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, total: 0, hasMore: false, messages: [], error: fallbackErr?.message });
         }
       }
     }
 
     // Pane agents: raw SDK session messages
-    const messages = await getSessionMessages(agent.sessionId);
-    res.json({ sessionId: agent.sessionId, type: 'pane', count: messages.length, messages });
+    const all = await getSessionMessages(agent.sessionId);
+    const { messages, total, hasMore } = paginate(all);
+    res.json({ sessionId: agent.sessionId, type: 'pane', count: messages.length, total, hasMore, messages });
   } catch (e: any) {
     res.status(500).json({ error: `Failed to get messages: ${e.message}` });
   }

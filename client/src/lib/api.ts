@@ -233,8 +233,13 @@ export const api = {
   getToolsRegistry: () => fetchJson<{ tools: ToolInfo[] }>('/tools'),
   getAgentTools: (name: string) => fetchJson<AgentToolsInfo>(`/tools/agents/${encodeURIComponent(name)}`),
   getSessionDetails: (id: string) => fetchJson<any>(`/sessions/${id}/details`),
-  getAgentMessages: (id: string) =>
-    fetchJson<{ messages: any[] }>(`/agents/${encodeURIComponent(id)}/messages`),
+  getAgentMessages: (id: string, opts?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.offset) params.set('offset', String(opts.offset));
+    const qs = params.toString();
+    return fetchJson<{ messages: any[]; total: number; hasMore: boolean }>(`/agents/${encodeURIComponent(id)}/messages${qs ? `?${qs}` : ''}`);
+  },
 
   // Templates
   getTemplates: () => fetchJson<AgentTemplate[]>('/templates'),

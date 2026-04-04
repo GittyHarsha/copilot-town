@@ -112,7 +112,7 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
   /* ── Shared chat hook (WS, streaming, messages, actions) ── */
   const ownChat = useHeadlessChat(externalChat ? null : agentName);
   const chat = externalChat || ownChat;
-  const { messages, connected, sending, historyLoaded, liveIntent, liveUsage, agentMode, pendingPermission, reconnectCountdown, turnStartedAt } = chat;
+  const { messages, connected, sending, historyLoaded, hasMore, loadingMore, loadMore, liveIntent, liveUsage, agentMode, pendingPermission, reconnectCountdown, turnStartedAt } = chat;
 
   const [input, setInput] = useState('');
   /* ── Search state ── */
@@ -629,6 +629,18 @@ export default function HeadlessChatPanel({ agentName, onClose, onResize, embedd
             <div className="flex items-center justify-center h-full text-fg-2/30 text-xs">Loading…</div>
           ) : (
             <div className={headerless ? 'px-2.5 py-2 space-y-2' : 'px-5 py-4 space-y-4'}>
+              {/* Load earlier messages button */}
+              {hasMore && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="text-[10px] px-3 py-1 rounded-full bg-bg-1 text-fg-2/60 hover:text-fg hover:bg-bg-2 border border-border/30 transition-all disabled:opacity-40"
+                  >
+                    {loadingMore ? 'Loading…' : '↑ Load earlier messages'}
+                  </button>
+                </div>
+              )}
               {visibleMessages.map((m, idx) => {
                 const isDimmed = searchOpen && searchQuery && !searchMatches.includes(m.id);
                 const isBookmarked = bookmarks.has(m.id);

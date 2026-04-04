@@ -35,6 +35,8 @@ export interface UseHeadlessChatOptions {
   loadHistory?: boolean;
   /** Max messages to keep in state (0 = unlimited, default: 0) */
   maxMessages?: number;
+  /** How many recent messages to load initially (default: 5, 0 = all) */
+  initialLoadCount?: number;
 }
 
 export interface UseHeadlessChatReturn {
@@ -49,6 +51,13 @@ export interface UseHeadlessChatReturn {
   pendingPermission: { id: string; tool: string; args?: any } | null;
   reconnectCountdown: number | null;
   turnStartedAt: number | null;
+
+  /** Whether there are older messages to load */
+  hasMore: boolean;
+  /** True while a "load more" request is in-flight */
+  loadingMore: boolean;
+  /** Fetch the next batch of older messages */
+  loadMore: () => void;
 
   /** Send a message. Optional action: 'enqueue' (queue), 'steer' (interrupt). */
   send: (text: string, action?: 'enqueue' | 'steer') => void;
@@ -79,13 +88,15 @@ export function useHeadlessChat(
   agentName: string | null,
   options: UseHeadlessChatOptions = {},
 ): UseHeadlessChatReturn {
-  const { loadHistory = true, maxMessages = 0 } = options;
+  const { loadHistory = true, maxMessages = 0, initialLoadCount = 5 } = options;
 
   /* ── State ── */
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [connected, setConnected] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [liveIntent, setLiveIntent] = useState<string | null>(null);
   const [liveUsage, setLiveUsage] = useState<UsageInfo | null>(null);
   const [agentMode, setAgentMode] = useState<string>('autopilot');
@@ -128,45 +139,54 @@ export function useHeadlessChat(
     return msgs;
   }, [maxMessages]);
 
-  /* ── Load conversation history ── */
+  // Track how many raw messages we've loaded (for offset-based pagination)
+  const loadedOffset = useRef(0);
+
+  /** Parse raw API messages into ChatMessage[] */
+  const parseRawMessages = useCallback((raw: any[]): ChatMessage[] => {
+    const seen = new Set<string>();
+    const result: ChatMessage[] = [];
+    for (const m of raw) {
+      if (m.id && seen.has(m.id)) continue;
+      if (m.id) seen.add(m.id);
+
+      if (m.type === 'user.message') {
+        const text = m.prompt || m.content || m.text || '';
+        if (!text) continue;
+        result.push({
+          id: m.id || `h-${msgCounter.current++}`, role: 'user', text,
+          from: text.startsWith('[Message from ') ? text.match(/\[Message from (.+?)\]/)?.[1] : 'you',
+          timestamp: new Date(m.timestamp || 0).getTime(),
+        });
+      } else if (m.type === 'assistant.message') {
+        const text = m.content || m.text || '';
+        if (!text && !(m.thinking || m.reasoningText)) continue;
+        result.push({
+          id: m.id || `h-${msgCounter.current++}`, role: 'agent', text,
+          thinking: m.thinking || m.reasoningText || undefined,
+          tokens: m.outputTokens,
+          timestamp: new Date(m.timestamp || 0).getTime(),
+        });
+      }
+    }
+    return result;
+  }, []);
+
+  /* ── Load conversation history (last N only) ── */
   useEffect(() => {
     if (!agentName || !loadHistory) { setHistoryLoaded(true); return; }
     let cancelled = false;
     const controller = new AbortController();
-    // Timeout: if history fetch takes >10s, give up and show empty state
     const timeout = setTimeout(() => controller.abort(), 10_000);
     (async () => {
       try {
-        const data = await api.getAgentMessages(agentName);
+        const opts = initialLoadCount > 0 ? { limit: initialLoadCount } : undefined;
+        const data = await api.getAgentMessages(agentName, opts);
         if (cancelled) return;
         if (!data?.messages) { setHistoryLoaded(true); return; }
-        const seen = new Set<string>();
-        const history: ChatMessage[] = [];
-        for (const m of data.messages) {
-          // Deduplicate by server-assigned ID
-          if (m.id && seen.has(m.id)) continue;
-          if (m.id) seen.add(m.id);
-
-          if (m.type === 'user.message') {
-            const text = m.prompt || m.content || m.text || '';
-            if (!text) continue; // Skip empty messages entirely
-            history.push({
-              id: m.id || `h-${msgCounter.current++}`, role: 'user', text,
-              from: text.startsWith('[Message from ') ? text.match(/\[Message from (.+?)\]/)?.[1] : 'you',
-              timestamp: new Date(m.timestamp || 0).getTime(),
-            });
-          } else if (m.type === 'assistant.message') {
-            const text = m.content || m.text || '';
-            if (!text && !(m.thinking || m.reasoningText)) continue; // Skip empty agent messages
-            history.push({
-              id: m.id || `h-${msgCounter.current++}`, role: 'agent', text,
-              thinking: m.thinking || m.reasoningText || undefined,
-              tokens: m.outputTokens,
-              timestamp: new Date(m.timestamp || 0).getTime(),
-            });
-          }
-        }
-        // Merge: deduplicate history against any live messages already in state
+        const history = parseRawMessages(data.messages);
+        loadedOffset.current = data.messages.length;
+        setHasMore(data.hasMore ?? false);
         setMessages(prev => {
           if (prev.length === 0) return trimMessages(history);
           const liveIds = new Set(prev.map(m => m.id));
@@ -179,7 +199,30 @@ export function useHeadlessChat(
       }
     })();
     return () => { cancelled = true; controller.abort(); clearTimeout(timeout); };
-  }, [agentName, loadHistory, trimMessages]);
+  }, [agentName, loadHistory, initialLoadCount, trimMessages, parseRawMessages]);
+
+  /* ── Load older messages on demand ── */
+  const loadMore = useCallback(async () => {
+    if (!agentName || !hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const batchSize = 10;
+      const data = await api.getAgentMessages(agentName, { limit: batchSize, offset: loadedOffset.current });
+      if (!data?.messages?.length) { setHasMore(false); return; }
+      const older = parseRawMessages(data.messages);
+      loadedOffset.current += data.messages.length;
+      setHasMore(data.hasMore ?? false);
+      setMessages(prev => {
+        const existingIds = new Set(prev.map(m => m.id));
+        const deduped = older.filter(m => !existingIds.has(m.id));
+        return [...deduped, ...prev];
+      });
+    } catch {
+      // silently fail — user can retry
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [agentName, hasMore, loadingMore, parseRawMessages]);
 
   /* ── WebSocket message handler ── */
   const wireWs = useCallback((ws: WebSocket) => {
@@ -642,6 +685,7 @@ export function useHeadlessChat(
   return {
     messages, setMessages,
     connected, sending, historyLoaded,
+    hasMore, loadingMore, loadMore,
     liveIntent, liveUsage, agentMode,
     pendingPermission, reconnectCountdown, turnStartedAt,
     send, abort, compact, changeMode, respondPermission,
