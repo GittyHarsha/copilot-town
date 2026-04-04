@@ -256,7 +256,9 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
     if (listeners?.size) for (const fn of listeners) fn(payload);
   };
 
-  sess.on('assistant.turn_start', () => emit({ type: 'turn_start' }));
+  sess.on('assistant.turn_start', () => {
+    emit({ type: 'turn_start' });
+  });
   sess.on('assistant.message_delta', (e: any) => {
     emit({ type: 'message_delta', content: e?.data?.deltaContent || '' });
   });
@@ -367,6 +369,7 @@ function wireStreamingEvents(session: CopilotSession, name: string, agent: Headl
       error: d.message || d.error || 'Tool execution failed',
     });
   });
+
 }
 
 /**

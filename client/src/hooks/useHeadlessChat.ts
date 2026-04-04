@@ -114,6 +114,11 @@ export function useHeadlessChat(
   const abortedRef = useRef(false);
   const lastEventRef = useRef<number>(0);
 
+  // Typewriter: progressively reveal buffered text to simulate streaming
+  const revealedText = useRef('');
+  const revealedThink = useRef('');
+  const typewriterRaf = useRef<number>(0);
+
   /* helper: keep sendingRef in sync with state (for use in wireWs without deps) */
   useEffect(() => { sendingRef.current = sending; }, [sending]);
 
@@ -187,6 +192,10 @@ export function useHeadlessChat(
         // Auto-create placeholder on turn_start (e.g. from relay/external trigger)
         if (msg.type === 'turn_start') {
           abortedRef.current = false;
+          // Reset typewriter state
+          revealedText.current = '';
+          revealedThink.current = '';
+          if (typewriterRaf.current) { cancelAnimationFrame(typewriterRaf.current); typewriterRaf.current = 0; }
           if (!sid) {
             const agentId = `agent-${msgCounter.current++}`;
             activeStreamId.current = agentId;
@@ -210,6 +219,9 @@ export function useHeadlessChat(
           streamBuf.current = '';
           thinkBuf.current = '';
           toolsBuf.current = [];
+          revealedText.current = '';
+          revealedThink.current = '';
+          if (typewriterRaf.current) { cancelAnimationFrame(typewriterRaf.current); typewriterRaf.current = 0; }
           setSending(true);
           setTurnStartedAt(Date.now());
           setMessages(prev => trimMessages([...prev, { id: agentId, role: 'agent', text: '', streaming: true, timestamp: Date.now() }]));
@@ -217,15 +229,46 @@ export function useHeadlessChat(
 
         if (msg.type === 'message_delta' || msg.type === 'streaming_delta') {
           streamBuf.current += msg.content || msg.deltaContent || '';
-          if (sid) {
-            const text = streamBuf.current;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, text, streaming: true } : m));
+          // Start typewriter if not already running
+          if (sid && !typewriterRaf.current) {
+            const tick = () => {
+              const target = streamBuf.current;
+              const revealed = revealedText.current;
+              if (revealed.length < target.length) {
+                // Reveal in chunks: 3-8 chars per frame for natural feel
+                const remaining = target.length - revealed.length;
+                const chunk = Math.min(remaining, Math.max(3, Math.ceil(remaining * 0.15)));
+                revealedText.current = target.slice(0, revealed.length + chunk);
+                const text = revealedText.current;
+                const thinking = revealedThink.current || undefined;
+                setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text, thinking, streaming: true } : m));
+                typewriterRaf.current = requestAnimationFrame(tick);
+              } else {
+                // Caught up to buffer — wait for more data
+                typewriterRaf.current = 0;
+              }
+            };
+            typewriterRaf.current = requestAnimationFrame(tick);
           }
         } else if (msg.type === 'reasoning_delta') {
           thinkBuf.current += msg.content || msg.deltaContent || '';
-          if (sid) {
-            const thinking = thinkBuf.current;
-            setMessages(prev => prev.map(m => m.id === sid ? { ...m, thinking, streaming: true } : m));
+          if (sid && !typewriterRaf.current) {
+            const tick = () => {
+              const targetThink = thinkBuf.current;
+              const revealedT = revealedThink.current;
+              if (revealedT.length < targetThink.length) {
+                const remaining = targetThink.length - revealedT.length;
+                const chunk = Math.min(remaining, Math.max(3, Math.ceil(remaining * 0.15)));
+                revealedThink.current = targetThink.slice(0, revealedT.length + chunk);
+                const thinking = revealedThink.current;
+                const text = revealedText.current;
+                setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text, thinking, streaming: true } : m));
+                typewriterRaf.current = requestAnimationFrame(tick);
+              } else {
+                typewriterRaf.current = 0;
+              }
+            };
+            typewriterRaf.current = requestAnimationFrame(tick);
           }
         } else if (msg.type === 'tool_start') {
           const input = msg.input ? (typeof msg.input === 'string' ? msg.input : JSON.stringify(msg.input)) : undefined;
@@ -264,34 +307,63 @@ export function useHeadlessChat(
           );
           if (sid) { const tools = [...toolsBuf.current]; setMessages(prev => prev.map(m => m.id === sid ? { ...m, tools } : m)); }
         } else if (msg.type === 'response') {
-          // Update the message with final content but keep streaming alive —
-          // more tools can arrive before turn_end. Only turn_end finalizes.
+          // Final response: let typewriter drain remaining text, then finalize
           if (activeStreamId.current) {
-            const text = msg.content || streamBuf.current;
-            const thinking = msg.thinking || thinkBuf.current || undefined;
+            const finalText = msg.content || streamBuf.current;
+            const finalThinking = msg.thinking || thinkBuf.current || undefined;
             const tokens = msg.outputTokens;
             const tools = toolsBuf.current.length > 0
               ? toolsBuf.current.map(t => ({ ...t, status: t.status === 'running' ? 'done' as const : t.status, endTimestamp: t.endTimestamp || Date.now() }))
               : undefined;
-            streamBuf.current = text;
-            setMessages(prev => prev.map(m => m.id === activeStreamId.current ? {
-              ...m, text, thinking, tokens, tools,
-            } : m));
+            streamBuf.current = finalText;
+            if (finalThinking) thinkBuf.current = finalThinking;
+
+            // Let typewriter continue draining — it'll catch up to the buffer
+            // If typewriter isn't running (e.g. no deltas came), start one to reveal final text
+            if (!typewriterRaf.current && revealedText.current.length < finalText.length) {
+              const tick = () => {
+                const target = streamBuf.current;
+                if (revealedText.current.length < target.length) {
+                  const remaining = target.length - revealedText.current.length;
+                  const chunk = Math.min(remaining, Math.max(3, Math.ceil(remaining * 0.15)));
+                  revealedText.current = target.slice(0, revealedText.current.length + chunk);
+                  setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text: revealedText.current, thinking: revealedThink.current || undefined, tokens, tools, streaming: true } : m));
+                  typewriterRaf.current = requestAnimationFrame(tick);
+                } else {
+                  typewriterRaf.current = 0;
+                  // Fully revealed — update with final content
+                  setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text: finalText, thinking: finalThinking, tokens, tools } : m));
+                }
+              };
+              typewriterRaf.current = requestAnimationFrame(tick);
+            } else {
+              // Typewriter is already running or text is already revealed
+              setMessages(prev => prev.map(m => m.id === activeStreamId.current ? {
+                ...m, tokens, tools,
+              } : m));
+            }
           }
           setLiveIntent(null);
           setLiveUsage(null);
           // Safety net: if turn_end doesn't arrive within 5s after response, finalize anyway
           setTimeout(() => {
             if (activeStreamId.current) {
-              setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, streaming: false } : m));
+              // Flush typewriter
+              if (typewriterRaf.current) { cancelAnimationFrame(typewriterRaf.current); typewriterRaf.current = 0; }
+              const finalText = streamBuf.current;
+              const finalThinking = thinkBuf.current || undefined;
+              setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, text: finalText, thinking: finalThinking, streaming: false } : m));
               activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+              revealedText.current = ''; revealedThink.current = '';
               setSending(false); setTurnStartedAt(null);
             }
           }, 5000);
         } else if (msg.type === 'aborted') {
           abortedRef.current = true;
+          if (typewriterRaf.current) { cancelAnimationFrame(typewriterRaf.current); typewriterRaf.current = 0; }
           if (sid) setMessages(prev => prev.map(m => m.id === sid ? { ...m, text: m.text || '(aborted)', streaming: false } : m));
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+          revealedText.current = ''; revealedThink.current = '';
           setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
           setMessages(prev => [...prev, { id: `sys-${msgCounter.current++}`, role: 'system', text: '⏹ Response aborted', timestamp: Date.now() }]);
         } else if (msg.type === 'enqueued') {
@@ -316,6 +388,8 @@ export function useHeadlessChat(
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
           setLiveIntent(null); setSending(false); setTurnStartedAt(null);
         } else if (msg.type === 'turn_end') {
+          // Flush typewriter — reveal all remaining text instantly
+          if (typewriterRaf.current) { cancelAnimationFrame(typewriterRaf.current); typewriterRaf.current = 0; }
           if (activeStreamId.current && streamBuf.current) {
             const text = streamBuf.current;
             const thinking = thinkBuf.current || undefined;
@@ -327,6 +401,7 @@ export function useHeadlessChat(
             setMessages(prev => prev.map(m => m.id === activeStreamId.current ? { ...m, streaming: false } : m));
           }
           activeStreamId.current = null; streamBuf.current = ''; thinkBuf.current = ''; toolsBuf.current = [];
+          revealedText.current = ''; revealedThink.current = '';
           setLiveIntent(null); setLiveUsage(null); setSending(false); setTurnStartedAt(null);
         } else if (msg.type === 'status_sync') {
           // Server sends agent status on connect — sync client state

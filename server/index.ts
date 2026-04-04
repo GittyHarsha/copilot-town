@@ -519,8 +519,6 @@ wssHeadless.on('connection', async (ws, req) => {
           const sendOpts: any = { prompt: msg.prompt };
           if (msg.attachments?.length) sendOpts.attachments = msg.attachments;
 
-          // sendAndWait blocks until done — response is sent via streaming events
-          // (assistant.message → response event). This just ensures we catch errors.
           await agent.session.sendAndWait(sendOpts, timeoutMs);
           agent.status = 'idle';
           broadcastToAgent(agentName, { type: 'status_changed', status: 'idle' });
