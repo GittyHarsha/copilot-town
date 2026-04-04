@@ -807,6 +807,9 @@ export function isHeadless(name: string): boolean {
   return _headlessAgents.has(name);
 }
 
+/** Check if agent is loaded in memory (no auto-revive). */
+export const isHeadlessLoaded = isHeadless;
+
 /** Update agent heartbeat timestamp. Called by MCP tools and message sends. */
 export function heartbeatAgent(name: string): void {
   const agent = _headlessAgents.get(name);

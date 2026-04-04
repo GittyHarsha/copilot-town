@@ -167,8 +167,15 @@ export async function sendToSession(
 /**
  * Get conversation history for a session.
  * Returns structured messages (id, type, timestamp, data).
+ * Results are cached for 30s to avoid repeated SDK round-trips.
  */
+const _msgCache = new Map<string, { data: SessionMessage[]; ts: number }>();
+const MSG_CACHE_TTL = 30_000;
+
 export async function getSessionMessages(sessionId: string): Promise<SessionMessage[]> {
+  const cached = _msgCache.get(sessionId);
+  if (cached && Date.now() - cached.ts < MSG_CACHE_TTL) return cached.data;
+
   const client = await getClient();
   const session = await client.resumeSession(sessionId, {
     onPermissionRequest: approveAll,
@@ -177,13 +184,15 @@ export async function getSessionMessages(sessionId: string): Promise<SessionMess
   try {
     const raw = await session.getMessages();
     if (!Array.isArray(raw)) return [];
-    return raw.map((m: any) => ({
+    const messages = raw.map((m: any) => ({
       id: m.id || '',
       type: m.type || 'unknown',
       timestamp: m.timestamp || '',
       parentId: m.parentId,
       data: m.data || {},
     }));
+    _msgCache.set(sessionId, { data: messages, ts: Date.now() });
+    return messages;
   } finally {
     try { await session.disconnect(); } catch {}
   }

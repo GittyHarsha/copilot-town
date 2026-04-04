@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import { getAllAgents, getAgent, getAgentAsync, getAgentMdContent, loadAgentTemplates, cleanSessionFile, refreshAgents, invalidateAgentCache } from '../services/agents.js';
@@ -295,22 +296,25 @@ router.get('/:id/messages', async (req, res) => {
   try {
     // Headless agents: structured messages with thinking, tool calls, tokens
     if (agent.type === 'headless') {
-      const { getHeadlessMessages } = await import('../services/headless.js');
-      try {
-        const all = await getHeadlessMessages(agent.name);
-        const { messages, total, hasMore } = paginate(all);
-        return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, total, hasMore, messages });
-      } catch (histErr: any) {
-        console.error(`[messages] getHeadlessMessages failed for "${agent.name}":`, histErr?.message || histErr);
+      const { getHeadlessMessages, isHeadlessLoaded } = await import('../services/headless.js');
+      // Only use getHeadlessMessages if agent is already in memory (avoids expensive auto-revive)
+      if (isHeadlessLoaded(agent.name)) {
         try {
-          console.log(`[messages] Falling back to getSessionMessages for "${agent.name}" (${agent.sessionId.slice(0, 8)})`);
-          const all = await getSessionMessages(agent.sessionId);
+          const all = await getHeadlessMessages(agent.name);
           const { messages, total, hasMore } = paginate(all);
           return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, total, hasMore, messages });
-        } catch (fallbackErr: any) {
-          console.error(`[messages] Fallback also failed for "${agent.name}":`, fallbackErr?.message || fallbackErr);
-          return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, total: 0, hasMore: false, messages: [], error: fallbackErr?.message });
+        } catch (histErr: any) {
+          console.error(`[messages] getHeadlessMessages failed for "${agent.name}":`, histErr?.message || histErr);
         }
+      }
+      // Lightweight fallback: read via SDK without spawning MCP server
+      try {
+        const all = await getSessionMessages(agent.sessionId);
+        const { messages, total, hasMore } = paginate(all);
+        return res.json({ sessionId: agent.sessionId, type: 'headless', count: messages.length, total, hasMore, messages });
+      } catch (fallbackErr: any) {
+        console.error(`[messages] getSessionMessages failed for "${agent.name}":`, fallbackErr?.message || fallbackErr);
+        return res.json({ sessionId: agent.sessionId, type: 'headless', count: 0, total: 0, hasMore: false, messages: [], error: fallbackErr?.message });
       }
     }
 
@@ -357,7 +361,7 @@ async function resumeAgent(agent: ReturnType<typeof getAgent>): Promise<{ ok: bo
   const provisionCfg: Partial<ProvisionConfig> = {};
   const result = provisionPane(provisionCfg);
   const target = result.target;
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 150));
 
   let meta: any = {};
   try {
@@ -570,7 +574,7 @@ router.post('/:id/move-to-pane', async (req, res) => {
     const pane = provisionPane(config, isPaneFree);
     if (!pane?.target) return res.status(500).json({ error: 'Failed to provision pane' });
 
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 150));
 
     const parts = ['copilot', `--resume=${sessionId}`];
     if (model) parts.push(`--model=${model}`);
@@ -727,7 +731,7 @@ router.post('/:id/resume', async (req, res) => {
       how = result.created;
 
       if (how !== 'reused') {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 150));
       }
     }
   } catch (e: any) {
@@ -738,7 +742,7 @@ router.post('/:id/resume', async (req, res) => {
   let meta: any = {};
   try {
     if (existsSync(SESSION_MAP_FILE)) {
-      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      const raw = JSON.parse(await readFile(SESSION_MAP_FILE, 'utf-8'));
       meta = raw.metadata?.[agent.name] || {};
     }
   } catch {}
@@ -771,11 +775,10 @@ router.post('/:id/start', async (req, res) => {
   let agent = getAgent(req.params.id);
   let templateName: string;
 
+  const templates = loadAgentTemplates();
   if (agent) {
     templateName = agent.template?.name || agent.name;
   } else {
-    // Check if :id is a template name, otherwise use as plain agent name
-    const templates = loadAgentTemplates();
     const template = templates.find(t => t.name === req.params.id);
     templateName = template?.name || req.params.id;
   }
@@ -793,7 +796,7 @@ router.post('/:id/start', async (req, res) => {
       );
       target = result.target;
       how = result.created;
-      if (how !== 'reused') await new Promise(r => setTimeout(r, 500));
+      if (how !== 'reused') await new Promise(r => setTimeout(r, 150));
     } catch (e: any) {
       return res.status(500).json({ error: e.message || 'Failed to provision pane' });
     }
@@ -803,7 +806,7 @@ router.post('/:id/start', async (req, res) => {
   let meta: any = {};
   try {
     if (existsSync(SESSION_MAP_FILE) && agent) {
-      const raw = JSON.parse(readFileSync(SESSION_MAP_FILE, 'utf-8'));
+      const raw = JSON.parse(await readFile(SESSION_MAP_FILE, 'utf-8'));
       meta = raw.metadata?.[agent.name] || {};
     }
   } catch {}
@@ -811,7 +814,7 @@ router.post('/:id/start', async (req, res) => {
   let cmd = req.body.command;
   if (!cmd) {
     const parts = ['copilot'];
-    const agentTemplate = meta.template || (loadAgentTemplates().some(t => t.name === templateName) ? templateName : null);
+    const agentTemplate = meta.template || (templates.some(t => t.name === templateName) ? templateName : null);
     if (agentTemplate) parts.push(`--agent=${agentTemplate}`);
     const model = req.body.model || meta.model;
     if (model) parts.push(`--model=${model}`);
@@ -1016,7 +1019,7 @@ router.post('/spawn', async (req, res) => {
     const cmd = parts.join(' ');
 
     // Small delay for pane to initialize
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 150));
     sendKeys(pane.target, cmd, true);
 
     // Register in agent-sessions.json
